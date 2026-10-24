@@ -1345,7 +1345,7 @@ async function renderSettings(){
   const known=new Set(repos.map(r=>r.id)),lost=Object.keys(by).filter(r=>!known.has(r)).flatMap(r=>by[r]);
   return sect.join('')+(lost.length?head('Removed repository',lost.length)+lost.map(one).sort().join(''):'')})();
  const repoBox=(v.repos||[]).length?`<h3>Repositories</h3><div class=box><p class=sub style="margin-top:0">Where MonitorBox looks for software. The first one is built in. Switching one off stops checking it; what is installed from it keeps running.</p>
-  ${(window._rv=v.repos,'')}${v.repos.map(r=>`<div class=row style="margin:.4rem 0"><label class=row style="gap:.6rem;flex:1"><input type=checkbox ${r.enabled?'checked':''} ${r.default?'disabled':''} onchange="repoOn('${esc(r.id)}',this.checked)"><span>${esc(r.name)}${r.default?' <small>· built in</small>':''}${r.error?`<small style="display:block">Can't reach it right now.</small>`:''}</span></label>
+  ${(window._rv=v.repos,'')}${v.repos.map(r=>`<div class=row style="margin:.4rem 0"><label class=row style="gap:.6rem;flex:1">${r.default?'':`<input type=checkbox ${r.enabled?'checked':''} onchange="repoOn('${esc(r.id)}',this.checked)">`}<span>${esc(r.name)}${r.default?' <small>· built in</small>':''}${r.error?`<small style="display:block">Can't reach it right now.</small>`:''}</span></label>
    ${r.default?'':`<button class="btn sm" onclick="repoRemove('${esc(r.id)}','${esc(r.name)}')">Remove</button>`}</div>`).join('')}
   <div class=row style="margin-top:.6rem"><input id=repoin placeholder="owner/name on GitHub" autocapitalize=off autocorrect=off spellcheck=false style="flex:1;min-width:12rem"><button class=btn onclick="repoAdd()">Add repository</button></div>
   <p id=repomsg class=sub></p></div>`:'';
@@ -1442,10 +1442,10 @@ async function renderSettings(){
    <textarea id=ccfg spellcheck=false>${esc(JSON.stringify(conn.connections,null,2))}</textarea>
    <div class=row style="margin-top:.6rem"><button class="btn pri" onclick="saveConn()">Save</button><span id=cmsg></span></div></div>`};
  const cur=SECS.find(x=>x[0]===sec);
- if(!cur){mpage().innerHTML=`<div class=top><div class=row><button class=btn onclick="location.hash=''">← Back</button><h1 style="margin:0;font-size:28px">Settings</h1></div><small>MonitorBox ${esc(s.version)} · channel ${esc(s.channel)}</small></div>
+ if(!cur){mpage().innerHTML=`<div class=top><div class=row><button class=btn onclick="location.hash=''">← Back</button><h1 style="margin:0;font-size:28px">Settings</h1></div><small>MonitorBox ${esc(v.version)} · channel ${esc(v.channel)}</small></div>
   ${last}<div class=hubg>${SECS.map(x=>`<button class="hub" onclick="location.hash='#/settings/${x[0]}'"><b>${x[1]}</b><span class=sub>${esc(x[2])}</span><small>${esc(x[3])}</small></button>`).join('')}</div>
   <div class=row style="margin-top:1rem"><button class=btn onclick="api('logout',{}).then(boot)">Sign out</button></div><p id=msg></p>`;return}
- mpage().innerHTML=`<div class=top><div class=row><button class=btn onclick="location.hash='#/settings'">← Settings</button><h1 style="margin:0;font-size:28px">${cur[1]}</h1></div><small>MonitorBox ${esc(s.version)} · channel ${esc(s.channel)}</small></div>
+ mpage().innerHTML=`<div class=top><div class=row><button class=btn onclick="location.hash='#/settings'">← Settings</button><h1 style="margin:0;font-size:28px">${cur[1]}</h1></div><small>MonitorBox ${esc(v.version)} · channel ${esc(v.channel)}</small></div>
   ${sec==='servers'&&window._ret?`<div class=box style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap"><span>You are setting up your box.</span><button class="btn pri" onclick="const r=window._ret;window._ret=null;location.hash=r">← Back to ${window._ret==='#/setup/review'?'the review':'Set up'}</button></div>`:''}${PARTS[sec].replace(/<h3>(Main screen|Servers)<\/h3>/,'')}<p id=msg></p>`;if(sec==='history'){hpRange('1');loadBarShow()}if(sec==='box')loadTzBox();if(sec==='servers')loadServers();if(sec==='graphs')graphSettings();if(sec==='power')powerSettings();if(sec==='alerts'){alertSettings();loadConfirm()}if(sec==='sites')siteSettings();if(sec==='security')securitySettings()}
 /* the history page: stretches that were not healthy, in a range, filtered by state */
 let hpFrom=0,hpTo=0;
