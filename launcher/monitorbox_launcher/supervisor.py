@@ -7,6 +7,15 @@ from . import artifacts, backup
 from .layout import Layout
 
 PROTOCOL = 3  # 2: understands {"action":"install",...} requests; 3: also {"action":"restore","backup":name} and shares backup.py
+
+
+def launcher_version():
+    """The version of this container image's launcher (the VERSION file beside this code). The app compares it with what the release expects, to tell the owner when the image itself needs re-pulling."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")) as f:
+            return f.read().strip()
+    except OSError:
+        return None
 RESTART_EXIT = 75  # App exits with this to ask for a restart (after an update request)
 
 
@@ -338,7 +347,7 @@ load(); setInterval(load,5000);
     # -- main loop -------------------------------------------------------
     def run(self):
         self.L.ensure()
-        self.write_state(protocol=PROTOCOL)
+        self.write_state(protocol=PROTOCOL, launcher_version=launcher_version())
         if backup.pending(self.L.root):  # we died in the middle of a restore: go back to what worked
             self.log("found an unfinished restore; undoing it")
             backup.undo(self.L.root)
