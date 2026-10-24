@@ -8,7 +8,7 @@ MonitorBox was designed to be light enough for a Raspberry Pi, and has been test
 
 ## What it does
 
-The whole screen is the answer. **Green** means everything is fine. **Yellow** means something is down and needs attention. **Red** means something critical is down. **Blue** means something could not be checked right now (MonitorBox says "I don't know" rather than guessing). Tap anything to drill down.
+The whole screen is the answer. **Green** means everything is fine. **Yellow** means something answers but not properly. **Red** means something is down. **Blue** means something could not be checked right now (MonitorBox says "I don't know" rather than guessing). Tap anything to drill down.
 
 - **Checks** through ICMP (ping), HTTP, SNMP, Docker containers (via Portainer), UPS battery backups (NUT), cameras (Scrypted), and native UniFi Network and UniFi Protect integrations.
 - **Finds things for you.** Point it at a server and it detects what that server offers. After install it keeps looking, and tells you when a new container or new capability appears.
