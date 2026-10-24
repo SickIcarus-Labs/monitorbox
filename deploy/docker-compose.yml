@@ -1,22 +1,19 @@
-# MonitorBox 4 (preview). Install once; the app updates itself.
-# Everything MonitorBox keeps lives in the "monitorbox" volume (/config).
+# MonitorBox: install once; the app and its modules update themselves.
 services:
-  monitorbox4:
+  monitorbox:
     image: ghcr.io/sickicarus-labs/monitorbox:latest
-    container_name: monitorbox4
+    container_name: monitorbox
     restart: unless-stopped
-    network_mode: host            # reaches your LAN devices; the web UI is on port 8080
-    environment:
-      MB_CHANNEL: stable           # dev | beta | stable (can also be switched in the app)
-      MB_PORT: "8090"
+    network_mode: host            # reaches the devices on your LAN; the web page is on port 8080
+    # Only if port 8080 is already used on this machine, uncomment both lines:
+    # environment:
+    #   MB_PORT: "8090"
     volumes:
-      - monitorbox4:/config
+      - /Containers/monitorbox:/config   # change the left side to a folder on your machine; everything MonitorBox keeps lives here
     read_only: true
     tmpfs:
-      - /tmp                      # no size limit on purpose
+      - /tmp
     cap_drop: [ALL]
     cap_add: [NET_RAW]            # ping
     security_opt:
       - no-new-privileges:true
-volumes:
-  monitorbox4:

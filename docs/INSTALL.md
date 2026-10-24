@@ -1,19 +1,73 @@
-# Trying MonitorBox 4 (preview)
+# Install MonitorBox
 
-This runs alongside MonitorBox 3 and does not touch it. It uses its own volume and container name, and web port 8090 by default.
+You need a machine that runs Docker (a Raspberry Pi 5 is what MonitorBox is built and tested on). You install it once. After that MonitorBox updates itself and tells you when its container image needs pulling.
 
-1. Copy `deploy/docker-compose.yml` to the Pi (or paste it into a Portainer stack).
-2. Start it. First start downloads the App from the `stable` channel (a few seconds).
-3. Open `http://<pi>:8090`, choose an admin password, and you should see the Hello module.
+**Portainer is the preferred way.** MonitorBox needs Portainer anyway to see your containers. But Portainer is not required to install MonitorBox: if you prefer plain Docker Compose, use Option B.
 
-What the first test proves: blank volume to running App with nothing but the compose file; update from the page (Check for updates, Apply); roll back; the App and module move without the compose file ever changing.
+## Option A: Portainer
 
-Until the first dev release is published, the page says it is waiting for a release. That is expected.
+### 1. Install Portainer (skip if you already have it)
 
-If the container will not start with a permissions message about `/config`, tell me the exact text: this is the one thing I could not test without Docker.
+```
+docker volume create portainer_data
+docker run -d -p 9443:9443 --name portainer --restart=always \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portainer_data:/data portainer/portainer-ce:lts
+```
+
+Browse to `https://<your-machine>:9443` (your browser will warn about the certificate; that is normal) and create the admin account. Do this within a few minutes of starting it, or Portainer locks itself and needs a restart (`docker restart portainer`).
+
+### 2. Create the MonitorBox stack
+
+In Portainer: **Stacks, Add stack**, name it `monitorbox`, paste the compose file below into the web editor, then **Deploy the stack**.
+
+## Option B: Docker Compose
+
+```
+sudo mkdir -p /Containers/monitorbox
+cd /Containers/monitorbox
+sudo nano docker-compose.yml
+```
+
+Paste the compose file below, save (Ctrl+O, Enter, Ctrl+X), then:
+
+```
+sudo docker compose up -d
+```
+
+(Older installs use `docker-compose` with a hyphen instead.)
+
+## The compose file
+
+```yaml
+services:
+  monitorbox:
+    image: ghcr.io/sickicarus-labs/monitorbox:latest
+    container_name: monitorbox
+    restart: unless-stopped
+    network_mode: host
+    # Only if port 8080 is already used on this machine, uncomment both lines:
+    # environment:
+    #   MB_PORT: "8090"
+    volumes:
+      - /Containers/monitorbox:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]
+    security_opt:
+      - no-new-privileges:true
+```
+
+The one line to check is `/Containers/monitorbox:/config`. Change the part before the colon to a folder on your machine. **That folder holds everything MonitorBox keeps (settings, history, backups), so back it up.**
+
+## First start
+
+Open `http://<your-machine>:8080` (or the port you chose). The first start downloads the app, which takes a few seconds. MonitorBox asks you to choose a password and which updates to follow (Stable is the default), then walks you through adding what to watch.
 
 ## Updating
 
-The page lists the App and each module with a version dropdown. **Latest** follows whatever the channel currently offers; picking a specific version holds you there (this is also how you go back). The channel setting limits what is offered: stable shows only stable releases, beta shows beta and stable, dev shows everything. "Check for updates automatically" is on by default; "Install updates automatically" is off by default and only affects items set to Latest. A new version that will not start is dropped and the previous one keeps running.
+The app and its modules update from the Updates page (Settings, Updates): **Latest** follows what your channel offers, and picking a specific version holds you there (this is also how you go back). Stable shows only stable releases, beta shows beta and stable, dev shows everything.
 
-The launcher lives in the container image. If the page says the image is out of date, redeploy the stack once with "Re-pull image".
+The container image itself changes rarely. When it does, MonitorBox says so in the bell and on the Updates page. Pull the new image and restart the container: in Portainer, update the stack with "Re-pull image"; with Compose, `sudo docker compose pull && sudo docker compose up -d`. Your settings and data are kept.
