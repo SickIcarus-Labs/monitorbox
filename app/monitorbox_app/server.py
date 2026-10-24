@@ -619,6 +619,7 @@ class App:
             out["app"] = versions.component(
                 version(), cfg["app_pin"], (dinfo["pointer"].get("app") or {}).get("version"),
                 dinfo["catalog"].get("app", []), cfg["channel"], self.launcher_state().get("failed", []))
+        out["imageVersion"] = self.launcher_state().get("launcher_version")
         out["image"] = versions.image(self.launcher_state().get("launcher_version"),
                                       ((dinfo or {}).get("pointer") or {}).get("launcher", {}).get("version") if isinstance(((dinfo or {}).get("pointer") or {}).get("launcher"), dict) else None)
         offered = {}                 # module id -> repositories (in order) whose pointer names it
