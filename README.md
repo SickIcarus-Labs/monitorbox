@@ -1,43 +1,48 @@
-# MonitorBox 4
+# MonitorBox
 
-A small, fast, good-looking appliance that answers one question when you open it: **is the homelab fine?**
+A lightweight, fast and friendly health glance at your homelab. Open it and one screen answers one question: **is everything fine?**
 
-> MonitorBox 4 is a ground-up rewrite.
+MonitorBox was designed to be light enough for a Raspberry Pi, and has been tested on a Raspberry Pi 5 and an Intel NUC mini PC.
 
-The whole screen is the answer. Soft green says **Everything is fine**. Yellow says **Something's down** (needs attention, not critical). Blue says **Something needs a look** (can't be checked right now). Red says **Everything is fucked.** (a critical item is down). Tap anything to drill down.
+<!-- screenshots go here -->
 
-## Goals
+## What it does
 
-1. **Install once.** A simple compose file that rarely or never changes. The app updates itself, with no `docker pull`.
-2. **Status at a glance.**
-3. **Light, fast, pretty.** Not another Netdata.
-4. **Modular.** Integrations install, update and remove on their own.
-5. **Simple and reliable.** Few moving parts, clear failure modes.
-6. **Dev, beta and stable channels** that are one-file moves.
-7. **Backup and restore that actually work**, proven by an automated round-trip test.
-8. **Cheap CI.**
-9. **Polished first experience:** real onboarding and a good config UI.
-10. **Keep coverage:** UniFi, SNMP, NUT, HTTP, Scrypted, Portainer, Wake-on-LAN.
-11. Later: alerting (one alert per root cause) and multiple sites. Eventually: publishable.
+The whole screen is the answer. **Green** means everything is fine. **Yellow** means something is down and needs attention. **Red** means something critical is down. **Blue** means something could not be checked right now (MonitorBox says "I don't know" rather than guessing). Tap anything to drill down.
 
-## Shape
+- **Checks** through ICMP (ping), HTTP, SNMP, Docker containers (via Portainer), Wake-on-LAN, UPS battery backups (NUT), cameras (Scrypted), and native UniFi Network and UniFi Protect integrations.
+- **Finds things for you.** Point it at a server and it detects what that server offers. After install it keeps looking, and tells you when a new container or new capability appears.
+- **Alerts you** when something goes wrong, by email (any SMTP server, Gmail included) or through Home Assistant notifications. One message per root cause, not one per thing that depends on it, and one all-clear when it recovers.
+- **Multiple sites.** Connect several MonitorBoxes (a home and a cabin, say) and see them all from one screen, with tabs and one notification bell. Each box keeps watching and alerting on its own, even if the link between them drops.
+- **Who talks to whom.** With UniFi it works out which devices on your LAN are talking to each other, without packet capture, port mirroring or sniffing.
+- **Your screen, your way.** Simplified or detailed front page, and throughput graphs you choose and size.
+- **Modular and expandable.** Integrations install, update and remove on their own, and there is a framework for third-party repositories and plugins, so anyone can contribute new functionality.
+- **Updates itself** if you want it to, with channels (stable, beta, dev), pinning and one-tap rollback. It tells you when the container image itself needs pulling.
+- **Backup and restore that works.** Automatic backups, and a restore proven by an automated test that gives every setting a different value and compares each one afterwards.
+- **Read-only.** MonitorBox never controls anything: no Docker socket, no remote control, no logging in to your systems. It asks your devices questions and never changes them. Your UPS data is read, never used to shut anything down.
 
-Three parts in one container: a tiny **Launcher** (first run, downloads, rollback, recovery page), one **App** (web UI, status engine, config, backup, updates), and downloaded **Modules** (one per integration, each its own subprocess).
+## Install
 
-Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+You need a machine running Docker. Quick version:
+
+1. Make a folder for MonitorBox's settings.
+2. Start the container from the [compose file](docs/INSTALL.md#the-compose-file), with Portainer or plain Docker Compose.
+3. Open `http://<your-machine>:8080`.
+
+The full steps, including installing Portainer, are in the **[install guide](docs/INSTALL.md)**. Please read its "Before you start" section: a little preparation (read-only accounts, SNMP) makes the first run much smoother.
+
+## How it is built
+
+Three parts in one container: a tiny launcher (first run, downloads, rollback, a recovery page), the app (web page, status engine, configuration, backup, updates), and downloadable modules, one per integration, each running separately. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Repositories
 
 | Repo | Purpose |
 | --- | --- |
-| `monitorbox` (this one) | All source and docs |
-| `monitorbox-modules` (public) | Built archives and the three channel pointer files |
+| `monitorbox` (this one) | Source and docs |
+| `monitorbox-modules` | Built releases and the three channel pointer files |
 
-The container image is `ghcr.io/sickicarus-labs/monitorbox`. Other repositories can be added on the Updates page of the app (see issue #264).
-
-## Status
-
-MonitorBox 4 is in active development. A full install guide is coming; until then see [docs/INSTALL.md](docs/INSTALL.md).
+The container image is `ghcr.io/sickicarus-labs/monitorbox`. More repositories can be added from the Updates page in the app.
 
 ## Licence
 
