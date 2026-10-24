@@ -20,7 +20,7 @@ RESTART_EXIT = 75  # App exits with this to ask for a restart (after an update r
 
 
 class Launcher:
-    def __init__(self, root, releases_url, channel="dev", port=8080,
+    def __init__(self, root, releases_url, channel="stable", port=8080,
                  health_timeout=30, app_cmd=None):
         self.L = Layout(root)
         self.releases_url = releases_url.rstrip("/")

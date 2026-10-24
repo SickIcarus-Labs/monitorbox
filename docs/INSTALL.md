@@ -3,7 +3,7 @@
 This runs alongside MonitorBox 3 and does not touch it. It uses its own volume and container name, and web port 8090 by default.
 
 1. Copy `deploy/docker-compose.yml` to the Pi (or paste it into a Portainer stack).
-2. Start it. First start downloads the App from the `dev` channel (a few seconds).
+2. Start it. First start downloads the App from the `stable` channel (a few seconds).
 3. Open `http://<pi>:8090`, choose an admin password, and you should see the Hello module.
 
 What the first test proves: blank volume to running App with nothing but the compose file; update from the page (Check for updates, Apply); roll back; the App and module move without the compose file ever changing.
