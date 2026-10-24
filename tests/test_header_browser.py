@@ -72,7 +72,7 @@ class Header(T.SnmpE2E):
             pg.evaluate("""async()=>{const f=window.fetch;window.fetch=(u,o)=>String(u).endsWith('/api/versions')?f(u,o).then(async r=>{const j=await r.json();j.image={have:'1.0.0',wants:'1.2.0',outdated:true};return new Response(JSON.stringify(j))}):f(u,o);window._f=f;route()}""")
             pg.wait_for_function("document.querySelector('#m').innerText.includes('The container image needs updating.')")
             t = pg.inner_text("#m")
-            self.assertIn("image 1.0.0", t); self.assertIn("built for 1.2.0", t); self.assertIn("Re-pull image", t)
+            self.assertIn("image 1.0.0", t); self.assertIn("built for 1.2.0", t); self.assertIn("Pull the new image", t); self.assertNotIn("Update the stack", t)
             pg.evaluate("window.fetch=window._f;route()")
             pg.wait_for_function("!document.querySelector('#m').innerText.includes('The container image needs updating.')&&document.querySelector('#m').innerText.includes('Updates')")
             b.close()
