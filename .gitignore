@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+.venv/
+dist/
+*.log
+# Never commit real config or secrets
+monitorbox.json
+secrets*
+.env
+
+# Local agent instructions are kept out of the public repo
+CLAUDE.md

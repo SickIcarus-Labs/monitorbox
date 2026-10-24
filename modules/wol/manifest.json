@@ -1,0 +1,1 @@
+{"id": "wol", "name": "Wake on LAN", "version": "0.1.1", "entry": ["python3", "main.py"]}

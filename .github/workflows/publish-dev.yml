@@ -1,0 +1,60 @@
+name: Publish dev
+# On merge to main: build archives, attach them to GitHub releases in the public
+# releases repo, and move ONLY channels/dev.json (and add new versions to catalog.json). beta/stable move only by Promote.
+on:
+  push:
+    branches: [main]
+    paths: [app/**, modules/**, tools/build_release.py, .github/workflows/publish-dev.yml]
+concurrency:
+  group: publish-dev
+  cancel-in-progress: false
+permissions:
+  contents: read
+env:
+  RELEASES_REPO: SickIcarus-Labs/monitorbox-modules
+jobs:
+  # Nothing is published unless the tests (including the backup/restore gate) pass on this exact commit.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Tests (failures are annotated)
+        shell: bash
+        run: tools/ci_tests.sh
+  publish:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.RELEASES_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          path: releases
+      - name: Build archives and update dev pointer
+        id: build
+        shell: bash          # bash -eo pipefail: a failed build must fail the job, not be hidden by the pipe into tee
+        run: |
+          # hello is the sample module; its builds live in the test repository now (see #264), so this repo no longer offers it
+          python3 tools/build_release.py --out dist --skip hello \
+            --url-template "https://github.com/${RELEASES_REPO}/releases/download/{tag}/{file}" \
+            --pointer releases/channels/dev.json --catalog releases/catalog.json | tee build.json
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          for f in $(python3 -c "import json;print(' '.join(json.load(open('build.json'))['assets']))"); do
+            tag="${f%.tar.gz}"
+            gh release create "$tag" "dist/$f" --repo "$RELEASES_REPO" --title "$tag" --notes "Built from ${GITHUB_SHA}"
+          done
+      - name: Commit pointer (assets are uploaded first, so the pointer never names a missing file)
+        run: |
+          cd releases
+          git config user.name monitorbox-publish && git config user.email noreply@github.com
+          git add channels/dev.json catalog.json
+          git diff --cached --quiet || { git commit -m "dev: publish ${GITHUB_SHA::7}" && git push; }

@@ -1,0 +1,29 @@
+name: Bug report
+description: Something did not work, or a question came up while setting up
+body:
+  - type: input
+    id: version
+    attributes:
+      label: MonitorBox version
+      description: Shown in the page header, or on Settings, Updates.
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Update channel
+      options: [stable, beta, dev]
+    validations:
+      required: true
+  - type: textarea
+    id: step
+    attributes:
+      label: What were you doing, and what did you expect?
+      description: Which step of the setup or which screen. Say what you were trying to do, not only what broke.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or a screenshot
+      description: Remove passwords, keys and addresses you do not want public before pasting.

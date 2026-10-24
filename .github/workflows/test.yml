@@ -1,0 +1,36 @@
+name: Test
+
+# Cheap by design: one job, one Python, standard library first, cancelled when a
+# newer push arrives. Component-specific jobs get added with their component and
+# are path-filtered so unrelated changes do not run them.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version check compares against the base branch
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Byte-compile all Python (catches syntax errors)
+        run: python -m compileall -q .
+      - name: Version bumped for every changed component
+        if: github.event_name == 'pull_request'
+        run: python tools/check_versions.py "origin/${{ github.base_ref }}"
+      - name: Unit tests
+        shell: bash
+        run: tools/ci_tests.sh
