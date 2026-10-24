@@ -74,6 +74,9 @@ class ReposUI(ReposUI):
             self.assertEqual(len(c.get("/api/versions")["repos"]), 2)
             # the default has no Remove button
             self.assertEqual(box.locator("label:has-text('built in')").locator("xpath=..").locator("button:has-text('Remove')").count(), 0)
+            # and no tick box at all: it cannot be switched off, so nothing is offered that looks as if it could be
+            self.assertEqual(box.locator("label:has-text('built in') input[type=checkbox]").count(), 0)
+            self.assertGreater(box.locator("input[type=checkbox]").count(), 0, "the others still have theirs")
             self.assertEqual(errs, [])
             b.close()
 

@@ -299,6 +299,7 @@ class Sites(unittest.TestCase):
             pg.goto(f"http://127.0.0.1:{main.port}/#/settings/updates"); pg.wait_for_selector("#ch")
             pg.wait_for_function("document.querySelector('#ch').value === 'stable'")
             self.assertEqual(pg.input_value("#ch"), "stable", "the far site's tab shows the far site's channel")
+            self.assertIn("channel stable", pg.inner_text("#m"), "and so does the line under the page title")
             pg.select_option("#ch", "dev")
             pg.wait_for_selector("#ch")
             pg.wait_for_function("document.querySelector('#ch').value === 'dev'")

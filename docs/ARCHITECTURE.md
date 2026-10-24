@@ -1172,3 +1172,8 @@ Before the repository goes public, the owner's real server names and the example
 ## 0.83.5: a site's Updates page shows that site's own channel
 
 With a far site's tab open, Settings, Updates drew the channel dropdown (and the "Install updates automatically … on the X channel" line) from the main box's own state (`state` is always answered by the main box), so the far site's real channel never showed and a change looked as if it had snapped back. The change itself always reached the far site (`POST /api/channel` is passed through like every other call). The page now reads the channel from the Updates view (`versions`), which is passed through to whichever box is selected. Test: `tests/test_sites.py`, `test_a_sites_updates_page_shows_and_changes_that_sites_channel_not_the_main_boxs`.
+
+## 0.83.6: the built-in repository has no tick box; the page header follows the site tab
+
+- The built-in repository's tick box looked tickable (a lighter blue) although it cannot be switched off. It is now left out of that row entirely; the row says "built in".
+- The line under the Settings page titles ("MonitorBox 0.83.5 · channel dev") read the main box's own state, so it showed Broad Leaf's version and channel under every site's tab. It now reads the Updates view, like the channel drop-down (0.83.5). Tests: `tests/test_repos_browser.py` and `tests/test_sites.py`.
