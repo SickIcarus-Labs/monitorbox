@@ -8,7 +8,7 @@ You need a machine that runs Docker (a Raspberry Pi 5 is what MonitorBox is buil
 
 - **A Linux machine running Docker** (with Docker Compose, or Portainer). MonitorBox uses host networking to reach your devices, so Docker Desktop on Windows or macOS will not work.
 - **A 64-bit processor, arm64 or amd64.** A Raspberry Pi 5 and an Intel NUC mini PC are what it has been tested on.
-- **Memory:** about 110 MB for a small setup, and about 330 MB with every integration running (Scrypted is the heaviest, then Portainer). Measured with Docker on Linux; the figure depends on how many integrations you use. No minimum has been tested, so leave yourself some headroom on small machines.
+- **Memory:** about 280 to 330 MB with every integration running. The app itself uses roughly 80 to 110 MB, Scrypted about 70 MB, Portainer about 30 to 40 MB, and each of the others 10 to 30 MB, so you use less if you run fewer integrations. Measured with Docker on Linux. No minimum has been tested, so leave yourself some headroom on small machines.
 - **Ports:** the web page uses 8080 (changeable). If you link several sites over the internet, the site port 8443 is also used. Nothing else needs to be opened.
 - **Internet access** for the machine, to download the image and to check for updates (GitHub).
 
