@@ -11,6 +11,9 @@ class Skip(unittest.TestCase):
         os.makedirs(os.path.join(root, "app", "monitorbox_app"))
         with open(os.path.join(root, "app", "monitorbox_app", "VERSION"), "w") as f:
             f.write("1.0.0\n")
+        os.makedirs(os.path.join(root, "launcher", "monitorbox_launcher"))
+        with open(os.path.join(root, "launcher", "monitorbox_launcher", "VERSION"), "w") as f:
+            f.write("3.4.5\n")
         for mid in ("kept", "left-out"):
             os.makedirs(os.path.join(root, "modules", mid))
             with open(os.path.join(root, "modules", mid, "manifest.json"), "w") as f:
@@ -36,6 +39,10 @@ class Skip(unittest.TestCase):
     def test_without_skip_everything_is_built(self):
         ptr, cat, out = self.build()
         self.assertEqual(sorted(ptr["modules"]), ["kept", "left-out"])
+
+    def test_the_pointer_carries_the_launcher_version_this_release_was_built_for(self):
+        ptr, cat, out = self.build()
+        self.assertEqual(ptr["launcher"], {"version": "3.4.5"})
 
 
 if __name__ == "__main__":

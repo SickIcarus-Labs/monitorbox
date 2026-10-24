@@ -118,6 +118,13 @@ def main(argv=None):
                 lambda v, mid=mid: ptr["modules"].__setitem__(mid, v),
                 f"module-{mid}", man["version"], data)
 
+    # Launcher: the image version this release was built for. A box whose own launcher is older tells its owner to re-pull the image.
+    with open(os.path.join(a.root, "launcher", "monitorbox_launcher", "VERSION")) as f:
+        lv = f.read().strip()
+    if ptr.get("launcher") != {"version": lv}:
+        ptr["launcher"] = {"version": lv}
+        changed = True
+
     if changed:
         ptr["updated"] = now
         for path, obj in ((a.pointer, ptr), (a.catalog, cat)):

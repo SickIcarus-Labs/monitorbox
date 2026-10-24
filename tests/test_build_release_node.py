@@ -14,6 +14,7 @@ class NodePackages(unittest.TestCase):
             with open(os.path.join(self.d, p), "w") as f:
                 f.write(t)
         w("root/app/monitorbox_app/VERSION", "9.9.9\n")
+        w("root/launcher/monitorbox_launcher/VERSION", "1.0.0\n")
         w("root/modules/demo/manifest.json", json.dumps({"id": "demo", "version": "1.0.0", "entry": ["node", "main.mjs"]}))
         w("root/modules/demo/main.mjs", "console.log('hi')\n")
         w("root/modules/demo/package.json", "{}\n")

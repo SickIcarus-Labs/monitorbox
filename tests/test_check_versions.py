@@ -23,6 +23,9 @@ class CheckVersions(unittest.TestCase):
         run(self.r, "init", "-q", "-b", "main")
         write(self.r, "app/monitorbox_app/VERSION", "1.0.0\n")
         write(self.r, "app/monitorbox_app/x.py", "a = 1\n")
+        write(self.r, "launcher/monitorbox_launcher/VERSION", "1.0.0\n")
+        write(self.r, "launcher/monitorbox_launcher/supervisor.py", "a = 1\n")
+        write(self.r, "Dockerfile", "FROM scratch\n")
         for m, v in (("snmp", "0.1.0"), ("nut", "0.3.0")):
             write(self.r, f"modules/{m}/manifest.json", json.dumps({"id": m, "version": v}))
             write(self.r, f"modules/{m}/main.py", "a = 1\n")
@@ -54,6 +57,19 @@ class CheckVersions(unittest.TestCase):
         p = check_versions.check("main", self.r)
         self.assertEqual(len(p), 1)
         self.assertIn("nut", p[0])
+
+    def test_image_changed_without_a_launcher_bump_fails(self):
+        write(self.r, "launcher/monitorbox_launcher/supervisor.py", "a = 2\n"); self.commit()
+        p = check_versions.check("main", self.r)
+        self.assertEqual(len(p), 1); self.assertIn("launcher/monitorbox_launcher/VERSION", p[0])
+        run(self.r, "reset", "-q", "--hard", "main")
+        write(self.r, "Dockerfile", "FROM scratch\nRUN true\n"); self.commit()
+        self.assertEqual(len(check_versions.check("main", self.r)), 1, "the Dockerfile counts as the image")
+
+    def test_image_changed_with_a_launcher_bump_passes(self):
+        write(self.r, "launcher/monitorbox_launcher/supervisor.py", "a = 2\n")
+        write(self.r, "launcher/monitorbox_launcher/VERSION", "1.0.1\n"); self.commit()
+        self.assertEqual(check_versions.check("main", self.r), [])
 
     def test_app_changed_without_bump_fails(self):
         write(self.r, "app/monitorbox_app/x.py", "a = 2\n"); self.commit()

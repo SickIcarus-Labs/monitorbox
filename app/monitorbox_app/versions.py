@@ -33,3 +33,14 @@ def component(running, pin, latest, entries, channel, failed):
         "needsApply": target is not None and target != running,
         "pinMissing": pin != "latest" and pin not in versions,
     }
+
+
+def image(have, wants):
+    """Does the container image need re-pulling? `have` is the launcher version this image carries (None for an image from before it was recorded),
+    `wants` the one the channel's release was built for (None when the release does not say). No notice unless both are known and the image is older."""
+    try:
+        if not have or not wants:
+            return None
+        return {"have": have, "wants": wants, "outdated": vkey(have) < vkey(wants)}
+    except ValueError:
+        return None

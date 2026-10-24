@@ -1177,3 +1177,13 @@ With a far site's tab open, Settings, Updates drew the channel dropdown (and the
 
 - The built-in repository's tick box looked tickable (a lighter blue) although it cannot be switched off. It is now left out of that row entirely; the row says "built in".
 - The line under the Settings page titles ("MonitorBox 0.83.5 · channel dev") read the main box's own state, so it showed Broad Leaf's version and channel under every site's tab. It now reads the Updates view, like the channel drop-down (0.83.5). Tests: `tests/test_repos_browser.py` and `tests/test_sites.py`.
+
+## 0.83.7: the box says when its container image needs re-pulling
+
+The App and modules update by themselves, but the image (the launcher, Node, Python) only changes when the owner re-pulls it, and nothing told him a newer one was needed. Now:
+
+- `launcher/monitorbox_launcher/VERSION` is the image's own version. The launcher writes it to `state.json` (`launcher_version`) at start-up.
+- The release build writes `launcher: {"version": …}` into the channel pointer: the image version that release was built for. It moves with promotion, so a box on `stable` is only asked for what `stable` was built for. Older boxes ignore the key.
+- The App compares the two (`versions.image`, numbers not text). Only when both are known and the box's image is older does `/api/versions` carry `image.outdated`; the bell then lists "The container image needs updating" and the Updates page explains that the image needs pulling. An image from before the version was recorded, or a release that does not say, gives no notice.
+- `tools/check_versions.py` fails a pull request that changes `launcher/` code or the `Dockerfile` without bumping the launcher VERSION, which is what keeps the notice honest.
+- Rule: any new image, even a base-image refresh with no code change, ships with a launcher VERSION bump (the bump alone is enough). CI enforces it for launcher code and the Dockerfile; for anything else it is a release habit. The Updates page tells the owner to pull the new image and restart; it does not name a tool, since people run Compose, Portainer or something else.

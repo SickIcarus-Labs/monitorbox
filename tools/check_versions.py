@@ -47,6 +47,11 @@ def check(base="origin/main", cwd="."):
         old, new = old_text(ref, "app/monitorbox_app/VERSION", cwd), new_text("app/monitorbox_app/VERSION", cwd)
         if old is not None and new is not None and old.strip() == new.strip():
             problems.append(f"The app changed ({len(app)} file{'s' if len(app) != 1 else ''}, for example {app[0]}) but app/monitorbox_app/VERSION is still {new.strip()}. Bump it.")
+    lch = [f for f in files if (f.startswith("launcher/monitorbox_launcher/") and f != "launcher/monitorbox_launcher/VERSION") or f == "Dockerfile"]
+    if lch:
+        old, new = old_text(ref, "launcher/monitorbox_launcher/VERSION", cwd), new_text("launcher/monitorbox_launcher/VERSION", cwd)
+        if old is not None and new is not None and old.strip() == new.strip():
+            problems.append(f"The container image changed ({lch[0]}) but launcher/monitorbox_launcher/VERSION is still {new.strip()}. Bump it, so boxes can tell their owner to re-pull the image.")
     mods = sorted({f.split("/")[1] for f in files if f.startswith("modules/") and f.count("/") >= 2 and f != "modules/%s/manifest.json" % f.split("/")[1]})
     for mid in mods:
         path = f"modules/{mid}/manifest.json"
