@@ -1,0 +1,327 @@
+"""Module install/update and the JSON-lines subprocess runner.
+
+Protocol (one JSON object per line):
+  App -> module : {"id": 1, "method": "hello", "params": {...}}
+  module -> App : {"id": 1, "result": {...}}  or  {"id": 1, "error": "message"}
+A module may also send unasked lines {"event": "...", "session": "<id>", "message": {...}} (live video setup messages); they go to whoever
+listened for that session id (ModuleProcess.listen), and are dropped if nobody did.
+"""
+import json, os, re, select, shutil, subprocess, sys, threading, time
+from . import perfstats
+
+from .store import read_json, write_json
+
+ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
+RETIRED = {"unifi": "unifi-network"}      # renamed modules: the old one is no longer started
+
+
+def current(ids):
+    """Drop renamed-away modules from a list of ids. The release pointer keeps naming old versions of a module that was renamed."""
+    return [i for i in ids if i not in RETIRED]
+
+
+class ModuleProcess:
+    def __init__(self, mid, version, directory, entry):
+        self.id, self.version = mid, version
+        self.proc = subprocess.Popen(
+            [sys.executable if e == "python3" else e for e in entry], cwd=directory,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            env={"PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}, text=True)
+        self.lock = threading.Lock()      # guards writes to stdin and the table of waiting calls
+        self.n = 0
+        self.waiting = {}                 # id -> [event, message]
+        self.dead = False
+        self.listeners = {}               # session id -> callback(msg) for unasked event lines
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        """One reader hands each answer to whoever asked, so calls can overlap (a slow device
+        must not hold up the others)."""
+        try:
+            for line in self.proc.stdout:
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                if "event" in msg:
+                    with self.lock:
+                        cb = self.listeners.get(msg.get("session"))
+                    if cb:
+                        try: cb(msg)
+                        except Exception: pass
+                    continue
+                with self.lock:
+                    w = self.waiting.get(msg.get("id"))
+                if w:
+                    w[1] = msg
+                    w[0].set()
+        finally:
+            with self.lock:
+                self.dead = True
+                for w in self.waiting.values():
+                    w[0].set()
+                gone = list(self.listeners.items())
+            for sid, cb in gone:                                  # a live view cannot outlive its module
+                try: cb({"event": "live", "session": sid, "message": {"type": "closed", "reason": "the module stopped"}})
+                except Exception: pass
+
+    def alive(self):
+        return self.proc.poll() is None and not self.dead
+
+    def listen(self, session, cb):
+        with self.lock:
+            self.listeners[session] = cb
+
+    def unlisten(self, session):
+        with self.lock:
+            self.listeners.pop(session, None)
+
+    def call(self, method, params=None, timeout=5):
+        w = [threading.Event(), None]
+        with self.lock:
+            if not self.alive():
+                raise RuntimeError("module is not running")
+            self.n += 1
+            i = self.n
+            self.waiting[i] = w
+            try:
+                self.proc.stdin.write(json.dumps({"id": i, "method": method, "params": params or {}}) + "\n")
+                self.proc.stdin.flush()
+            except (OSError, ValueError):
+                self.waiting.pop(i, None)
+                raise RuntimeError("module is not running")
+        try:
+            if not w[0].wait(timeout):
+                raise TimeoutError(f"{self.id} did not answer {method}")
+        finally:
+            with self.lock:
+                self.waiting.pop(i, None)
+        msg = w[1]
+        if msg is None:
+            raise RuntimeError("module exited")
+        if "error" in msg:
+            raise RuntimeError(msg["error"])
+        return msg.get("result")
+
+    def stop(self):
+        if self.alive():
+            self.proc.terminate()
+            try:
+                self.proc.wait(3)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+
+
+class Modules:
+    def __init__(self, paths, installer):
+        self.paths = paths
+        self.install_archive = installer  # (url, sha256, dest) -> dest
+        self.running = {}
+        self.lock = threading.Lock()
+        self.retry_after = float(os.environ.get("MB_MODULE_RETRY_SECONDS", "10"))
+        self.last_try = {}
+        self.cards = {}                   # (module id, version) -> its describe answer, kept once known
+        self.wanted = lambda: None        # () -> set of module ids some connection uses, or None for "all"
+
+    def state(self):
+        return read_json(self.paths.modules_state, {})
+
+    def _save(self, st):
+        write_json(self.paths.modules_state, st, mode=0o644)
+
+    def dir(self, mid, version):
+        return os.path.join(self.paths.module_releases, mid, version)
+
+    def _start(self, mid, version):
+        d = self.dir(mid, version)
+        man = read_json(os.path.join(d, "manifest.json"))
+        if not man or man.get("id") != mid or man.get("version") != version:
+            raise ValueError(f"{mid} {version}: manifest does not match")
+        p = ModuleProcess(mid, version, d, man["entry"])
+        p.call("hello")  # must answer before we call it healthy
+        old = self.running.get(mid)
+        self.running[mid] = p
+        if old:
+            old.stop()
+
+    def start_all(self):
+        with self.lock:
+            st = self.state()
+            if any(mid in st for mid in RETIRED):          # a renamed module's old record would show up as a stray card and be offered updates
+                for mid in RETIRED:
+                    st.pop(mid, None)
+                self._save(st)
+            want = self.wanted()
+            for mid, rec in st.items():
+                try:
+                    if rec.get("active") and (want is None or mid in want):     # the rest start the first time something asks for them
+                        self._start(mid, rec["active"])
+                except Exception:
+                    pass  # shown as not running in the UI
+
+    def apply_one(self, mid, entry):
+        """Install and start one specific release. The old one keeps running if the new one will not start.
+        Returns 'updated', 'unchanged' or 'failed: why'."""
+        if not ID_RE.match(mid):
+            return "failed: bad module id"
+        if mid in RETIRED:
+            return f"failed: {mid} was renamed to {RETIRED[mid]}"
+        with self.lock:
+            st = self.state()
+            rec = st.get(mid, {})
+            if rec.get("active") == entry["version"]:
+                return "unchanged"
+            try:
+                self.install_archive(entry["url"], entry["sha256"], self.dir(mid, entry["version"]))
+            except Exception as e:
+                return f"failed: {e}"
+            try:
+                self._start(mid, entry["version"])
+            except Exception as e:
+                failed = rec.get("failed", [])
+                if entry["version"] not in failed:
+                    failed.append(entry["version"])
+                st[mid] = {**rec, "active": rec.get("active"), "failed": failed}
+                if not rec.get("active"):
+                    st.pop(mid)
+                self._save(st)
+                return f"failed: {e}"
+            st[mid] = {"active": entry["version"], "failed": rec.get("failed", []), "sha256": entry["sha256"]}   # the build that runs: a repo that offers the same bytes can take over
+            self._save(st)
+            return "updated"
+
+    def uninstall(self, mid):
+        """Stop a module and delete it: its process, its record and its files. (Its settings, the connections that use it, are the App's to remove.)"""
+        with self.lock:
+            p = self.running.pop(mid, None)
+            if p:
+                p.stop()
+            st = self.state()
+            if mid not in st:
+                raise ValueError(f"{mid} is not installed.")
+            st.pop(mid)
+            self._save(st)
+            shutil.rmtree(os.path.join(self.paths.module_releases, mid), ignore_errors=True)
+            for k in [k for k in self.cards if k[0] == mid]:
+                del self.cards[k]
+            self.last_try.pop(mid, None)
+
+    def _revive(self, mid):
+        """A module that died (a crash in its device library, say) is started again, at most every few seconds."""
+        if time.monotonic() - self.last_try.get(mid, -1e9) < self.retry_after or not self.lock.acquire(blocking=False):
+            return self.running.get(mid)
+        try:
+            self.last_try[mid] = time.monotonic()
+            rec = self.state().get(mid, {})
+            if rec.get("active"):
+                try:
+                    self._start(mid, rec["active"])
+                except Exception:
+                    pass
+            return self.running.get(mid)
+        finally:
+            self.lock.release()
+
+    def pids(self):
+        """{process id: module name} of the modules running now."""
+        out = {}
+        for mid, p in list(self.running.items()):
+            pid = getattr(getattr(p, "proc", None), "pid", None)
+            if pid:
+                out[pid] = mid
+        return out
+
+    def call(self, mid, method, params, timeout=10):
+        """Ask a running module to do something. Raises RuntimeError with a plain message if it cannot."""
+        p = self.running.get(mid)
+        if not p or not p.alive():
+            p = self._revive(mid)
+        if not p or not p.alive():
+            raise RuntimeError(f"the {mid} module is not running (install it under Settings, Versions)")
+        t0 = time.monotonic()
+        try:
+            return p.call(method, params, timeout=timeout)
+        finally:
+            perfstats.record("module", f"{mid}.{method}", (time.monotonic() - t0) * 1000)
+
+    def listen(self, mid, session, cb):
+        p = self.running.get(mid)
+        if not p or not p.alive():
+            p = self._revive(mid)
+        if not p or not p.alive():
+            raise RuntimeError(f"the {mid} module is not running (install it under Settings, Versions)")
+        p.listen(session, cb)
+
+    def unlisten(self, mid, session):
+        p = self.running.get(mid)
+        if p:
+            p.unlisten(session)
+
+    def check(self, spec, conn):
+        """Run one module check. Returns (ok, detail, ms, extra) like a probe.
+        A module that cannot be reached, times out, or errors makes the check UNKNOWN, never failed:
+        only the module itself can say a device is down, because it is the one that talked to it."""
+        mid = spec["module"]
+        p = self.running.get(mid)
+        if not p or not p.alive():
+            p = self._revive(mid)
+        if not p or not p.alive():
+            return None, f"the {mid} module is not running", None, {}
+        t0 = time.monotonic()
+        try:
+            res = p.call("check", {"check": spec.get("check"), "params": spec.get("params", {}),
+                                   "connection": conn}, timeout=spec.get("timeout", 10) + 2)
+        except Exception as e:
+            return None, f"the {mid} module did not answer: {e}", None, {}
+        ms = round((time.monotonic() - t0) * 1000, 1)
+        state = (res or {}).get("state")
+        detail = str((res or {}).get("detail", ""))
+        ms = res.get("ms", ms) if isinstance(res, dict) else ms
+        if state == "healthy":
+            return True, detail, ms, ({"notice": True} if (res or {}).get("notice") else {})     # fine, but worth a line (a busy CPU)
+        if state == "degraded":
+            return True, detail, ms, {"warn": True}
+        if state == "failed":
+            return False, detail, ms, {}
+        return None, detail or f"the {mid} module could not check this", ms, {}
+
+    def describe(self):
+        """Each active module's card. A card never changes for a version, so it is asked for once and kept; a module busy with a long check answers late, and asking
+        them one after another made the Settings page wait 5 seconds for every busy module. The ones not yet known are asked together, for at most 2 seconds."""
+        res = []
+        st = self.state()
+        todo = []
+        for mid, rec in sorted((m, r) for m, r in st.items() if r.get("active")):
+            p = self.running.get(mid)
+            if p and p.alive() and (mid, rec["active"]) not in self.cards:
+                todo.append((mid, rec["active"], p))
+        got = {}
+
+        def ask(item):
+            mid, ver, p = item
+            try:
+                self.cards[(mid, ver)] = p.call("describe", timeout=2)
+            except Exception as e:
+                got[mid] = str(e)
+        threads = [threading.Thread(target=ask, args=(t,), daemon=True) for t in todo]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(2.5)
+        for mid, rec in sorted((m, r) for m, r in st.items() if r.get("active")):
+            p = self.running.get(mid)
+            card, err = None, None
+            if p and p.alive():
+                card = self.cards.get((mid, rec["active"]))
+                err = None if card else got.get(mid, "did not answer yet")
+            elif mid not in self.last_try and mid not in self.running:
+                err = "idle until something uses it"       # lazy start: costs no memory until then
+            else:
+                err = "not running"
+            res.append({"id": mid, "version": rec["active"], "pid": p.proc.pid if p and p.alive() else None,
+                        "running": bool(p and p.alive()), "card": card, "error": err})
+        return res
+
+    def stop_all(self):
+        for p in self.running.values():
+            p.stop()

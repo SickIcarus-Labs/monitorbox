@@ -1,0 +1,1 @@
+{"id": "unifi-protect", "name": "UniFi Protect", "version": "0.1.1", "entry": ["python3", "main.py"]}
