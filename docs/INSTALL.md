@@ -9,11 +9,11 @@ You need a machine that runs Docker (a Raspberry Pi 5 is what MonitorBox is buil
 None of this is required, but a few minutes of preparation makes the first run much smoother. MonitorBox walks you through connecting each thing and finds what it can on its own.
 
 - **SNMP:** turn it on, in advance, on the systems you want to watch (servers, switches, NAS). MonitorBox then finds their disks, interfaces and temperatures by itself.
-- **Portainer:** install it even if you do not use it to manage your containers. It is how MonitorBox sees your container stack. MonitorBox only ever sends read requests to it. Prepare it like this:
+- **Portainer:** install it even if you do not use it to manage your containers. It is how MonitorBox sees your container stack. Once you are logged into Portainer:
   1. Open **My account, Access tokens, Add access token** and copy the token. Portainer shows it only once.
   2. Later, in MonitorBox (during first-run setup, or Settings, Servers), open the server that runs Portainer, choose **Portainer**, and paste the token into **Access token**. The port is 9443 unless you chose another; tick "Portainer uses plain http" only if you use port 9000.
 
-  **Whose token?** MonitorBox gets the same rights as the account that created the token. MonitorBox itself only ever reads, but Portainer cannot enforce that for it. If your Portainer edition offers a **Read-only user** role, make a dedicated user with that role, give it access to the environments you want watched, sign in as that user, and create the token in step 1. If it does not (Portainer's free Community Edition may not), the next best choice is a dedicated non-admin user with access to those environments. Creating the token from your normal admin account also works, but then the token carries admin rights. It is not a concern while MonitorBox only reads; if it worries you, Portainer Business Edition (free for a small number of nodes) has finer roles. Your call.
+  MonitorBox has the same access rights as the account used to create the token. You may prefer to create a separate read-only Portainer user and create the token from there. MonitorBox is written so that it only ever reads.
 
 - **UniFi Network:** create a **local** user that can only **view**. Name your devices cleanly in UniFi, because those names are what MonitorBox shows.
 - **UniFi Protect:** create a local user that can only view Protect. It cannot record, move or change anything.
