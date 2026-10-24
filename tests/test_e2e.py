@@ -299,6 +299,7 @@ class E2E(unittest.TestCase):
         sp = os.path.join(self.cfg, "data", "launcher", "state.json")
         self.assertEqual(self.read_json(sp)["launcher_version"], real)
         self.assertEqual(c.get("/api/versions")["image"], {"have": real, "wants": real, "outdated": False})
+        self.assertEqual(c.get("/api/versions")["imageVersion"], real)
         with open(os.path.join(self.src, "launcher/monitorbox_launcher/VERSION"), "w") as f:
             f.write("99.0.0\n")                      # a later release built for a newer image
         self.publish(app="0.2.0")
@@ -308,6 +309,7 @@ class E2E(unittest.TestCase):
         st.pop("launcher_version")                    # an image from before the version was recorded: no notice, no guess
         self.write_json(sp, st)
         self.assertIsNone(c.get("/api/versions")["image"])
+        self.assertIsNone(c.get("/api/versions")["imageVersion"])
 
     def test_old_launcher_is_detected(self):
         self.publish(app="0.1.0", hello="0.1.0")

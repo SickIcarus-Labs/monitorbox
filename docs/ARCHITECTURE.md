@@ -1187,3 +1187,7 @@ The App and modules update by themselves, but the image (the launcher, Node, Pyt
 - The App compares the two (`versions.image`, numbers not text). Only when both are known and the box's image is older does `/api/versions` carry `image.outdated`; the bell then lists "The container image needs updating" and the Updates page explains that the image needs pulling. An image from before the version was recorded, or a release that does not say, gives no notice.
 - `tools/check_versions.py` fails a pull request that changes `launcher/` code or the `Dockerfile` without bumping the launcher VERSION, which is what keeps the notice honest.
 - Rule: any new image, even a base-image refresh with no code change, ships with a launcher VERSION bump (the bump alone is enough). CI enforces it for launcher code and the Dockerfile; for anything else it is a release habit. The Updates page tells the owner to pull the new image and restart; it does not name a tool, since people run Compose, Portainer or something else.
+
+## 0.83.8: the Settings line says when the image has an update
+
+The line under the Settings page titles reads "MonitorBox 0.83.8 · image 1.0.1 · channel dev" and adds "(update available)" after the image version when the image is older than the release expects. Launcher VERSION moved to 1.0.1 (no code change) to exercise the notice end to end on a real box: a box still on the 1.0.0 image shows the bell item and the note until it pulls the new image.
