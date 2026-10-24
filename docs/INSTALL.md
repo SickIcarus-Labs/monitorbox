@@ -4,6 +4,14 @@ You need a machine that runs Docker (a Raspberry Pi 5 is what MonitorBox is buil
 
 **Portainer is the preferred way.** MonitorBox needs Portainer anyway to see your containers. But Portainer is not required to install MonitorBox: if you prefer plain Docker Compose, use Option B.
 
+## Requirements
+
+- **A Linux machine running Docker** (with Docker Compose, or Portainer). MonitorBox uses host networking to reach your devices, so Docker Desktop on Windows or macOS will not work.
+- **A 64-bit processor, arm64 or amd64.** A Raspberry Pi 5 and an Intel NUC mini PC are what it has been tested on.
+- **Memory:** about 280 to 330 MB with every integration running. The app itself uses roughly 80 to 110 MB, Scrypted about 70 MB, Portainer about 30 to 40 MB, and each of the others 10 to 30 MB, so you use less if you run fewer integrations. Measured with Docker on Linux. No minimum has been tested, so leave yourself some headroom on small machines.
+- **Ports:** the web page uses 8080 (changeable). If you link several sites over the internet, the site port 8443 is also used. Nothing else needs to be opened.
+- **Internet access** for the machine, to download the image and to check for updates (GitHub).
+
 ## Before you start
 
 None of this is required, but a few minutes of preparation makes the first run much smoother. MonitorBox walks you through connecting each thing and finds what it can on its own.
@@ -88,3 +96,10 @@ Open `http://<your-machine>:8080` (or the port you chose). The first start downl
 The app and its modules update from the Updates page (Settings, Updates): **Latest** follows what your channel offers, and picking a specific version holds you there (this is also how you go back). Stable shows only stable releases, beta shows beta and stable, dev shows everything.
 
 The container image itself changes rarely. When it does, MonitorBox says so in the bell and on the Updates page. Pull the new image and restart the container: in Portainer, update the stack with "Re-pull image"; with Compose, `sudo docker compose pull && sudo docker compose up -d`. Your settings and data are kept.
+
+## Next steps
+
+- [Setup guides](GUIDES.md): alerts, SNMP, battery backup, several sites
+- [Troubleshooting](TROUBLESHOOTING.md)
+- [Exposing it safely, and privacy](SECURITY.md)
+- [Known limitations and what is next](LIMITATIONS.md)
