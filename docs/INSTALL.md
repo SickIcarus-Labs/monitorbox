@@ -10,12 +10,11 @@ None of this is required, but a few minutes of preparation makes the first run m
 
 - **SNMP:** turn it on, in advance, on the systems you want to watch (servers, switches, NAS). MonitorBox then finds their disks, interfaces and temperatures by itself.
 - **Portainer:** install it even if you do not use it to manage your containers. It is how MonitorBox sees your container stack. MonitorBox only ever sends read requests to it. Prepare it like this:
-  1. In Portainer, make a user just for MonitorBox (Users, Add user). Do **not** make it an administrator.
-  2. Give that user access to each environment you want watched (Environments, open the environment, Manage access).
-  3. Sign in as that user, open **My account, Access tokens, Add access token**, and copy the token. Portainer shows it only once.
-  4. Later, in MonitorBox (during first-run setup, or Settings, Servers), open the server that runs Portainer, choose **Portainer**, and paste the token into **Access token**. The port is 9443 unless you chose another; tick "Portainer uses plain http" only if you use port 9000.
+  1. Open **My account, Access tokens, Add access token** and copy the token. Portainer shows it only once.
+  2. Later, in MonitorBox (during first-run setup, or Settings, Servers), open the server that runs Portainer, choose **Portainer**, and paste the token into **Access token**. The port is 9443 unless you chose another; tick "Portainer uses plain http" only if you use port 9000.
 
-  Portainer's free edition has no read-only role, so the token carries that user's rights. That is why it should be its own non-admin user.
+  **Whose token?** MonitorBox gets the same rights as the account that created the token. Portainer's free edition has no read-only role, so the safest choice is a dedicated user for MonitorBox: in Portainer, make a user (Users, Add user) that is **not** an administrator, give it access to each environment you want watched (Environments, open the environment, Manage access), then sign in as that user and create the token in step 1. You can instead create the token from your normal admin account; it works, but then MonitorBox holds admin rights. Your call.
+
 - **UniFi Network:** create a **local** user that can only **view**. Name your devices cleanly in UniFi, because those names are what MonitorBox shows.
 - **UniFi Protect:** create a local user that can only view Protect. It cannot record, move or change anything.
 - **Scrypted:** create a user that is **not an admin**, and give it only the **Camera** and **VideoCamera** interfaces of the cameras. For live view it also needs the **RTCSignalingChannel** interface on those cameras (view only).
