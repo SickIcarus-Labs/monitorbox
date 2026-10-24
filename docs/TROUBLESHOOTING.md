@@ -34,7 +34,7 @@ Your settings and data are kept.
 
 ## Forgot the password
 
-There is no password recovery, by design. You start over, and then restore a backup or set things up again.
+MonitorBox does not store a way to look up your password. To recover, reset the app and start over, or restore from a saved backup file.
 
 If you can reach the box itself, create an empty file named `factory-reset` in your config folder. The next time MonitorBox starts, it clears the settings, history, password and installed modules, and starts again at the setup screen. **Your backups are kept**, so you can restore one after setting a new password. (A restore brings back your settings and history, and keeps the password you set on the fresh box.)
 
