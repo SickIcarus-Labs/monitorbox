@@ -1191,3 +1191,7 @@ The App and modules update by themselves, but the image (the launcher, Node, Pyt
 ## 0.83.8: the Settings line says when the image has an update
 
 The line under the Settings page titles reads "MonitorBox 0.83.8 · image 1.0.1 · channel dev" and adds "(update available)" after the image version when the image is older than the release expects. Launcher VERSION moved to 1.0.1 (no code change) to exercise the notice end to end on a real box: a box still on the 1.0.0 image shows the bell item and the note until it pulls the new image.
+
+## 0.83.9: new boxes follow the stable channel (#118)
+
+A box with nothing chosen yet now follows `stable` (before: `dev`): the launcher and App defaults, and the example `deploy/docker-compose.yml`. A box whose owner has chosen a channel keeps it (the choice is in the config, and it wins over the default). Launcher VERSION 1.0.2, since the launcher code changed.
