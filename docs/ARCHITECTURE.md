@@ -1177,3 +1177,13 @@ With a far site's tab open, Settings, Updates drew the channel dropdown (and the
 
 - The built-in repository's tick box looked tickable (a lighter blue) although it cannot be switched off. It is now left out of that row entirely; the row says "built in".
 - The line under the Settings page titles ("MonitorBox 0.83.5 · channel dev") read the main box's own state, so it showed Broad Leaf's version and channel under every site's tab. It now reads the Updates view, like the channel drop-down (0.83.5). Tests: `tests/test_repos_browser.py` and `tests/test_sites.py`.
+
+## 0.83.7: the box says when its container image needs re-pulling
+
+The App and modules update by themselves, but the image (the launcher, Node, Python) only changes when the owner re-pulls it, and nothing told him a newer one was needed. Now:
+
+- `launcher/monitorbox_launcher/VERSION` is the image's own version. The launcher writes it to `state.json` (`launcher_version`) at start-up.
+- The release build writes `launcher: {"version": …}` into the channel pointer: the image version that release was built for. It moves with promotion, so a box on `stable` is only asked for what `stable` was built for. Older boxes ignore the key.
+- The App compares the two (`versions.image`, numbers not text). Only when both are known and the box's image is older does `/api/versions` carry `image.outdated`; the bell then lists "The container image needs updating" and the Updates page explains how to re-pull (Portainer: Update the stack, Re-pull image). An image from before the version was recorded, or a release that does not say, gives no notice.
+- `tools/check_versions.py` fails a pull request that changes `launcher/` code or the `Dockerfile` without bumping the launcher VERSION, which is what keeps the notice honest.
+- Limit: a refresh of only the base image (no launcher change) is not detected. Bump the launcher VERSION when one matters. Watchtower, run by the owner, remains an option for people who prefer automatic pulls; MonitorBox does not ship or control it (read-only rule).

@@ -288,6 +288,27 @@ class E2E(unittest.TestCase):
         c.post("/api/channel", {"channel": "dev"})
         self.assertEqual(ids(c.post("/api/check")), ["0.2.0", "0.1.0"])
 
+    def test_an_image_older_than_the_release_expects_is_reported(self):
+        """The real launcher records its image version, the real build puts the expected one in the pointer, the app compares them."""
+        self.publish(app="0.1.0", hello="0.1.0")
+        self.start_launcher()
+        c = self.signed_in()
+        c.post("/api/check")
+        with open(os.path.join(REPO, "launcher/monitorbox_launcher/VERSION")) as f:
+            real = f.read().strip()
+        sp = os.path.join(self.cfg, "data", "launcher", "state.json")
+        self.assertEqual(self.read_json(sp)["launcher_version"], real)
+        self.assertEqual(c.get("/api/versions")["image"], {"have": real, "wants": real, "outdated": False})
+        with open(os.path.join(self.src, "launcher/monitorbox_launcher/VERSION"), "w") as f:
+            f.write("99.0.0\n")                      # a later release built for a newer image
+        self.publish(app="0.2.0")
+        c.post("/api/check")
+        self.assertEqual(c.get("/api/versions")["image"], {"have": real, "wants": "99.0.0", "outdated": True})
+        st = self.read_json(sp)
+        st.pop("launcher_version")                    # an image from before the version was recorded: no notice, no guess
+        self.write_json(sp, st)
+        self.assertIsNone(c.get("/api/versions")["image"])
+
     def test_old_launcher_is_detected(self):
         self.publish(app="0.1.0", hello="0.1.0")
         self.start_launcher()

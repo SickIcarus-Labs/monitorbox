@@ -58,6 +58,26 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_bell_says_when_the_container_image_needs_re_pulling_and_the_updates_page_explains(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.evaluate("hdrSites['']={ver:'',img:true,fu:[],pend:null};hdrSig='';renderHeader()")
+            self.assertEqual(pg.inner_text("#hdr .badge").strip(), "1")
+            pg.click("#bellbtn"); self.assertIn("The container image needs updating", pg.inner_text("#bell"))
+            pg.click("#bell .nitem"); pg.wait_for_function("location.hash==='#/settings/updates'")
+            # the page itself: with a stale image the explanation is there, with a current one it is not
+            pg.evaluate("""async()=>{const f=window.fetch;window.fetch=(u,o)=>String(u).endsWith('/api/versions')?f(u,o).then(async r=>{const j=await r.json();j.image={have:'1.0.0',wants:'1.2.0',outdated:true};return new Response(JSON.stringify(j))}):f(u,o);window._f=f;route()}""")
+            pg.wait_for_function("document.querySelector('#m').innerText.includes('The container image needs updating.')")
+            t = pg.inner_text("#m")
+            self.assertIn("image 1.0.0", t); self.assertIn("built for 1.2.0", t); self.assertIn("Re-pull image", t)
+            pg.evaluate("window.fetch=window._f;route()")
+            pg.wait_for_function("!document.querySelector('#m').innerText.includes('The container image needs updating.')&&document.querySelector('#m').innerText.includes('Updates')")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_bell_covers_all_sites_labels_them_skips_silent_ones_and_switches_site(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:

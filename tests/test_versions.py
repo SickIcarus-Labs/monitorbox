@@ -25,6 +25,15 @@ class VersionTests(unittest.TestCase):
         c = versions.component("0.1.0", "0.3.0", "0.2.0", ENTRIES, "beta", [])  # 0.3.0 is dev only
         self.assertEqual((c["target"], c["pinMissing"]), (None, True))
 
+    def test_image_notice_only_when_both_versions_are_known_and_the_image_is_older(self):
+        self.assertEqual(versions.image("1.0.0", "1.0.1"), {"have": "1.0.0", "wants": "1.0.1", "outdated": True})
+        self.assertEqual(versions.image("1.9.0", "1.10.0")["outdated"], True)          # numbers, not text
+        self.assertEqual(versions.image("1.0.1", "1.0.1")["outdated"], False)
+        self.assertEqual(versions.image("2.0.0", "1.0.1")["outdated"], False)          # a newer image is never a problem
+        self.assertIsNone(versions.image(None, "1.0.1"))                               # image from before the version was recorded
+        self.assertIsNone(versions.image("1.0.0", None))                               # release that does not say
+        self.assertIsNone(versions.image("junk", "1.0.1"))
+
     def test_prerelease_sorts_before_release(self):
         self.assertLess(versions.vkey("1.0.0-beta.1"), versions.vkey("1.0.0"))
 
