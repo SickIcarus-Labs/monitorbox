@@ -15,8 +15,9 @@ class DefaultChannel(unittest.TestCase):
             self.assertIn('os.environ.get("MB_CHANNEL", "stable")', text(*p), p)
         self.assertIn('channel="stable"', text("launcher", "monitorbox_launcher", "supervisor.py"))
 
-    def test_the_example_compose_file_follows_stable(self):
-        self.assertTrue(re.search(r"^\s*MB_CHANNEL:\s*stable\b", text("deploy", "docker-compose.yml"), re.M))
+    def test_the_example_compose_file_leaves_the_channel_to_the_default_and_the_welcome_page(self):
+        compose = text("deploy", "docker-compose.yml")
+        self.assertNotRegex(compose, r"(?m)^\s*MB_CHANNEL:\s*(dev|beta)\b", "a stranger's compose must not pin a test channel")
 
     def test_a_chosen_channel_still_wins_over_the_default(self):
         import sys, tempfile, json
