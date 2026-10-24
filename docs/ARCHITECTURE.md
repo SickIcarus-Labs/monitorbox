@@ -1168,3 +1168,7 @@ Right after a restart the port history is a minute or two long, and the panel sh
 ## 0.83.4: made-up names and addresses everywhere (launch scrub, #128 follow-up)
 
 Before the repository goes public, the owner's real server names and the example addresses from his network were replaced by made-up ones in the code, the demo mode, the tests and the docs (Bay Harbor and Tidewater for the sites, Granite and Anchor3 for servers, Aurora for a helper box, Cedar hut for a container stack, 192.168.77.x for the example addresses). The new names keep the same alphabetical position as the old ones so sorted lists stay in order. Behaviour is unchanged. Components whose files changed (comments only for the modules and the launcher) carry new versions: app 0.83.4, portainer 0.1.6, unifi-network 0.2.20, wol 0.1.1.
+
+## 0.83.5: a site's Updates page shows that site's own channel
+
+With a far site's tab open, Settings, Updates drew the channel dropdown (and the "Install updates automatically … on the X channel" line) from the main box's own state (`state` is always answered by the main box), so the far site's real channel never showed and a change looked as if it had snapped back. The change itself always reached the far site (`POST /api/channel` is passed through like every other call). The page now reads the channel from the Updates view (`versions`), which is passed through to whichever box is selected. Test: `tests/test_sites.py`, `test_a_sites_updates_page_shows_and_changes_that_sites_channel_not_the_main_boxs`.
