@@ -459,7 +459,7 @@ The main screen view (Summarized/Detailed), the history window, the side-panel w
 
 ## Choosing the update channel on a new box (0.42.1)
 
-The welcome page (right after the password) now asks which updates the box should follow: Stable, Beta or Dev, with the box's current channel ticked (it comes from the image's `MB_CHANNEL`, default dev). The choice uses the same `POST /api/channel` as Settings, Updates. A restored backup brings back its own choice.
+The welcome page (right after the password) now asks which updates the box should follow: Stable, Beta or Dev, with the box's current channel ticked (it comes from the image's `MB_CHANNEL`, default stable from 0.83.9, dev before). The choice uses the same `POST /api/channel` as Settings, Updates. A restored backup brings back its own choice.
 
 ## Edge agents and the agent note (0.42.2)
 
