@@ -278,6 +278,35 @@ class Sites(unittest.TestCase):
         self.assertEqual(json.load(open(os.path.join(main.root, "config", "graphs.json")))[0]["title"], "Distinct main graph 96")
         self.assertEqual(json.load(open(os.path.join(tb.root, "config", "graphs.json")))[0]["title"], "Distinct far graph 97")
 
+    def test_a_sites_updates_page_shows_and_changes_that_sites_channel_not_the_main_boxs(self):
+        """Seen on the owner's boxes: with the far site's tab open, the Updates page showed the main box's channel, so picking one on the far site seemed to snap back."""
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            self.skipTest("playwright not installed")
+        main, tb, tport, code, _ = self.pair()
+        main.post("/api/channel", {"channel": "beta"})
+        tb.post("/api/channel", {"channel": "stable"})
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 420, "height": 900})
+            errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
+            pg.goto(f"http://127.0.0.1:{main.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", main.pw); pg.keyboard.press("Enter")
+            pg.wait_for_selector("#hdr .tab >> text=Tidewater")
+            pg.goto(f"http://127.0.0.1:{main.port}/#/settings/updates"); pg.wait_for_selector("#ch")
+            self.assertEqual(pg.input_value("#ch"), "beta", "the main box's own tab shows the main box's channel")
+            pg.click("#hdr .tab >> text=Tidewater")
+            pg.goto(f"http://127.0.0.1:{main.port}/#/settings/updates"); pg.wait_for_selector("#ch")
+            pg.wait_for_function("document.querySelector('#ch').value === 'stable'")
+            self.assertEqual(pg.input_value("#ch"), "stable", "the far site's tab shows the far site's channel")
+            pg.select_option("#ch", "dev")
+            pg.wait_for_selector("#ch")
+            pg.wait_for_function("document.querySelector('#ch').value === 'dev'")
+            self.assertEqual(pg.input_value("#ch"), "dev", "after the change the page still shows what was chosen")
+            self.assertEqual((main.app.cfg()["channel"], tb.app.cfg()["channel"]), ("beta", "dev"), "only the far site changed")
+            self.assertEqual(errs, [])
+            b.close()
+
     def test_a_fold_opens_by_itself_for_a_problem_but_not_for_something_that_cannot_be_checked(self):
         try:
             from playwright.sync_api import sync_playwright

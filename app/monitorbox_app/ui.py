@@ -1409,11 +1409,11 @@ async function renderSettings(){
    <p class=sub style="margin-bottom:.4rem">When you tap a graph</p>
    <div class=seg role=group aria-label="Panel graph window">${GPW.map(x=>`<button aria-pressed=${getGp()===x[0]} onclick="setGp(${x[0]});segOn(this)">${x[1]}</button>`).join('')}</div></div>
   `,backups:backupsHtml,updates:`<h3>Updates</h3><div class=box>
-   <div class=row><select id=ch onchange="act('channel',{channel:this.value})">${['dev','beta','stable'].map(c=>`<option ${c==s.channel?'selected':''}>${c}</option>`).join('')}</select>
+   <div class=row><select id=ch onchange="act('channel',{channel:this.value})">${['dev','beta','stable'].map(c=>`<option ${c==v.channel?'selected':''}>${c}</option>`).join('')}</select>
    <button class=btn onclick="checkUpdates(this)">Check now</button><small id=chk>${v.checkedAt?'Checked '+esc(lt(v.checkedAt)):''}</small></div>
    <div class=sub style="margin-top:.4rem">Channel: <b>dev</b> is the newest and least tested, <b>beta</b> is in between, <b>stable</b> changes least.</div>
    <label class=row style="margin-top:.6rem"><input type=checkbox ${v.settings.autoCheck?'checked':''} onchange="setting({autoCheck:this.checked})"> Check for updates automatically</label>
-   <label class=row><input type=checkbox ${v.settings.autoUpdate?'checked':''} onchange="setting({autoUpdate:this.checked})"> Install updates automatically (only for items set to Latest on the ${esc(s.channel)} channel below)</label></div>
+   <label class=row><input type=checkbox ${v.settings.autoUpdate?'checked':''} onchange="setting({autoUpdate:this.checked})"> Install updates automatically (only for items set to Latest on the ${esc(v.channel)} channel below)</label></div>
   ${v.checkError?`<div class=box>${esc(v.checkError)}</div>`:''}
   ${repoBox}<h3>Installed software</h3>${last}${nPending>1?`<div class=box><div class=row><button class="btn pri" id=upall onclick="updateAll(this)">Update all (${nPending})</button><small>Installs every update listed below. MonitorBox itself goes last and restarts.</small></div></div>`:''}${row('MonitorBox','app','',v.app)}${swList}
   `,box:`${about}<h3>Time zone</h3><div class=box><p class=sub style="margin-top:0">The time zone of <b>this site</b>. Times on the screens, and anything the box writes itself, follow it. Each site has its own. The first time you open this page it uses your device's time zone. You can change it here at any time.</p>
