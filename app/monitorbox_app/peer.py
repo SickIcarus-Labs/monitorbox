@@ -196,6 +196,12 @@ class _Handler(BaseHTTPRequestHandler):
             if ident.startswith("m:") and owner.is_manager(ident[2:]):
                 owner.seen[ident[2:]] = owner.clock()
                 owner.manager_named(ident[2:], self.headers.get("X-MB-Name"))
+                if path == "/peer/set-name" and method == "POST":
+                    try:
+                        body = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
+                    except ValueError:
+                        return self._json(400, {"error": "bad json"})
+                    return self._json(200, owner.set_name_if_unset(body.get("name")))
                 if path == "/peer/bye" and method == "POST":
                     owner.remove_manager(ident[2:])
                     return self._json(200, {"ok": True})
@@ -425,7 +431,19 @@ class Peer:
         return self.get()
 
     def hello(self):
-        return {"app": "monitorbox", "name": self.name(), "version": self.version()}
+        return {"app": "monitorbox", "name": self.name(), "version": self.version(), "nameSet": bool(self._cfg()["name"])}
+
+    def set_name_if_unset(self, name):
+        """A main box that manages this one offers it a name, and only if it has none of its own: a name the owner chose here is never changed from outside."""
+        name = str(name or "").strip()[:60]
+        c = self._cfg()
+        if c["name"]:
+            return {"ok": False, "error": "this site already has a name"}
+        if not name:
+            return {"ok": False, "error": "no name given"}
+        c["name"] = name
+        self._write(c)
+        return {"ok": True, "name": name}
 
     def forward(self, h, method, rest, n):
         """Pass a managing box's request to this box's own API, as if its owner were signed in. Streams both ways."""
@@ -534,6 +552,20 @@ class Peer:
         self._changed()
         return self.get()
 
+    def name_remote(self, sid):
+        """Offer a managed site that has no name of its own the name this box calls it. The site accepts only while it has none."""
+        s = self._site(sid)
+        try:
+            st, j = call_json(s["address"], "m:" + s["mid"], bytes.fromhex(s["key"]), "POST", "/peer/set-name", {"name": s.get("name")}, who=s.get("name") or "That site")
+        except PeerError as e:
+            raise Invalid(str(e))
+        if st == 404:
+            raise Invalid("That site runs an older MonitorBox that cannot take a name from here. Update it, or name it on that box under Settings, Sites.")
+        if st != 200 or not isinstance(j, dict) or not j.get("ok"):
+            raise Invalid("That site did not take the name" + (f" ({j['error']})" if isinstance(j, dict) and j.get("error") else "") + ".")
+        self._note(sid, "linked", "", nameSet=True)
+        return self.get()
+
     def open_udp(self, sid, remote_sid, pipe):
         """Join the live view `remote_sid` on a managed site: the pipe then carries its media. Runs until either side closes."""
         s = self._site(sid)
@@ -561,7 +593,7 @@ class Peer:
             old = self.links.get(sid) or {}
             self.links[sid] = {"state": state, "error": error, "lastSeen": self.clock() if state == "linked" else old.get("lastSeen"),
                                "version": extra.get("version", old.get("version")), "banner": extra.get("banner", old.get("banner")),
-                               "attention": extra.get("attention", old.get("attention"))}
+                               "attention": extra.get("attention", old.get("attention")), "nameSet": extra.get("nameSet", old.get("nameSet"))}
 
     def poll_once(self):
         for s in self._cfg()["sites"]:
@@ -575,7 +607,8 @@ class Peer:
                 st, snap = call_json(s["address"], "m:" + s["mid"], key, "GET", "/peer/api/status", timeout=8, who=who,
                                        headers={"X-MB-Name": urllib.parse.quote(self.name())})
                 snap = snap if st == 200 and isinstance(snap, dict) else {}
-                self._note(s["id"], "linked", "", version=hello.get("version"), banner=snap.get("banner"), attention=len(snap.get("attention") or []))
+                self._note(s["id"], "linked", "", version=hello.get("version"), banner=snap.get("banner"), attention=len(snap.get("attention") or []),
+                           nameSet=hello.get("nameSet"))
             except PeerError as e:
                 self._note(s["id"], e.kind, str(e))
             except Exception as e:

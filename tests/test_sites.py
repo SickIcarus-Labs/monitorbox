@@ -108,6 +108,25 @@ class Sites(unittest.TestCase):
             main.app.peer.poll_once(); time.sleep(0.3)
         self.assertNotEqual(main.get("/api/sites")["sites"][0]["link"]["state"], "linked")
 
+    def test_a_site_without_a_name_is_offered_one_and_a_chosen_name_is_never_changed(self):
+        main, tb, tport, code, _ = self.pair()
+        main.app.peer.poll_once()
+        self.assertTrue(main.get("/api/sites")["sites"][0]["link"]["nameSet"])
+        # the owner of the site clears its name
+        cfg = os.path.join(tb.root, "config", "sites.json")
+        c = json.load(open(cfg)); c["name"] = ""; json.dump(c, open(cfg, "w"))
+        main.app.peer.poll_once()
+        self.assertIs(main.get("/api/sites")["sites"][0]["link"]["nameSet"], False)
+        sc, out = main.post("/api/sites/remote-name", {"id": "tidewater"})
+        self.assertEqual(sc, 200, out)
+        self.assertEqual(tb.get("/api/sites")["name"], "Tidewater")
+        self.assertTrue(main.get("/api/sites")["sites"][0]["link"]["nameSet"])
+        # the site now has its own name; a second offer under another name changes nothing
+        main.post("/api/sites/rename", {"id": "tidewater", "name": "Other Name"})
+        sc, out = main.post("/api/sites/remote-name", {"id": "tidewater"})
+        self.assertEqual(sc, 400, out)
+        self.assertEqual(tb.get("/api/sites")["name"], "Tidewater")
+
     def test_removing_a_manager_cuts_it_off_and_a_dead_site_is_unknown_not_failed(self):
         main, tb, tport, code, _ = self.pair()
         mid = tb.get("/api/sites")["managers"][0]["id"]

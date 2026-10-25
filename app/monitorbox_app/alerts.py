@@ -51,6 +51,15 @@ def _iso(t):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
+def _clock(iso):
+    """Just the time of day, in this box's time zone, such as '1:36 PM CDT' (for a phone notification, which already shows the date)."""
+    try:
+        t = time.localtime(calendar.timegm(time.strptime(str(iso), "%Y-%m-%dT%H:%M:%SZ")))
+    except (ValueError, OverflowError):
+        return ""
+    return f"{t.tm_hour % 12 or 12}:{t.tm_min:02d} {'AM' if t.tm_hour < 12 else 'PM'} {time.strftime('%Z', t)}"
+
+
 def _local(iso):
     """An event's UTC time (as sent to Home Assistant) in words, in this box's own time zone, such as 'Oct 25 at 1:36 PM CDT'. Unreadable text is left as it is."""
     try:
@@ -522,13 +531,13 @@ class Alerts:
             title = f"{site}: {n} things went down at once"
             msg, state = f"{n} things went down within a minute of each other, so they are probably one cause: {shown}.", "failed"
         return {"source": "monitorbox", "event": kind, "site": site, "id": "storm", "name": f"{n} things", "group": "", "state": state, "critical": True,
-                "detail": "", "title": title, "message": msg, "at": _iso(now), "count": n}
+                "detail": "", "title": title, "message": msg, "at": _iso(now), "atLocal": _local(_iso(now)), "count": n}
 
     def _flap_event(self, site, a, now):
         name = a["name"]
         return {"source": "monitorbox", "event": "problem", "site": site, "id": a["id"], "name": name, "group": a.get("group", ""), "state": a["state"], "critical": bool(a.get("critical")),
                 "detail": a.get("detail", ""), "title": f"{site}: {name} keeps going down and coming back",
-                "message": f"{name} has gone down {FLAP_COUNT} times in {FLAP_WINDOW // 60} minutes. No more messages until it has been steady for {FLAP_QUIET // 60} minutes.", "at": _iso(now), "flapping": True}
+                "message": f"{name} has gone down {FLAP_COUNT} times in {FLAP_WINDOW // 60} minutes. No more messages until it has been steady for {FLAP_QUIET // 60} minutes.", "at": _iso(now), "atLocal": _local(_iso(now)), "flapping": True}
 
     def _event(self, kind, site, a, now, urgent=None, steady=False):
         name, st = a["name"], a["state"]
@@ -544,7 +553,7 @@ class Alerts:
             msg += " Also affected: " + ", ".join(a["affects"][:5]) + "."
         return {"source": "monitorbox", "event": kind, "site": site, "id": a["id"], "name": name, "group": a.get("group", ""),
                 "state": st, "critical": bool(a.get("critical")), "detail": a.get("detail", ""),
-                "title": f"{site}: {name} {verb}", "message": msg, "at": _iso(now), **({"urgent": True} if urgent else {})}
+                "title": f"{site}: {name} {verb}", "message": msg, "at": _iso(now), "atLocal": _local(_iso(now)), **({"urgent": True} if urgent else {})}
 
     # -- delivery ----------------------------------------------------------
     @staticmethod
@@ -552,7 +561,8 @@ class Alerts:
         data = {"tag": "monitorbox-" + str(ev["id"])}               # the "back" message replaces the "down" one on the phone
         if ev["event"] == "problem" and (ev["state"] == "failed" or ev.get("urgent")):
             data.update({"push": {"interruption-level": "time-sensitive"}, "ttl": 0, "priority": "high"})
-        return {"title": ev["title"], "message": ev["message"], "data": data}
+        when = _clock(ev.get("at"))
+        return {"title": ev["title"], "message": ev["message"] + (f" ({when} at {ev['site']})" if when else ""), "data": data}
 
     def _send_ha(self, c, ev, done):
         """Send to every ticked device not already done. Returns None, or a plain reason naming what failed."""
@@ -627,7 +637,7 @@ class Alerts:
         now = self.clock()
         site = self._site(c["site"])
         ev = {"source": "monitorbox", "event": "test", "site": site, "id": "test", "name": "Test", "group": "", "state": "healthy",
-              "critical": False, "detail": "", "title": f"{site}: test alert", "message": "This is a test alert from MonitorBox.", "at": _iso(now)}
+              "critical": False, "detail": "", "title": f"{site}: test alert", "message": "This is a test alert from MonitorBox.", "at": _iso(now), "atLocal": _local(_iso(now))}
         ok, parts, why = True, [], []
         if self._ha_ready(c):
             if self._connected(c):
