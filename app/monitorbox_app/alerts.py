@@ -25,7 +25,7 @@ Everything secret (the refresh or long-lived token, the webhook address) lives i
 the signed-in owner only where the owner needs it (the webhook address, so a typo can be found; tokens never), and is never
 written to a log or an error message.
 """
-import json, os, secrets, socket, threading, time, urllib.error, urllib.request
+import calendar, json, os, secrets, socket, threading, time, urllib.error, urllib.request
 from urllib.parse import urlparse
 
 from . import engine, ha, mailer
@@ -49,6 +49,15 @@ class Invalid(ValueError):
 
 def _iso(t):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def _local(iso):
+    """An event's UTC time (as sent to Home Assistant) in words, in this box's own time zone, such as 'Oct 25 at 1:36 PM CDT'. Unreadable text is left as it is."""
+    try:
+        t = time.localtime(calendar.timegm(time.strptime(str(iso), "%Y-%m-%dT%H:%M:%SZ")))
+    except (ValueError, OverflowError):
+        return str(iso)
+    return f"{time.strftime('%b', t)} {t.tm_mday} at {t.tm_hour % 12 or 12}:{t.tm_min:02d} {'AM' if t.tm_hour < 12 else 'PM'} {time.strftime('%Z', t)}"
 
 
 def post_json(url, payload, timeout=8.0):
@@ -567,7 +576,7 @@ class Alerts:
 
     def _send_email(self, c, ev):
         e = c["email"]
-        body = ev["message"] + f"\n\nSite: {ev['site']}\nTime: {ev['at']}\n"
+        body = ev["message"] + f"\n\nSite: {ev['site']}\nTime: {_local(ev['at'])}\n"
         return mailer.send(e, ev["title"], body)
 
     def _deliver(self, c, item):
