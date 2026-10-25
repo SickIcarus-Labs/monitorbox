@@ -1331,6 +1331,10 @@ class App:
         f["_cameraIps"], f["_cameraMacs"], f["_cameraNames"] = sorted(ips), sorted(macs), sorted(self.camera_names())
         f["_makers"] = (self.last_map or {}).get("makers") or {}
         f["_iotIps"] = (self.last_map or {}).get("iotIps") or []
+        conns = [c for c in monconfig.load_config(self.paths).get("connections", []) if isinstance(c, dict) and c.get("module") == "unifi-network"]
+        gw = {h for h in (followups.host_of(c) for c in conns) if h}                # the UniFi login's own address is the gateway's LAN address
+        f["_infraIps"] = sorted(set((self.last_map or {}).get("infraIps") or []) | gw)
+        f["_infraMacs"] = (self.last_map or {}).get("infraMacs") or []
         return f
 
     def busiest_filter(self):

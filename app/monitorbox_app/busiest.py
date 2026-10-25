@@ -88,15 +88,16 @@ def endpoints(m):
     return out
 
 
-def flow_endpoints(rows, eps, seconds):
+def flow_endpoints(rows, eps, seconds, infra_ips=(), infra_macs=()):
     """Devices the switch ports cannot see (wifi clients, and anything else that is not on a port with readings), from the gateway's flow log: [{id, name, where, node: None,
     port: None, keys: [], flow: (down_bps, up_bps)}]. `rows` is the log boiled down (module unifi-network `flows`); a device already on a wired port is left to its port."""
     wired = {m for e in eps for m in e.get("macs", [])}
+    skip_ips, skip_macs = {str(i) for i in infra_ips}, {str(m)[-8:].lower() for m in infra_macs}      # the network's own gear (gateway, switches, access points) is never a "client"
     by = {}
     for r in rows:
         for mac, name, down, up, ip in ((r.get("src_mac"), r.get("src_name"), r.get("down", 0), r.get("up", 0), r.get("src_ip")),
                                         (r.get("dst_mac"), r.get("dst_name"), r.get("up", 0), r.get("down", 0), r.get("dst_ip")) if r.get("direction") == "local" else (None, None, 0, 0, None)):
-            if not mac or mac in wired:
+            if not mac or mac in wired or ip in skip_ips or str(mac)[-8:].lower() in skip_macs:
                 continue
             e = by.setdefault(mac, {"id": "flow|" + mac, "name": name or "unnamed device", "where": "seen by the gateway", "node": None, "port": None, "keys": [], "mac": mac, "ips": [], "flow": [0, 0]})
             if ip and ip not in e["ips"]:
@@ -140,7 +141,7 @@ class Busiest:
         floor = float(opts.get("floorMbps") or FLOOR_BPS / 1e6) * 1e6
         keep = floor / 2
         eps = endpoints(m)
-        eps += flow_endpoints(flows or [], eps, WINDOW)          # found before filtering, so a hidden wired device is not rediscovered as a wifi one
+        eps += flow_endpoints(flows or [], eps, WINDOW, opts.get("_infraIps") or (), opts.get("_infraMacs") or ())          # found before filtering, so a hidden wired device is not rediscovered as a wifi one
         eps = [e for e in eps if allowed(e, opts)]
         rates = self._rates(eps, now)
         act = {i: r[0] + r[1] for i, r in rates.items()}

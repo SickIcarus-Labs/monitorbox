@@ -204,6 +204,15 @@ class Filters(Leader):
         self.assertEqual(self.go({"wired": False}, [self.PHONE]), "Phone-Six", "wifi only")
         self.assertIsNone(self.go({"wired": False, "wifi": False}, [self.PHONE]), "nothing allowed: nobody is crowned")
 
+    def test_the_gateway_and_other_network_gear_are_never_the_busiest_client(self):
+        """Regression: the card crowned '192.168.3.1', the gateway itself, which shows in its own flow log."""
+        gw = {"src_mac": "..:aa:aa:aa", "src_name": "", "src_ip": "192.0.2.254", "dst_mac": "", "dst_name": "cdn.example.test", "direction": "outgoing", "down": 9_000_000_000, "up": 0}
+        quiet = {A: (1_000, 1_000), N: (1_000, 1_000), T: (1_000, 1_000)}
+        self.assertEqual(self.go({}, [gw], rates=quiet), "unnamed device", "without knowing the gear it looks like a wifi client")
+        self.assertIsNone(self.go({"_infraIps": ["192.0.2.254"]}, [gw], rates=quiet), "known by its address")
+        self.assertIsNone(self.go({"_infraMacs": ["aa:bb:cc:aa:aa:aa"]}, [gw], rates=quiet), "known by its hardware address, in any notation")
+        self.assertEqual(self.go({"_infraIps": ["192.0.2.254"]}, [gw, self.PHONE], rates=quiet), "Phone-Six", "a real client still takes the card")
+
     def test_servers_can_be_left_out_with_one_tick(self):
         busy_nas = {A: (1_000_000, 2_000_000), N: (9_000_000, 9_000_000), T: (100_000, 100_000)}
         self.assertEqual(self.go({}, rates=busy_nas), "Server-Nas")
