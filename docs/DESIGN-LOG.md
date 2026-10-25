@@ -1106,7 +1106,7 @@ With a far site's tab open, Settings, Updates drew the channel dropdown (and the
 ## 0.83.6: the built-in repository has no tick box; the page header follows the site tab
 
 - The built-in repository's tick box looked tickable (a lighter blue) although it cannot be switched off. It is now left out of that row entirely; the row says "built in".
-- The line under the Settings page titles ("MonitorBox 0.83.5 · channel dev") read the main box's own state, so it showed Broad Leaf's version and channel under every site's tab. It now reads the Updates view, like the channel drop-down (0.83.5). Tests: `tests/test_repos_browser.py` and `tests/test_sites.py`.
+- The line under the Settings page titles ("MonitorBox 0.83.5 · channel dev") read the main box's own state, so it showed the main box's version and channel under every site's tab. It now reads the Updates view, like the channel drop-down (0.83.5). Tests: `tests/test_repos_browser.py` and `tests/test_sites.py`.
 
 ## 0.83.7: the box says when its container image needs re-pulling
 
