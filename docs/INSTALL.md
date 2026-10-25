@@ -89,7 +89,7 @@ The one line to check is `/Containers/monitorbox:/config`. Change the part befor
 
 ## First start
 
-Open `http://<your-machine>:8080` (or the port you chose). The first start downloads the app, which takes a few seconds. MonitorBox asks you to choose a password and which updates to follow (Stable is the default), then walks you through adding what to watch.
+Open `http://<your-machine>:8080` (or the port you chose). The first start downloads the app, which takes a few seconds. **Do this straight away: until you choose a password, anyone who can reach the page can.** MonitorBox asks you to choose a password and which updates to follow (Stable is the default), then walks you through adding what to watch.
 
 ## Updating
 

@@ -17,7 +17,12 @@ If you do want it reachable from outside:
 - Too many wrong passwords from one address lock that address out for a while, and the pause grows. A burst of wrong attempts from many addresses through the proxy pauses outside sign-in for a few minutes; people at home are not affected.
 - Each device that signs in gets its own random key. The box stores only a hash of it.
 - Passkey sign-in is supported.
+- Inside the container MonitorBox runs as root, but with every capability dropped except the one ping needs (NET_RAW), a read-only filesystem and no-new-privileges.
 - MonitorBox is **read-only** towards what it watches: it does not mount the Docker socket, does not control anything, and does not log in to your systems to run commands. The one thing it can send is a Wake-on-LAN packet, when you tap the button.
+
+## Where updates come from
+
+The app and its modules are downloaded from the `monitorbox-modules` repository on GitHub and run inside the container, where they can see the passwords and tokens you give them. Each download is checked against a SHA-256 fingerprint, which catches a damaged download; it does not prove who published it, because the fingerprint is published next to the file. You are trusting that repository, and any repository you add on the Updates page. This is why automatic updating is **off** by default: you choose when to update. Only add repositories you trust.
 
 ## The site port (several sites)
 
