@@ -134,4 +134,6 @@ def build(sources):
         nodes.append(node)
     nodes.sort(key=lambda n: (n["kind"] != "gateway", n["name"].lower()))
     iot = sorted({c["ip"] for c in clients if c.get("ip") and is_iot(c)})
-    return {"iotIps": iot, "makers": {c["ip"]: c["oui"] for c in clients if c.get("ip") and c.get("oui")}, "nodes": nodes, "counts": {"devices": len(devices), "wired": len(wired), "wifi": len(clients) - len(wired)}, "notes": notes}
+    infra_ips = sorted({d["ip"] for d in devices if d.get("ip")})
+    infra_macs = sorted({d["mac"] for d in devices if d.get("mac") not in (None, "", "?")})
+    return {"infraIps": infra_ips, "infraMacs": infra_macs, "iotIps": iot, "makers": {c["ip"]: c["oui"] for c in clients if c.get("ip") and c.get("oui")}, "nodes": nodes, "counts": {"devices": len(devices), "wired": len(wired), "wifi": len(clients) - len(wired)}, "notes": notes}
