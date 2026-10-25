@@ -24,7 +24,7 @@ The whole screen is the answer. **Green** means everything is fine. **Yellow** m
 - **Modular and expandable.** Integrations install, update and remove on their own, and there is a framework for third-party repositories and plugins, so anyone can contribute new functionality.
 - **Updates itself** if you want it to, with channels (stable, beta, dev), pinning and one-tap rollback. It tells you when the container image itself needs pulling.
 - **Backup and restore that works.** Automatic backups, and a restore proven by an automated test that gives every setting a different value and compares each one afterwards.
-- **Read-only.** MonitorBox never controls anything you have not asked it to: no Docker socket, no remote control, no logging in to your systems. It asks your devices questions and never changes them. The one thing it can send is a Wake-on-LAN packet, and only when you tap the button. Your UPS data is read, never used to shut anything down.
+- **Read-only.** MonitorBox never controls anything you have not asked it to: no Docker socket, no remote control, no logging in to run commands. It signs in only with the read-only accounts you give it (UniFi, Portainer and so on), asks your devices questions and never changes them. The one thing it can send is a Wake-on-LAN packet, and only when you tap the button. Your UPS data is read, never used to shut anything down.
 
 ## Install
 
