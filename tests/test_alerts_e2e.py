@@ -63,6 +63,17 @@ class AlertsE2E(unittest.TestCase):
         mode = os.stat(os.path.join(self.cfg, "config", "alerts.json")).st_mode & 0o777
         self.assertEqual(oct(mode), "0o600")
 
+    def test_alerts_use_the_name_given_to_this_site_not_the_computer_name(self):
+        """Regression: alerts said "Apollo" (the computer's name) while the tabs said the site name set in Settings, Sites."""
+        rx = Receiver(); self.addCleanup(rx.close)
+        c = self.start()
+        c.post("/api/sites/name", {"name": "Distinct site name 73"})
+        self.assertEqual(c.get("/api/alerts")["siteDefault"], "Distinct site name 73")
+        hook = f"http://127.0.0.1:{rx.port}/api/webhook/fake-e2e-hook-73"
+        c.post("/api/alerts", {"enabled": True, "site": "", "delaySeconds": 0, "homeAssistant": {"webhook": hook}})
+        self.assertTrue(c.post("/api/alerts/test", {})["ok"])
+        self.assertEqual(rx.got[0][1]["title"], "Distinct site name 73: test alert")
+
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_alerts_are_set_up_in_settings_and_the_test_button_says_what_happened(self):
         rx = Receiver(); self.addCleanup(rx.close)
