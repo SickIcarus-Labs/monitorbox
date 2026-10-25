@@ -6,6 +6,10 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+_Nothing yet._
+
+## 0.83.11 to 0.83.17 (stable, October 25)
+
 - **0.83.17** Busiest client: the gateway, switches and access points are never crowned (the gateway could show up as the "busiest client" because it appears in its own flow log).
 - **0.83.16** Tapping a traffic graph: a big download the gateway has not named yet (a game download, for example) is now listed as internet traffic instead of "not matched yet".
 - **0.83.15** Alerts: choose what sends an alert. Tick Down, Degraded, Unknown and Restored. Unknown is off unless you turn it on. A UPS running on battery always alerts.
@@ -14,7 +18,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 - **0.83.12** Alerts use the site name set under Settings, Sites, not the computer's name.
 - **0.83.11** Busiest client: cameras are recognised by hardware address and name, so the Cameras tick works; links between switches are never crowned.
 
-## 0.83.10 (stable)
+## 0.83.10
 
 - Traffic graphs no longer show spikes and gaps for devices that only refresh their counters every few seconds.
 
