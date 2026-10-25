@@ -1176,9 +1176,14 @@ class App:
         seen = self.flow_entries(self.flow_rows(win)["rows"], win, row.get("ips") or [], row.get("macs") or [])
         out["flows"] += seen
         mine = [x for x in self.gateway_usage(win)["clients"] if x["id"] in (row.get("macs") or [])]
-        if mine and not any(f["scope"] == "internet" for f in seen):      # the flow log named no destinations: give the gateway's total instead
-            out["flows"].append({"scope": "internet", "label": "the internet and other networks",
-                                 "down_bps": sum(x["down_bps"] for x in mine), "up_bps": sum(x["up_bps"] for x in mine)})
+        if mine:        # the gateway counts every byte this device sent or got through it; its flow log lags behind a long download and may name only the small flows
+            named = [f for f in seen if f["scope"] == "internet"]
+            d, u = (max(0, sum(x[k] for x in mine) - sum(f[k] for f in named)) for k in ("down_bps", "up_bps"))
+            big = lambda left, whole: left >= 100_000 and left >= 0.1 * whole
+            whole_d, whole_u = sum(x["down_bps"] for x in mine), sum(x["up_bps"] for x in mine)
+            if not named or big(d, whole_d) or big(u, whole_u):
+                out["flows"].append({"scope": "internet", "label": "the internet and other networks" if not named else "more internet traffic (the gateway has not named where yet)",
+                                     "down_bps": d if named else whole_d, "up_bps": u if named else whole_u})
         out["flows"] += self.unmatched(peers.get("total"), out["flows"])
         out["history"] = peers.get("history", 0)
         young = 0 < out["history"] < 0.9 * win                  # the box has not been reading long enough to fill the window: a gap may only mean it has not learned yet
