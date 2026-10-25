@@ -57,6 +57,59 @@ class Rates(unittest.TestCase):
         self.assertEqual(g.points, {})
 
 
+class StaleCounters(unittest.TestCase):
+    """Regression: a device that refreshes its counters every few seconds (Linux net-snmp) while we read every second drew zeros
+    with tall false spikes for a steady transfer. The rate is now worked out between the moments the counters moved."""
+    BYTES_PER_SECOND = 125_000          # 1 Mbit/s, steady
+
+    def run_device(self, seconds, refresh, stop_at=None):
+        clock = Clock()
+        t0 = clock.t
+        state = {"n": 0}
+
+        def sample(cid, names):
+            elapsed = clock.t - t0
+            if stop_at is not None:
+                elapsed = min(elapsed, stop_at)
+            shown = (int(elapsed) // refresh) * refresh          # the device only updates its counters every `refresh` seconds
+            v = int(shown * self.BYTES_PER_SECOND)
+            return {n: {"in": v, "out": v // 10, "bits": 64} for n in names}
+
+        saved = G.clean_list(GOOD, lambda c: True)
+        g = G.Graphs(lambda: saved, sample, clock)
+        for _ in range(seconds):
+            g.tick()
+            clock.t += 1
+        return g.data()["graphs"][0]["points"]
+
+    def test_a_steady_transfer_is_flat_even_when_the_device_refreshes_every_four_seconds(self):
+        pts = self.run_device(30, refresh=4)
+        self.assertTrue(pts)
+        for t, rin, rout in pts[:-3]:                     # the last few seconds are still waiting for the next refresh
+            self.assertAlmostEqual(rin, 1_000_000, delta=10_000, msg=f"in at {t}")
+            self.assertAlmostEqual(rout, 100_000, delta=1_000, msg=f"out at {t}")
+        self.assertLess(max(p[1] for p in pts), 1_100_000, "no spike above the real rate")
+
+    def test_a_device_that_updates_every_second_is_unchanged(self):
+        pts = self.run_device(10, refresh=1)
+        self.assertEqual({p[1] for p in pts}, {1_000_000})
+
+    def test_when_the_traffic_really_stops_the_graph_drops_to_zero_after_a_few_seconds(self):
+        pts = self.run_device(40, refresh=4, stop_at=12)
+        self.assertEqual(pts[-1][1], 0)
+        self.assertAlmostEqual(pts[5][1], 1_000_000, delta=10_000)
+
+    def test_a_link_with_no_traffic_at_all_reads_zero_not_nothing(self):
+        clock = Clock()
+        saved = G.clean_list(GOOD, lambda c: True)
+        g = G.Graphs(lambda: saved, lambda cid, names: {n: {"in": 7, "out": 7, "bits": 64} for n in names}, clock)
+        for _ in range(12):
+            g.tick(); clock.t += 1
+        pts = g.data()["graphs"][0]["points"]
+        self.assertTrue(pts)
+        self.assertEqual({(p[1], p[2]) for p in pts}, {(0, 0)})
+
+
 class Validation(unittest.TestCase):
     def test_ids_are_made_and_made_unique(self):
         out = G.clean_list(GOOD + GOOD, lambda c: True)

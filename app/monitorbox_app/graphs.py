@@ -8,6 +8,7 @@ from collections import deque
 MAX_GRAPHS = 12
 KEEP_SECONDS = 3600
 FAST, SLOW, WATCHING_FOR = 1.0, 10.0, 15.0
+STALE = 6.0              # seconds the counters may stand still before the link counts as idle
 _ID = re.compile(r"[^a-z0-9]+")
 
 
@@ -111,6 +112,7 @@ class Graphs:
         self.load, self.sample, self.clock = load, sample, clock
         self.lock = threading.Lock()
         self.last = {}          # graph id -> (time, in, out, bits) of the previous reading
+        self.anchor = {}        # graph id -> (time, in, out) of the last reading whose counters had moved (see _rate)
         self.points = {}        # graph id -> deque of [time, in_bps, out_bps]
         self.errors = {}        # graph id -> why there is no reading
         self.speed = {}         # graph id -> the link's rated speed in Mbit/s, when the device says
@@ -153,29 +155,56 @@ class Graphs:
                 prev = self.last.get(g["id"])
                 self.last[g["id"]] = (now, r["in"], r["out"], r["bits"])
                 if not prev or now <= prev[0] or prev[3] != r["bits"]:
+                    self.anchor[g["id"]] = (now, r["in"], r["out"])
                     continue
-                span = now - prev[0]
-                rates = []
-                for cur, old in ((r["in"], prev[1]), (r["out"], prev[2])):
-                    d = cur - old
-                    if d < 0 and r["bits"] == 32 and old > 1 << 31:
-                        d += 1 << 32           # a 32-bit counter rolled over
-                    rates.append(d)
-                if min(rates) < 0:             # the device restarted its counters: skip this one
-                    continue
-                rin, rout = rates
-                with self.lock:
-                    q = self.points.setdefault(g["id"], deque())
-                    q.append([round(now, 2), round(rin * 8 / span), round(rout * 8 / span)])
-                    while q and q[0][0] < now - KEEP_SECONDS:
-                        q.popleft()
+                self._rate(g["id"], now, r)
         keep = {g["id"] for g in graphs}
         with self.lock:
             for k in [k for k in self.points if k not in keep]:
                 del self.points[k]
-        for d in (self.last, self.errors, self.speed):
+        for d in (self.last, self.anchor, self.errors, self.speed):
             for k in [k for k in d if k not in keep]:
                 del d[k]
+
+    def _rate(self, gid, now, r):
+        """Turn one reading into a point.
+
+        Some devices (Linux net-snmp, for one) only refresh their counters every few seconds, so most one-second readings
+        repeat the last numbers and the one after a refresh holds several seconds of traffic. Dividing that by one second
+        draws zeros with tall false spikes. So the rate is worked out between the moments the counters actually moved,
+        and the one-second points in between are filled in with that average. While the counters have not moved yet the
+        last known rate is held, and after a few seconds without movement the link counts as idle."""
+        at, a_in, a_out = self.anchor.get(gid, (None, r["in"], r["out"]))
+        if at is None or now <= at:
+            self.anchor[gid] = (now, r["in"], r["out"])
+            return
+        with self.lock:
+            q = self.points.setdefault(gid, deque())
+            if (r["in"], r["out"]) == (a_in, a_out):                  # nothing moved since the last change
+                if q and now - at <= max(STALE, 2 * self.interval()):
+                    q.append([round(now, 2), q[-1][1], q[-1][2]])    # hold the last known rate
+                else:
+                    q.append([round(now, 2), 0, 0])                  # quiet for a while: idle
+                return
+        span = now - at
+        rates = []
+        for cur, old in ((r["in"], a_in), (r["out"], a_out)):
+            d = cur - old
+            if d < 0 and r["bits"] == 32 and old > 1 << 31:
+                d += 1 << 32           # a 32-bit counter rolled over
+            rates.append(d)
+        self.anchor[gid] = (now, r["in"], r["out"])
+        if min(rates) < 0:             # the device restarted its counters: skip this one
+            return
+        rin, rout = round(rates[0] * 8 / span), round(rates[1] * 8 / span)
+        with self.lock:
+            q = self.points.setdefault(gid, deque())
+            for p in q:                # the held points since the last change become the real average
+                if at < p[0] < now:
+                    p[1], p[2] = rin, rout
+            q.append([round(now, 2), rin, rout])
+            while q and q[0][0] < now - KEEP_SECONDS:
+                q.popleft()
 
     def data(self, seconds=300):
         seconds = max(10, min(int(seconds), KEEP_SECONDS))
