@@ -33,7 +33,7 @@ def allowed(e, f):
     if wired and e.get("server") and not f.get("servers", True):
         return False
     ips = {str(i).lower() for i in (e.get("ips") or [e.get("ip")]) if i}
-    if ips & set(f.get("_cameraIps") or ()) and not f.get("cameras", True):
+    if not f.get("cameras", True) and is_camera(e, ips, f):
         return False
     if ips & set(f.get("_iotIps") or ()) and not f.get("iot", True):
         return False
@@ -44,6 +44,17 @@ def allowed(e, f):
         if (x.get("id") and x["id"] == e.get("id")) or (x.get("mac") and norm_mac(x["mac"]) in macs):
             return False
     return True
+
+
+def is_camera(e, ips, f):
+    """Whether this device is one of the cameras the camera sources know: by address, by the last three pairs of its MAC address (all the map keeps), or by name."""
+    if ips & {str(i).lower() for i in f.get("_cameraIps") or ()}:
+        return True
+    tails = {norm_mac(m)[-6:] for m in (e.get("macs") or [e.get("mac")]) if m and len(norm_mac(m)) >= 6}
+    if tails & {norm_mac(m)[-6:] for m in f.get("_cameraMacs") or () if len(norm_mac(m)) >= 6}:
+        return True
+    name = str(e.get("name") or "").strip().lower()
+    return bool(name) and name in {str(n).strip().lower() for n in f.get("_cameraNames") or () if n}
 
 
 def blocked(e, ips, f):
@@ -71,7 +82,7 @@ def endpoints(m):
     out = []
     for n in (m or {}).get("nodes", []):
         for p in n.get("ports", []):
-            if p.get("keys"):
+            if p.get("keys") and not p.get("infra"):          # a port that leads to another switch carries everyone behind it: never one client
                 out.append({"id": f"{n['id']}|{p['port']}", "name": p.get("name") or "nothing named", "where": f"{n['name']} port {p['port']}",
                             "node": n["id"], "port": p["port"], "keys": [tuple(k) for k in p["keys"]], "macs": list(p.get("macs") or []), "ips": list(p.get("ips") or []), "server": bool(p.get("server"))})
     return out

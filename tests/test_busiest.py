@@ -218,6 +218,22 @@ class Filters(Leader):
             self.assertEqual(self.go({ips: ["10.0.9.9"]}, [cam]), "Phone-Six", f"{key} ticked: the list changes nothing")
         self.assertEqual(self.go({"cameras": False, "_iotIps": ["10.0.9.9"]}, [cam]), "Phone-Six", "the two lists are not mixed up")
 
+    def test_a_camera_is_found_by_its_mac_or_its_name_when_its_address_does_not_match(self):
+        """Regression (#289): the Cameras tick only knew a camera's address, so a camera listed under another address, a name, or only by MAC took the card."""
+        cam = {"id": "x|1", "name": "Porch Cam", "ips": ["10.0.9.50"], "macs": ["..:dd:ee:ff"], "node": "sw", "port": "1"}
+        off = {"cameras": False}
+        self.assertFalse(B.allowed(cam, {**off, "_cameraIps": ["10.0.9.99"], "_cameraMacs": ["a1b2c3ddeeff"]}), "by the last three pairs of its MAC")
+        self.assertFalse(B.allowed(cam, {**off, "_cameraNames": ["porch cam"]}), "by name, capitals ignored")
+        self.assertFalse(B.allowed(cam, {**off, "_cameraIps": ["10.0.9.50"]}), "by address, as before")
+        self.assertTrue(B.allowed(cam, {**off, "_cameraIps": ["10.0.9.99"], "_cameraMacs": ["a1b2c3ddee00"], "_cameraNames": ["back door"]}), "a different camera does not hide it")
+        self.assertTrue(B.allowed(cam, {"_cameraNames": ["porch cam"]}), "Cameras ticked: nothing is hidden")
+
+    def test_a_port_that_leads_to_another_switch_is_never_a_client(self):
+        m = {"nodes": [{"id": "sw", "name": "Switch-A", "ports": [
+            {"port": "1", "name": "Aggregation", "keys": [["sw", "Port 1"]], "infra": True, "macs": [], "ips": []},
+            {"port": "2", "name": "Desk-PC", "keys": [["sw", "Port 2"]], "macs": [], "ips": []}]}]}
+        self.assertEqual([e["name"] for e in B.endpoints(m)], ["Desk-PC"])
+
     def test_the_hide_list_matches_name_mac_or_maker_and_can_be_switched_off(self):
         ph = {**self.PHONE, "src_ip": "10.0.9.9"}
         mk = {"_makers": {"10.0.9.9": "Fake Maker Co"}}

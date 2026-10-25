@@ -937,22 +937,35 @@ class App:
             stop.wait(20)
 
     def camera_ids(self):
-        """(MACs, addresses) of every camera the connected camera sources know, for finding their switch ports. Asked at most every five minutes."""
+        """(MACs, addresses) of every camera the connected camera sources know, for finding their switch ports and for the Busiest client's Cameras tick (their names: camera_names).
+        Asked at most every five minutes; a look that failed or missed a source is not remembered, so the next one tries again."""
         hit = getattr(self, "_cam_ids", None)
         if hit and time.time() - hit[0] < 300:
             return hit[1]
-        macs, ips = set(), set()
+        macs, ips, names, ok = set(), set(), set(), True
+        self._cam_names = set()
         try:
-            for cam in self.cameras().get("cameras", []):
+            got = self.cameras()
+            ok = not got.get("errors")
+            for cam in got.get("cameras", []):
                 m = re.sub(r"[^0-9a-f]", "", str(cam.get("mac") or "").lower())
                 if len(m) == 12:
                     macs.add(m)
                 if cam.get("host"):
                     ips.add(str(cam["host"]).strip().lower())
+                if cam.get("name"):
+                    names.add(str(cam["name"]).strip().lower())
         except Exception:
-            pass
-        self._cam_ids = (time.time(), (macs, ips))
+            ok = False
+        self._cam_names = names
+        if ok:
+            self._cam_ids = (time.time(), (macs, ips))
         return macs, ips
+
+    def camera_names(self):
+        """The names of the cameras the camera sources know (lower case), from the same look as camera_ids."""
+        self.camera_ids()
+        return getattr(self, "_cam_names", set())
 
     def camera_ports(self, by, me, row):
         """The map ports with a camera on them (by MAC, else address), not counting the port being asked about. Needs at least two to be a group."""
@@ -1308,7 +1321,8 @@ class App:
     def busiest_opts(self):
         """The saved filters plus who is a camera and who is on an IoT network (addresses, from the camera sources and the map), so the cameras and IoT ticks can act."""
         f = dict(self.busiest_filter())
-        f["_cameraIps"] = sorted(self.camera_ids()[1])
+        macs, ips = self.camera_ids()
+        f["_cameraIps"], f["_cameraMacs"], f["_cameraNames"] = sorted(ips), sorted(macs), sorted(self.camera_names())
         f["_makers"] = (self.last_map or {}).get("makers") or {}
         f["_iotIps"] = (self.last_map or {}).get("iotIps") or []
         return f

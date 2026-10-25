@@ -73,6 +73,16 @@ class LanMap(unittest.TestCase):
         self.assertEqual(by["3"]["name"], "Mini-Two and 1 more")
         self.assertEqual((by["8"]["name"], by["8"]["server"]), ("Server-Spare", True))
 
+    def test_a_switch_found_over_snmp_is_marked_so_it_is_not_taken_for_a_server(self):
+        r = report()
+        for d in r[0]["report"]["devices"]:
+            if d["name"] == "Rack-C":
+                d["ports"].append(port(9, lastMac="..:cc:dd:ee"))
+        r.append({"connection": "s3", "module": "snmp", "report": {"sysName": "Agg-Switch", "ports": [{"name": "1", "mac": "..:cc:dd:ee", "learned": 12, "lldp": {"name": "Rack-C"}}]}})
+        by = {p["port"]: p for p in {x["id"]: x for x in lanmap.build(r)["nodes"]}["Rack-C"]["ports"]}
+        self.assertEqual((by["9"]["name"], by["9"]["infra"]), ("Agg-Switch", True))
+        self.assertFalse(by["8"]["infra"], "an ordinary server on a port is not marked")
+
     def test_an_access_point_counts_its_wifi_clients_and_a_device_that_is_not_settled_is_degraded(self):
         self.assertEqual(self.n["AP-E"]["wifi"], 2)
         self.assertEqual((self.n["Edge-D"]["state"], self.n["Edge-D"]["stateWord"]), ("degraded", "provisioning"))
