@@ -175,6 +175,22 @@ class Peers(unittest.TestCase):
         self.assertGreater(nas["up_bps"], 0); self.assertLessEqual(nas["up_bps"], sum(send) // len(send) + 1, "never more than the device sent")
         self.assertEqual(r["focus"], "Core-B port 13")
 
+    def test_a_long_download_the_flow_log_has_not_named_yet_is_still_counted_as_internet_not_left_unmatched(self):
+        """Regression: a Steam download of 850 Mbit/s showed as 'not matched yet' because the gateway's flow log listed only small flows."""
+        send = bursts(self.N, 3)
+        self.feed("Core-B", "Port 13", send, [1000] * self.N)
+        self.conns(("tv", "192.0.2.13"))
+        self.graphs({"id": "tv-eth", "title": "TV Eth", "connection": "tv", "interface": "eth0"})
+        self.box.app.gateway_usage = lambda seconds=300: {"seconds": seconds, "total": {}, "notes": [], "clients": [
+            {"id": "..:44:44:44", "name": "TV-Three", "wired": True, "down_bps": 851_000_000, "up_bps": 15_000_000}]}
+        self.box.app.flow_entries = lambda rows, win, ips=(), macs=(): [
+            {"scope": "internet", "label": "cdn.example.invalid", "down_bps": 459_000, "up_bps": 67_000}]
+        r = self.box.get("/api/lan/flows?graph=tv-eth&win=900")
+        more = next(f for f in r["flows"] if f["label"].startswith("more internet traffic"))
+        self.assertEqual((more["scope"], more["down_bps"], more["up_bps"]), ("internet", 851_000_000 - 459_000, 15_000_000 - 67_000))
+        self.assertEqual(r["flows"][0], more, "the big one is listed first")
+        self.assertFalse([f for f in r["flows"] if f["scope"] == "unmatched" and f["down_bps"] > 1_000_000], "the download is not 'unmatched'")
+
     def test_a_graph_of_the_gateway_is_found_by_the_unifi_logins_address_not_only_the_maps_wan_address(self):
         self.box.app.lansampler.stopping.set()                                  # no background map rebuild while this test sets the map by hand
         rev = self.box.get("/api/config/connections")["revision"]
