@@ -47,7 +47,7 @@ def device_ids(devices):
 
 def build(sources):
     """sources: the list the switch report returns ([{"connection","module","report"|"error"}]). Returns {"nodes", "counts", "notes"}."""
-    notes, devices, clients, hosts = [], [], [], {}
+    notes, devices, clients, hosts, switches = [], [], [], {}, set()
     for s in sources or []:
         r = s.get("report")
         if not isinstance(r, dict):
@@ -62,6 +62,8 @@ def build(sources):
             for p in r.get("ports") or []:
                 if p.get("mac"):
                     hosts.setdefault(p["mac"], name)          # a server's own card address -> its name
+            if any(p.get("learned") or p.get("lldp") for p in r.get("ports") or []):
+                switches.add(name.lower())                    # it learns addresses or hears neighbours on its ports: a switch, not a server
     if not devices:
         return {"iotIps": sorted({c["ip"] for c in clients if c.get("ip") and is_iot(c)}), "makers": {}, "nodes": [], "counts": {"devices": 0, "wired": 0, "wifi": 0}, "notes": notes + ["No UniFi devices to map yet. The map is built from a UniFi connection."]}
     # Two devices can share a name (a switch and an access point both called "Living Room"), so everything is tied together by id:
@@ -119,11 +121,13 @@ def build(sources):
                 if not server:
                     server = next((hosts[g["lastMac"]] for g in group if g.get("lastMac") in hosts), None)
                 who = server or (here[0].get("name") or here[0].get("ip") or "unnamed device" if here else "")
+                # a switch on this port (found by its SNMP name, or a client of that name) is a link between switches: everything behind it passes through
+                infra = bool(switches) and (str(server or "").lower() in switches or any(str(c.get("name") or "").lower() in switches for c in here))
                 if len(here) > 1 and not server:
                     who += f" and {len(here) - 1} more"
                 node["ports"].append({"keys": [[me, g.get("name")] for g in sorted(group, key=lambda g: g.get("port_idx") or 0) if g.get("name")],
                                       "port": "+".join(str(g.get("port_idx")) for g in sorted(group, key=lambda g: g.get("port_idx") or 0)), "name": who,
-                                      "server": bool(server), "macs": [c.get("mac") for c in here if c.get("mac")], "ips": [c.get("ip") for c in here if c.get("ip")], "speedMbps": sum(_num(g.get("speed")) for g in group),
+                                      "server": bool(server), "infra": infra, "macs": [c.get("mac") for c in here if c.get("mac")], "ips": [c.get("ip") for c in here if c.get("ip")], "speedMbps": sum(_num(g.get("speed")) for g in group),
                                       "down": sum(_num(g.get("outBps")) for g in group), "up_bps": sum(_num(g.get("inBps")) for g in group),
                                       "errors": sum(_num(g.get("rx_errors")) + _num(g.get("tx_errors")) for g in group),
                                       "drops": sum(_num(g.get("rx_dropped")) + _num(g.get("tx_dropped")) for g in group)})
