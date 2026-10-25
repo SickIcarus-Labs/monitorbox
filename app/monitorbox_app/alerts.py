@@ -37,6 +37,8 @@ MAX_BACKOFF = 300
 DEFAULT_DELAY = 60
 LOOP_EVERY = 2.0
 STATES = ("failed", "degraded")
+TRIGGERS = {"down": True, "degraded": True, "unknown": False, "restored": True}      # what the owner can tick; Unknown is off until asked for
+TRIGGER_STATE = {"down": "failed", "degraded": "degraded", "unknown": "unknown"}
 POWER_GRACE = 600                                       # after a UPS that announced "on battery" is healthy again, the systems it powers get this long to boot before they can alert
 STORM_COUNT, STORM_WINDOW, STORM_HOLD = 3, 60, 300      # this many new problems within this many seconds are one storm; later ones within STORM_HOLD join it
 FLAP_COUNT, FLAP_WINDOW, FLAP_QUIET = 3, 600, 600       # this many times down within this long is flapping; steady this long ends it
@@ -135,7 +137,9 @@ class Alerts:
         email = {"host": str(em.get("host") or ""), "port": port if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536 else 587,
                  "security": em.get("security") if em.get("security") in mailer.SECURITY else "starttls", "user": str(em.get("user") or ""),
                  "password": str(em.get("password") or ""), "from": str(em.get("from") or ""), "to": mailer.addresses(em.get("to"))}
-        return {"email": email, "enabled": bool(c.get("enabled")), "site": str(c.get("site") or "")[:60],
+        tr = c.get("triggers") if isinstance(c.get("triggers"), dict) else {}
+        triggers = {k: (bool(tr[k]) if k in tr else d) for k, d in TRIGGERS.items()}
+        return {"email": email, "triggers": triggers, "enabled": bool(c.get("enabled")), "site": str(c.get("site") or "")[:60],
                 "delaySeconds": d if isinstance(d, int) and not isinstance(d, bool) and 0 <= d <= 3600 else DEFAULT_DELAY,
                 "webhook": str(h.get("webhook") or ""), "url": str(h.get("url") or ""), "origin": str(h.get("origin") or ""),
                 "refresh": str(h.get("refresh") or ""), "token": str(h.get("token") or ""),
@@ -145,7 +149,7 @@ class Alerts:
         write_json(self.cfg_path, {"enabled": c["enabled"], "site": c["site"], "delaySeconds": c["delaySeconds"],
                                    "homeAssistant": {"webhook": c["webhook"], "url": c["url"], "origin": c["origin"], "refresh": c["refresh"],
                                                      "token": c["token"], "devices": c["devices"]},
-                                   "email": c["email"]})
+                                   "email": c["email"], "triggers": c["triggers"]})
 
     @staticmethod
     def _connected(c):
@@ -163,7 +167,7 @@ class Alerts:
         c = self._cfg()
         host = urlparse(c["webhook"]).netloc if c["webhook"] else ""
         with self.lock:
-            return {"enabled": c["enabled"], "site": c["site"], "siteDefault": self._site(""), "delaySeconds": c["delaySeconds"],
+            return {"enabled": c["enabled"], "site": c["site"], "siteDefault": self._site(""), "delaySeconds": c["delaySeconds"], "triggers": c["triggers"],
                     "homeAssistant": {"set": bool(c["webhook"]), "host": host, "webhook": c["webhook"],
                                       "connected": self._connected(c), "url": c["url"], "kind": ("account" if c["refresh"] else "token") if self._connected(c) else None,
                                       "devices": c["devices"], "needsSignIn": self.needs_sign_in and self._connected(c)},
@@ -185,6 +189,10 @@ class Alerts:
             if not isinstance(d, int) or isinstance(d, bool) or not 0 <= d <= 3600:
                 raise Invalid("The delay must be a whole number of seconds, from 0 to 3600.")
             c["delaySeconds"] = d
+        if isinstance(body.get("triggers"), dict):
+            for k in TRIGGERS:
+                if k in body["triggers"]:
+                    c["triggers"][k] = bool(body["triggers"][k])
         h = body.get("homeAssistant")
         if isinstance(h, dict) and h.get("webhook") is not None:
             c["webhook"] = _clean_url(h["webhook"])
@@ -385,8 +393,10 @@ class Alerts:
         site = self._site(c["site"])
         out = []
         with self.lock:
-            bad = {a["id"]: a for a in snap.get("attention", []) if a["state"] in STATES}
             nodes = snap.get("nodes", {})
+            allowed = {st for k, st in TRIGGER_STATE.items() if c["triggers"][k]}
+            bad = {a["id"]: a for a in snap.get("attention", [])
+                   if a["state"] in allowed or a["state"] in STATES and self._urgent(nodes.get(a["id"]))}           # a UPS on battery is always announced
             bad = {nid: a for nid, a in bad.items() if not any(self._held(p, now) for p in (nodes.get(nid) or {}).get("poweredBy", []))}      # explained by a UPS that is on battery
             urgent = {nid: self._urgent(nodes.get(nid)) for nid in bad}
             self.opens = [o for o in self.opens if now - o[0] <= FLAP_WINDOW]
@@ -399,7 +409,7 @@ class Alerts:
                     if old.get("grouped"):
                         rec["grouped"] = True
                     self.open[nid] = rec
-                    if not old and not urgent[nid]:
+                    if not old and not urgent[nid] and a["state"] != "unknown":        # "could not look" is not a pile-up or a flap
                         fresh.append(nid)
                         self.opens.append([now, nid])
                         if nid in self.flaps:
@@ -461,6 +471,8 @@ class Alerts:
                     h["until"] = now + POWER_GRACE
                 elif h.get("until") is not None and now >= h["until"]:
                     del self.holds[uid]
+            if not c["triggers"]["restored"]:
+                out = [e for e in out if e["event"] != "recovered"]
             for e in out:
                 self.outbox.append({"event": e, "tries": 0, "first": now, "next": now})
             if out or fresh:
@@ -476,7 +488,7 @@ class Alerts:
         """Three new problems within a minute start a storm; new ones within STORM_HOLD of the last join it. Members are not announced one by one."""
         st = self.storm
         if st is None:
-            recent = sorted({o[1] for o in self.opens if now - o[0] <= STORM_WINDOW and o[1] in bad and not urgent.get(o[1])})
+            recent = sorted({o[1] for o in self.opens if now - o[0] <= STORM_WINDOW and o[1] in bad and not urgent.get(o[1]) and bad[o[1]]["state"] != "unknown"})
             if len(recent) >= STORM_COUNT:
                 st = self.storm = {"start": now, "until": now + STORM_HOLD, "ids": recent, "sent": False, "names": [], "upd": False}
         elif fresh and now <= st["until"]:
@@ -541,7 +553,7 @@ class Alerts:
 
     def _event(self, kind, site, a, now, urgent=None, steady=False):
         name, st = a["name"], a["state"]
-        verb = {"failed": "is down", "degraded": "is degraded", "healthy": "is back"}.get(st, st)
+        verb = {"failed": "is down", "degraded": "is degraded", "healthy": "is back", "unknown": "can't be checked"}.get(st, st)
         if urgent:
             verb = URGENT[urgent]
         if steady:

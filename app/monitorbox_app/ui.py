@@ -676,7 +676,10 @@ async function alertSettings(){const o=$('#alset');if(!o)return;await loadAlertC
   <h3 style="margin:1.2rem 0 .3rem">Details</h3>
   <div class=row><label>Name of this site <input id=al-site value="${esc(c.site)}" placeholder="${esc(c.siteDefault)}" maxlength=60></label>
   <label>Wait <input id=al-delay type=number min=0 max=3600 value="${c.delaySeconds}" style="width:6rem"> seconds before alerting</label>
-  <button class="btn" onclick="alertSave()">Save</button></div>`;
+  <button class="btn" onclick="alertSave()">Save</button></div>
+  <h3 style="margin:1.2rem 0 .3rem">What sends an alert</h3>
+  <div class=row>${[['down','Down'],['degraded','Degraded'],['unknown','Unknown'],['restored','Restored']].map(([k,t])=>`<label class=row style="min-height:44px"><input type=checkbox id=al-t-${k} ${c.triggers[k]?'checked':''} onchange="alertSave()"> ${t}</label>`).join('')}</div>
+  <p class=sub style="margin-top:0">Unknown means MonitorBox could not look (for example the UPS host or a provider is out of reach), which is not the same as down. A UPS running on battery always alerts.</p>`;
  if(ha.connected)alertDevices()}
 async function alertDevices(){const o=$('#al-devs');if(!o)return;let r;try{r=await api('alerts/ha/devices')}catch(e){o.innerHTML='<p class=sub>'+esc(e.message)+'</p>';return}
  if(r.error){o.innerHTML=`<p class=sub><b>${esc(r.error)}</b></p><div class=row>${r.needsSignIn?`<button class="btn pri sm" onclick="alertConnect(alCfg.homeAssistant.url)">Connect again</button>`:''}<button class="btn sm" onclick="alertDevices()">Try again</button></div>`;return}
@@ -693,7 +696,7 @@ async function alertMailSave(){const v=id=>$('#'+id).value.trim(),m=$('#em-msg')
  if(pw)e.password=pw;
  try{alCfg=await api('alerts',{email:e});await alertSettings();const n=$('#em-msg');if(n)n.textContent='Saved. Send a test alert to check it.'}catch(x){if(m)m.textContent=x.message}}
 async function alertMailClear(){if(!await askYes('Remove the email settings, including the saved password?'))return;try{alCfg=await api('alerts',{email:{clear:true}});await alertSettings();const n=$('#em-msg');if(n)n.textContent='Removed.'}catch(x){$('#em-msg').textContent=x.message}}
-async function alertSave(){const m=$('#al-msg');try{alCfg=await api('alerts',{enabled:$('#al-on').checked,site:$('#al-site').value,delaySeconds:parseInt($('#al-delay').value,10)});alertSettings();const n=$('#al-msg');if(n)n.textContent='Saved.'}catch(e){if(m)m.textContent=e.message;await alertSettings();const n=$('#al-msg');if(n)n.textContent=e.message}}
+async function alertSave(){const m=$('#al-msg');try{alCfg=await api('alerts',{enabled:$('#al-on').checked,site:$('#al-site').value,delaySeconds:parseInt($('#al-delay').value,10),triggers:Object.fromEntries(['down','degraded','unknown','restored'].map(k=>[k,$('#al-t-'+k).checked]))});alertSettings();const n=$('#al-msg');if(n)n.textContent='Saved.'}catch(e){if(m)m.textContent=e.message;await alertSettings();const n=$('#al-msg');if(n)n.textContent=e.message}}
 async function alertHook(clear){const v=clear?'':$('#al-hook').value.trim();if(!clear&&!v){$('#al-msg').textContent='Paste the webhook address first.';return}if(clear&&!await askYes('Remove the webhook address?'))return;
  try{if(clear)await api('alerts',{homeAssistant:{webhook:''}});else await api('alerts',{homeAssistant:{webhook:v}});await alertSettings();const n=$('#al-msg');if(n)n.textContent=clear?'Removed.':'Saved. Send a test alert to check it.'}catch(e){$('#al-msg').textContent=e.message}}
 async function alertTest(b){b.disabled=true;$('#al-msg').textContent='Sending…';try{const th=$('#al-hook'),typed=th?(th.value||'').trim():'';if(typed&&alCfg&&!alCfg.homeAssistant.connected&&typed!==alCfg.homeAssistant.webhook)await api('alerts',{homeAssistant:{webhook:typed}});const r=await api('alerts/test',{});await alertSettings();const n=$('#al-msg');if(n)n.textContent=r.message}catch(e){await alertSettings();const n=$('#al-msg');if(n)n.textContent=e.message}}
