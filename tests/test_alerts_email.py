@@ -1,4 +1,4 @@
-import json, os, smtplib, sys, tempfile, unittest
+import json, os, smtplib, sys, tempfile, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
@@ -46,6 +46,24 @@ class Email(unittest.TestCase):
         self.assertIn("Subject: box-host: Anchor3 is down", m["text"])
         self.go(snap(self.NODES, a=True), 1); self.go(snap(self.NODES, a=True), 60)
         self.assertIn("is back", self.smtp.messages[-1]["text"])
+
+    def test_the_time_in_the_email_is_in_the_boxs_time_zone_not_utc(self):
+        """Regression: alert emails said Time: 2026-10-25T18:36:49Z whatever time zone the box was set to."""
+        import calendar
+        old = os.environ.get("TZ")
+        def restore():
+            if old is None: os.environ.pop("TZ", None)
+            else: os.environ["TZ"] = old
+            time.tzset()
+        self.addCleanup(restore)
+        os.environ["TZ"] = "America/Chicago"; time.tzset()
+        self.now = calendar.timegm((2026, 10, 25, 18, 36, 49))
+        self.mail()
+        self.go(snap(self.NODES, a=False))
+        text = self.smtp.messages[0]["text"]
+        self.assertIn("Time: Oct 25 at 1:36 PM CDT", text)
+        self.assertNotIn("18:36", text)
+        self.assertEqual(alerts._local("not a time"), "not a time", "unreadable text is left alone")
 
     def test_the_password_never_leaves_the_box_and_a_save_without_one_keeps_it(self):
         out = self.mail()
