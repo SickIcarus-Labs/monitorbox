@@ -4,7 +4,11 @@ A lightweight, fast and friendly health glance at your homelab. Open it and one 
 
 MonitorBox was designed to be light enough for a Raspberry Pi, and has been tested on a Raspberry Pi 5 and an Intel NUC mini PC.
 
-<!-- screenshots go here -->
+![The main screen: everything is fine](docs/screenshots/main-landscape.png)
+
+<img src="docs/screenshots/something-not-right.png" alt="One site has a problem" width="420">
+
+More screens in [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md). Site names and addresses in the pictures have been changed.
 
 ## What it does
 
