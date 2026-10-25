@@ -90,7 +90,8 @@ class App:
         self.busiest = busiest.Busiest(self.series)
         self.lansampler = lansampler.LanSampler(self.series, lambda: monconfig.load_config(self.paths).get("connections", []), lambda m, meth, p, t: self.modules.call(m, meth, p, t),
                                                 after=lambda: self.last_map and self.busiest.update(self.last_map, flows=self.minute_flows, opts=self.busiest_opts()))
-        self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), self.monitor.snapshot)
+        self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), self.monitor.snapshot,
+                                   hostname=lambda: self.peer.name())     # alerts say the site's own name (Settings, Sites), the computer name only when none is set
         self.peer = peer.Peer(self.paths.p("config", "sites.json"), self.port, self.internal_session, version)
         self.peer.relay_lookup = self.live_relay
         self.peer.on_change = self.sync_site_nodes
