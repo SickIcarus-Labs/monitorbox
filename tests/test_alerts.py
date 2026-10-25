@@ -405,5 +405,74 @@ class PowerHold(Storms):
         self.assertEqual(again.observe(power_snap("unknown", False), self.now), [])
 
 
+
+class Triggers(unittest.TestCase):
+    """The owner ticks what sends an alert: Down, Degraded, Unknown, Restored."""
+    NODES = [node("a", "Anchor3"), node("b", "Granite")]
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.sent, self.now = [], 1000.0
+        self.a = alerts.Alerts(os.path.join(self.d, "alerts.json"), os.path.join(self.d, "state.json"), lambda: None,
+                               send=lambda url, ev: self.sent.append(ev), clock=lambda: self.now, hostname=lambda: "box-host")
+        self.a.set({"enabled": True, "homeAssistant": {"webhook": HOOK}, "delaySeconds": 60})
+
+    def go(self, s, secs=0):
+        self.now += secs
+        ev = self.a.observe(s, self.now)
+        self.a.flush(self.now)
+        return ev
+
+    def test_defaults_are_down_degraded_and_restored_but_not_unknown(self):
+        self.assertEqual(self.a.get()["triggers"], {"down": True, "degraded": True, "unknown": False, "restored": True})
+
+    def test_each_box_is_saved_and_survives_a_save_that_leaves_it_out(self):
+        self.a.set({"triggers": {"down": False, "unknown": True}})
+        self.a.set({"delaySeconds": 30})
+        self.assertEqual(self.a.get()["triggers"], {"down": False, "degraded": True, "unknown": True, "restored": True})
+
+    def test_down_unticked_means_no_down_alert_but_degraded_still_comes(self):
+        self.a.set({"triggers": {"down": False}})
+        self.go(snap(self.NODES, a=False, b=True)); self.go(snap(self.NODES, a=False, b=True), 70)
+        self.assertEqual(self.sent, [])
+        warn = {"a/c": {"ok": True, "warn": True, "detail": "slow", "ms": 1, "at": "t", "since": "t"}, "b/c": {"ok": True, "detail": "", "ms": 1, "at": "t", "since": "t"}}
+        w = engine.evaluate(self.NODES, warn, "t")
+        self.assertEqual(w["nodes"]["a"]["state"], "degraded")
+        self.go(w); self.go(w, 70)
+        self.assertEqual([e["state"] for e in self.sent], ["degraded"])
+
+    def test_degraded_unticked_stays_quiet(self):
+        self.a.set({"triggers": {"degraded": False}})
+        warn = {"a/c": {"ok": True, "warn": True, "detail": "slow", "ms": 1, "at": "t", "since": "t"}, "b/c": {"ok": True, "detail": "", "ms": 1, "at": "t", "since": "t"}}
+        w = engine.evaluate(self.NODES, warn, "t")
+        self.go(w); self.go(w, 70)
+        self.assertEqual(self.sent, [])
+
+    def test_unknown_ticked_alerts_once_and_then_says_back(self):
+        self.a.set({"triggers": {"unknown": True}})
+        unk = snap(self.NODES, a=None, b=True)
+        self.go(unk); self.go(unk, 70)
+        self.assertEqual([(e["state"], e["message"]) for e in self.sent], [("unknown", "Anchor3 can't be checked.")])
+        ok = snap(self.NODES, a=True, b=True)
+        self.go(ok, 5); self.go(ok, 40)
+        self.assertEqual(self.sent[-1]["event"], "recovered")
+
+    def test_many_unknown_at_once_is_not_called_a_pile_of_things_going_down(self):
+        self.a.set({"triggers": {"unknown": True}})
+        nodes = [node(f"n{i}", f"Thing{i}") for i in range(5)]
+        unk = snap(nodes, **{f"n{i}": None for i in range(5)})
+        self.go(unk); self.go(unk, 70)
+        self.assertEqual(len(self.sent), 5)
+        self.assertTrue(all(e["id"] != "storm" for e in self.sent))
+
+    def test_restored_unticked_sends_the_problem_but_not_the_all_clear(self):
+        self.a.set({"triggers": {"restored": False}})
+        bad, ok = snap(self.NODES, a=False, b=True), snap(self.NODES, a=True, b=True)
+        self.go(bad); self.go(bad, 70)
+        self.go(ok, 5); self.go(ok, 40)
+        self.assertEqual([e["event"] for e in self.sent], ["problem"])
+        self.go(bad, 5); self.go(bad, 70)                    # the open alert was closed quietly, so a new problem is announced again
+        self.assertEqual(len(self.sent), 2)
+
 if __name__ == "__main__":
     unittest.main()
