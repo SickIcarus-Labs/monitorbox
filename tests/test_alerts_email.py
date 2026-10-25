@@ -65,6 +65,21 @@ class Email(unittest.TestCase):
         self.assertNotIn("18:36", text)
         self.assertEqual(alerts._local("not a time"), "not a time", "unreadable text is left alone")
 
+    def test_phone_alerts_say_the_time_at_the_site_as_well(self):
+        """The phone shows when it received the alert; the message says what time it was at the site, so nobody has to do the sums."""
+        old = os.environ.get("TZ")
+        def restore():
+            if old is None: os.environ.pop("TZ", None)
+            else: os.environ["TZ"] = old
+            time.tzset()
+        self.addCleanup(restore)
+        os.environ["TZ"] = "America/Chicago"; time.tzset()
+        ev = {"id": "n1", "event": "problem", "state": "failed", "site": "Riverside", "title": "Anchor3 is down", "message": "Anchor3 stopped answering.", "at": "2026-10-25T18:36:49Z"}
+        out = alerts.Alerts._ha_payload(ev)
+        self.assertEqual(out["message"], "Anchor3 stopped answering. (1:36 PM CDT at Riverside)")
+        self.assertEqual(ev["at"], "2026-10-25T18:36:49Z", "the event keeps its UTC time")
+        self.assertEqual(alerts.Alerts._ha_payload(dict(ev, at="junk"))["message"], "Anchor3 stopped answering.")
+
     def test_the_password_never_leaves_the_box_and_a_save_without_one_keeps_it(self):
         out = self.mail()
         self.assertNotIn(PW, json.dumps(out))

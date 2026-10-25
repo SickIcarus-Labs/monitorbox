@@ -1703,6 +1703,8 @@ class App:
             return p.add_site(str(body.get("address", "")), str(body.get("code", "")), body.get("name"))
         if path == "/api/sites/remove":
             return p.remove_site(str(body.get("id", "")))
+        if path == "/api/sites/remote-name":
+            return p.name_remote(str(body.get("id", "")))
         if path == "/api/sites/rename":
             return p.rename_site(str(body.get("id", "")), body.get("name"))
         if path == "/api/sites/manager/remove":

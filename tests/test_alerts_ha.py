@@ -57,7 +57,9 @@ class Account(unittest.TestCase):
         self.assertTrue(r["ok"], r)
         self.assertEqual([n for n, _ in self.fake.sent], ["mobile_app_tablet_two"])
         body = self.fake.sent[0][1]
-        self.assertEqual((body["title"], body["message"]), ("box-host: test alert", "This is a test alert from MonitorBox."))
+        # the message now ends with the site's local time, e.g. " (1:23 AM UTC at box-host)", so the phone and the site's clock can be compared
+        self.assertEqual(body["title"], "box-host: test alert")
+        self.assertRegex(body["message"], r"^This is a test alert from MonitorBox\. \(\d{1,2}:\d\d [AP]M \S+ at box-host\)$")
         self.assertIn("Tablet Two", r["message"])
 
     def test_nothing_ticked_says_so(self):
