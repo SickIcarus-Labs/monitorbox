@@ -6,6 +6,11 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+Nothing yet.
+
+## 1.0.0 and 0.83.18 to 0.83.22 (stable, October 25)
+
+- **1.0.0** Version number only, nothing else changed: MonitorBox is in use, so it is 1.0. From here the middle number moves for new abilities and the last for fixes.
 - **0.83.22** The Sites card counts the sites it watches even when there is only one ("1 of 1 up"), like the other cards. A row with a long name and a middling detail (a camera called "Camera Garage") now gets two lines instead of a cut-off one.
 - **0.83.21** A camera that UniFi Protect and Scrypted both watch is one camera: both say it is down, it is Down; they disagree (one says down, the other says fine), it is only Degraded, since one source may be the one acting up. One attention line and one alert per camera, and the detail says the other source reports it fine.
 - **0.83.20** Cards fold their many alike items: cameras, switches and access points, and VPN tunnels each sit under one heading per source (for example "UniFi Protect cameras"). A problem inside opens its heading by itself. A camera that two sources both report counts once, so the Cameras summary counts cameras instead of 19 of 19.

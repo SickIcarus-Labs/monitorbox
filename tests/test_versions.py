@@ -36,6 +36,8 @@ class VersionTests(unittest.TestCase):
 
     def test_prerelease_sorts_before_release(self):
         self.assertLess(versions.vkey("1.0.0-beta.1"), versions.vkey("1.0.0"))
+        self.assertGreater(versions.vkey("1.0.0"), versions.vkey("0.83.22"))   # the jump to 1.0 is an upgrade, not a downgrade
+        self.assertGreater(versions.vkey("0.84.0"), versions.vkey("0.83.22"))
 
 
 if __name__ == "__main__":
