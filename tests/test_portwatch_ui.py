@@ -36,6 +36,8 @@ class PortWatchUi(unittest.TestCase):
             self.assertNotIn("data-k=", off, "no per-port marks while the watch is off"); self.assertNotIn("rising (about", off); self.assertNotIn("learning what is normal</span>", off)
             rising = pg.evaluate(MAP_JS, [True, {"learning": False, "rising": ["errors"], "perHour": {"errors": 1600, "drops": 0, "flaps": 0}, "was": {"errors": 0}, "known": False}])
             self.assertIn("errors rising (about 1,600 an hour)", rising); self.assertIn(">known issue</a>", rising)
+            both = pg.evaluate(MAP_JS, [True, {"learning": False, "rising": ["errors"], "perHour": {"errors": 29068}, "split": {"errors": {"rx": 29000, "tx": 68}}, "traffic": {"avgBps": 4100000000, "peakBps": 9200000000}, "was": {}, "known": False}])
+            self.assertIn("errors rising (about 29,068 an hour: 29,000 receive, 68 transmit), carrying about", both)
             known = pg.evaluate(MAP_JS, [True, {"learning": False, "rising": ["errors"], "perHour": {"errors": 1600, "drops": 0, "flaps": 0}, "was": {"errors": 0}, "known": True}])
             self.assertNotIn("errors rising (about", known); self.assertIn("known issue</span>", known); self.assertIn("not a known issue", known)
             self.assertIn('checked=""', rising.split("Watch for rising port errors")[0].rsplit("<input", 1)[1], "ticked when the box says it is on")
