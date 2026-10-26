@@ -321,6 +321,25 @@ class PoweredBy(unittest.TestCase):
             self.assertIn(w, m.STATUS_WORDS.values())
 
 
+class CameraCount(unittest.TestCase):
+    """Regression: a Cameras card said '19 of 19 up' for nine cameras, because UniFi Protect and Scrypted both list the same cameras."""
+    def cam(self, i, name, source):
+        return {"id": i, "name": name, "group": "Cameras", "critical": False, "dependsOn": [], "rule": "primary",
+                "checks": [{"id": "c0", "type": "module", "module": source, "check": "camera", "params": {"name": name}}]}
+
+    def test_one_camera_seen_by_two_sources_counts_once_and_is_named_once_when_down(self):
+        nodes = [self.cam("p-patio", "Camera Patio", "unifi-protect"), self.cam("s-patio", "Camera Patio", "scrypted"),
+                 self.cam("p-pool", "Camera Pool", "unifi-protect"), self.cam("s-pool", "Camera Pool", "scrypted"),
+                 self.cam("s-pkg", "Camera Doorbell Package", "scrypted")]
+        card = lambda res: next(c for c in engine.evaluate(nodes, res)["cards"] if c["name"] == "Cameras")
+        up = {f"{n['id']}/c0": {"ok": True, "detail": "", "ms": 1, "at": "t", "since": "s"} for n in nodes}
+        self.assertEqual(card(up)["big"], "3 of 3 up")
+        down = dict(up, **{"p-patio/c0": {"ok": False, "detail": "offline", "ms": 1, "at": "t", "since": "s"},
+                           "s-patio/c0": {"ok": False, "detail": "offline", "ms": 1, "at": "t", "since": "s"}})
+        c = card(down)
+        self.assertEqual(c["big"], "2 of 3 up")
+        self.assertEqual(c["line"], "Camera Patio is down", "named once, not 'Camera Patio and Camera Patio are down'")
+
 if __name__ == "__main__":
     unittest.main()
 

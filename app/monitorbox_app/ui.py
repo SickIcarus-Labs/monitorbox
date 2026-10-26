@@ -372,7 +372,15 @@ function envFold(g,i){
 function cardRows(c){
  const ns=c.nodes.map(id=>snap.nodes[id]).filter(Boolean), kids=new Set(ns.flatMap(n=>{if(n.kind!=='aggregate')return [];const m=membersOf(n);return m.length>1?m.map(x=>x.id):[]}));
  const eg=envGroups(ns.filter(n=>!kids.has(n.id)));
- return{loose:ns.filter(n=>!kids.has(n.id)&&!eg.taken.has(n.id)),groups:eg.groups}}
+ const loose0=ns.filter(n=>!kids.has(n.id)&&!eg.taken.has(n.id)),secs={};
+ for(const n of loose0){const k=secOf(n);if(k)(secs[k.key]=secs[k.key]||{key:k.key,name:k.name,unit:k.unit,nodes:[]}).nodes.push(n)}
+ const sections=Object.values(secs).filter(x=>x.nodes.length>=3),inSec=new Set(sections.flatMap(x=>x.nodes.map(n=>n.id)));
+ return{loose:loose0.filter(n=>!inSec.has(n.id)),groups:eg.groups,sections}}
+/* a card with many alike items (every camera, every switch and access point, every VPN tunnel) folds them under one heading per source; a problem opens it by itself */
+const SEC={'unifi-protect/camera':['UniFi Protect cameras','cameras'],'scrypted/camera':['Scrypted cameras','cameras'],'unifi-network/device':['UniFi switches and access points','devices'],'unifi-network/tunnel':['UniFi VPN tunnels','tunnels']};
+function secOf(n){const cs=n.checks||[];if(n.kind==='aggregate'||cs.length!==1)return null;const k=cs[0].type+'/'+cs[0].target,v=SEC[k];return v?{key:'sec/'+k,name:v[0],unit:v[1]}:null}
+const secFold=(x,i)=>{const nodes=x.nodes.slice().sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true})),sts=nodes.map(n=>ds(n,n.state));
+ return fold(x.key,worstState(sts),x.name,sts,()=>nodes.map(n=>rowsOf(n,i,1)).join(''),0,true,x.unit)}
 const CI={servers:'M4 5h16v6H4z M4 13h16v6H4z M8 8h.01 M8 16h.01',network:'M12 20v-6 M4 10a12 12 0 0 1 16 0 M7 13a8 8 0 0 1 10 0 M12 20h.01',internet:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M3 12h18 M12 3c3 3 3 15 0 18 M12 3c-3 3-3 15 0 18',power:'M13 2L4 14h7l-1 8 9-12h-7z',cameras:'M3 7h12v10H3z M15 11l6-3v8l-6-3',services:'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5',sites:'M12 21s7-6 7-11a7 7 0 0 0-14 0c0 5 7 11 7 11z M12 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'};
 function cIco(n){const d=CI[String(n).toLowerCase()];return d?`<span class=cico aria-hidden=true><svg width=20 height=20 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2 stroke-linecap=round stroke-linejoin=round><path d="${d}"/></svg></span>`:''}
 /* the 24 h bar on each card: the worst state of its checks, hour by hour (asked for from the box, kept a minute) */
@@ -408,7 +416,7 @@ async function stripTap(ev,i){const c=snap&&snap.cards[i],d=c&&strips[sk(c)]&&st
 addEventListener('pointerdown',e=>{if(tsOpen&&!e.target.closest('#tsheet,.strip'))closeTrouble()},true);
 addEventListener('keydown',e=>{if(e.key==='Escape'&&tsOpen)closeTrouble()});
 function detailCard(c,i){
- const r=cardRows(c),rows=r.loose.map(n=>rowsOf(n,i)).join('')+r.groups.map(g=>envFold(g,i)).join('');
+ const r=cardRows(c),rows=r.loose.map(n=>rowsOf(n,i)).join('')+r.sections.map(x=>secFold(x,i)).join('')+r.groups.map(g=>envFold(g,i)).join('');
  return `<div class="card det"><button class=hd onclick="openDrawer(${i})"><span class=t>${cIco(c.name)}${esc(c.name)}</span>${chip(c.state,c.label)}</button><div class=strip data-c="${esc(sk(c))}" aria-label="Last 24 hours, tap for what happened" onclick="stripTap(event,${i})">${stripHtml(c)}</div><div class=rows>${rows}</div></div>`}
 /* cards go into side-by-side columns by their FOLDED size, so opening a fold never moves a card to another column */
 function colsFor(){const w=($('#m')&&$('#m').clientWidth)||innerWidth;return Math.max(1,Math.min(3,Math.floor((w+16)/356)))}
@@ -447,7 +455,7 @@ function render(){if(!SITE&&snap&&snap.banner){locBanner=snap.banner}renderHeade
    <small>${since(a.label,a.since)}</small><button class="btn sm" onclick="event.stopPropagation();checkNow('${esc(a.id)}')">Check now</button></div>`).join('');
  const sumCard=(c,i)=>`<button class=card onclick="openDrawer(${i})"><div class=r><span class=t>${cIco(c.name)}${esc(c.name)}</span>${chip(c.state,c.label)}</div>
    <div class=big>${esc(c.big)}</div><div class=strip data-c="${esc(sk(c))}" aria-label="Last 24 hours, tap for what happened" onclick="event.stopPropagation();stripTap(event,${i})">${stripHtml(c)}</div><div class=sub>${esc(c.line)}</div></button>`;
- const cards=view==='detail'?(lastCols=colsFor(),denseGrid(snap.cards.map((c,i)=>{const r=cardRows(c);return{html:detailCard(c,i),w:2+r.loose.length+r.groups.length}}))):snap.cards.map(sumCard).join('');
+ const cards=view==='detail'?(lastCols=colsFor(),denseGrid(snap.cards.map((c,i)=>{const r=cardRows(c);return{html:detailCard(c,i),w:2+r.loose.length+r.sections.length+r.groups.length}}))):snap.cards.map(sumCard).join('');
  $('#m').innerHTML=`<div class=top><div class=row>${snap.demo?`<span class=ribbon>DEMO: ${esc(snap.demo)}</span>`:''}<div class=seg role=group aria-label="Main screen view"><button aria-pressed=${view==='summary'} onclick="setView('summary')">Summarized</button><button aria-pressed=${view==='detail'} onclick="setView('detail')">Detailed</button></div><small id=upd></small></div></div>
   <h1 class=head>${headHtml(b.headline)}</h1><p class=lede>${esc(b.subline)}</p>${tilesHtml()}
   ${snap.configError?`<div class=err>The saved monitoring settings have a problem, so only the built-in checks are running: ${esc(snap.configError)}</div>`:''}
