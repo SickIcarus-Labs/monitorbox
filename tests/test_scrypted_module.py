@@ -120,10 +120,10 @@ class ScryptedModule(unittest.TestCase):
     def test_discover_suggests_the_server_and_says_why_a_limited_account_fails(self):
         d = self.call("discover", {"connection": self.conn})["result"]
         self.assertEqual([c["name"] for c in d["cameras"]], ["Doorbell", "Driveway", "Garage"])
-        self.assertEqual([s["label"] for s in d["suggest"]], ["Scrypted", "Scrypted cameras", "Camera Doorbell", "Camera Driveway", "Camera Garage"])
-        self.assertEqual([(s["check"], s["params"], s["batch"]) for s in d["suggest"][2:]],
+        self.assertEqual([s["label"] for s in d["suggest"]], ["Scrypted", "Camera Doorbell", "Camera Driveway", "Camera Garage"])      # no all-cameras summary: each camera is its own item
+        self.assertEqual([(s["check"], s["params"], s["batch"]) for s in d["suggest"][1:]],
                          [("camera", {"name": n}, "Cameras") for n in ("Doorbell", "Driveway", "Garage")])
-        self.assertTrue(all(s["group"] == "Cameras" and s["node"] == "Scrypted" and s["rule"] == "any" for s in d["suggest"]))
+        self.assertTrue(all(s["group"] == "Cameras" and s["rule"] == "primary" and s["node"] == ("Scrypted" if s["check"] == "server" else s["label"]) for s in d["suggest"]))
         for dev in self.w["devices"]:
             dev["hidden"] = True                                                                    # a limited account that is shown nothing
         self.save()

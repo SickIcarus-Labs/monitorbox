@@ -29,20 +29,20 @@ class UnifiE2E(T.SnmpE2E):
         self.states(c, {"unifi": "healthy", "pi": "healthy"})
         cards = {x["name"]: x for x in c.get("/api/status")["cards"]}
         self.assertIn("Network", cards)
-        # one switch dies: the node is Degraded (rule 'any'), not Failed
+        # one switch dies: that switch is its own item and is Down by name (a shared item with the 'any' rule used to read only Degraded)
         ctl.devices[3]["state"] = 0
-        self.states(c, {"unifi": "degraded"})
+        self.states(c, {"unifi-garage": "failed"})
         ctl.devices[3]["state"] = 1
-        self.states(c, {"unifi": "healthy"})
-        # a tunnel drops: the UniFi node is Degraded and the sidebar says which one
+        self.states(c, {"unifi": "healthy", "unifi-garage": "healthy"})
+        # a tunnel drops: it is its own item too, and Down
         ctl.connections[1]["status"] = "disconnected"
-        n = self.states(c, {"unifi": "degraded"})
-        self.assertIn("Tidewater", str(n["unifi"]))
+        n = self.states(c, {"unifi-vpn-tidewater": "failed"})
+        self.assertIn("disconnected", str(n["unifi-vpn-tidewater"]))
         ctl.connections[1]["status"] = "connected"
-        self.states(c, {"unifi": "healthy"})
+        self.states(c, {"unifi": "healthy", "unifi-vpn-tidewater": "healthy"})
         # the controller goes away: cannot be checked, not failed
         ctl.close()
-        self.states(c, {"unifi": "unknown"}, timeout=60)
+        self.states(c, {"unifi": "unknown", "unifi-garage": "unknown"}, timeout=60)
         self.assertEqual(c.get("/api/status")["banner"]["status"], "blue")
         # Nothing but reads: the login, and (since 0.76.0, when the Busiest client began counting wifi clients) the flow log's search, which is a POST that only asks a question.
         self.assertLessEqual({r for r in ctl.requests if r[0] != "GET"}, {("POST", "/api/auth/login"), ("POST", "/proxy/network/v2/api/site/default/traffic-flows")})

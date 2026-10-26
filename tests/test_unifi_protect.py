@@ -86,8 +86,10 @@ class ProtectChecks(unittest.TestCase):
         self.assertFalse({c["name"]: c for c in M.handle({"method": "cameras", "params": {"connection": self.conn}})["cameras"]}["Driveway"]["snapshot"])
         d = M.handle({"method": "discover", "params": {"connection": self.conn}})
         self.assertEqual([s["label"] for s in d["suggest"]],
-                         ["Protect cameras", "Protect recorder", "Protect storage", "Camera Backyard", "Camera Driveway", "Camera Front Door"])
-        self.assertTrue(all(s["group"] == "Cameras" and s["node"] == "Cameras" and s["rule"] == "any" for s in d["suggest"]))
+                         ["Protect recorder", "Protect storage", "Camera Backyard", "Camera Driveway", "Camera Front Door"])
+        # every camera is its own item (one that is off shows as Down by name); the recorder and its storage share one, with the recorder first ("is it there")
+        self.assertTrue(all(s["group"] == "Cameras" and s["rule"] == "primary" for s in d["suggest"]))
+        self.assertEqual([s["node"] for s in d["suggest"]], ["UniFi Protect", "UniFi Protect", "Camera Backyard", "Camera Driveway", "Camera Front Door"])
 
     def test_a_snapshot_comes_back_as_a_picture_and_only_a_picture(self):
         r = M.handle({"method": "snapshot", "params": {"connection": self.conn, "id": "cam0001abc"}})

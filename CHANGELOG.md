@@ -6,7 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
-_Nothing yet._
+- **0.83.18** Every camera, UniFi device and VPN tunnel is its own item, so one that is offline shows as Down by name instead of making a shared item ("Cameras", "UniFi", "Scrypted") only Degraded. Existing boxes are split automatically; the recorder and storage stay together as "UniFi Protect", and the old all-cameras summary checks are dropped because each camera now says its own state.
 
 ## 0.83.11 to 0.83.17 (stable, October 25)
 

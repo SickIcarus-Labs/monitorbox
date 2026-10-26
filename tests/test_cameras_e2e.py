@@ -322,7 +322,7 @@ class CamerasE2E(T.SnmpE2E):
         with c.op.open(c.base + "/api/camera-snapshot?conn=scr&id=2", timeout=10) as r:
             self.assertEqual((r.headers["Content-Type"], r.read()), ("image/jpeg", b"JPEG-Doorbell"))
         t = c.post("/api/connections/test", {"connection": scr})
-        self.assertEqual((t["ok"], {f["label"]: f["count"] for f in t["found"]}), (True, {"Overview": 2, "Cameras": 3}), t)
+        self.assertEqual((t["ok"], {f["label"]: f["count"] for f in t["found"]}), (True, {"Overview": 1, "Cameras": 3}), t)
         t = c.post("/api/connections/test", {"connection": {**scr, "password": "fake-wrong-" + secrets.token_hex(4)}})
         self.assertFalse(t["ok"]); self.assertIn("user name or password", t["error"])
 

@@ -38,7 +38,7 @@ class ConnectionTestE2E(T.SnmpE2E):
         cam = {"id": "nvr", "module": "unifi-protect", "base_url": cons.url, "username": cons.username, "password": cons.password, "timeout": 1}
         out = c.post("/api/connections/test", {"connection": cam})
         self.assertTrue(out["ok"], out)
-        self.assertEqual({f["label"]: f["count"] for f in out["found"]}, {"Overview": 3, "Cameras": 3})
+        self.assertEqual({f["label"]: f["count"] for f in out["found"]}, {"Overview": 2, "Cameras": 3})
         self.assertNotIn(cons.password, json.dumps(out))
         out = c.post("/api/connections/test", {"connection": {**cam, "password": "fake-wrong-" + secrets.token_hex(5)}})
         self.assertFalse(out["ok"])

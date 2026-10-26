@@ -227,8 +227,8 @@ def discover(devices, health, networks=(), connections=None):
         name = str(n.get("name") or n.get("_id"))
         sug.append({"label": f"UniFi VPN {name}", "check": "tunnel", "params": {"name": name}, "batch": "VPN tunnels"})
         tunnels.append({"name": name, "type": tunnel_kind(n), "subnet": n.get("ip_subnet"), "status": tunnel_status(n, connections)})
-    for s in sug:
-        s.update({"node": "UniFi", "group": "Network", "rule": "any"})
+    for s in sug:        # the overview shares one item (the devices summary first); every device and tunnel is its own, so one that is off shows as Down by name
+        s.update({"node": "UniFi" if s["batch"] == "Overview" else s["label"], "group": "Network", "rule": "primary"})
     return {"devices": topo, "tunnels": tunnels, "suggest": sug}
 
 

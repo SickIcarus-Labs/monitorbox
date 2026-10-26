@@ -157,10 +157,10 @@ async function discover(conn) {
   catch (e) { throw new ScryptedProblem(`connected and can see ${found.length} cameras, but taking a picture from ${found[0].d.name} failed (${String(e.message || e).slice(0, 120)}). Check this account's access to the cameras in Scrypted`); }
   const cams = found.map(describeCamera);
   const suggest = [
-    { label: 'Scrypted', check: 'server', params: {}, batch: 'Overview' },
-    { label: 'Scrypted cameras', check: 'cameras', params: {}, batch: 'Overview' },
-    ...cams.map(c => ({ label: `Camera ${c.name}`, check: 'camera', params: { name: c.name }, batch: 'Cameras' })),
-  ].map(s => ({ ...s, node: 'Scrypted', group: 'Cameras', rule: 'any' }));
+    { label: 'Scrypted', check: 'server', params: {}, batch: 'Overview', node: 'Scrypted', group: 'Cameras', rule: 'primary' },
+    // every camera is its own item, so one that is off shows as Down by name (the all-cameras summary is no longer offered: the cameras say it themselves)
+    ...cams.map(c => ({ label: `Camera ${c.name}`, check: 'camera', params: { name: c.name }, batch: 'Cameras', node: `Camera ${c.name}`, group: 'Cameras', rule: 'primary' })),
+  ];
   return { cameras: cams, suggest };
 }
 
