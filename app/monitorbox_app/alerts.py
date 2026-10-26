@@ -25,7 +25,7 @@ Everything secret (the refresh or long-lived token, the webhook address) lives i
 the signed-in owner only where the owner needs it (the webhook address, so a typo can be found; tokens never), and is never
 written to a log or an error message.
 """
-import calendar, json, os, secrets, socket, threading, time, urllib.error, urllib.request
+import calendar, json, os, re, secrets, socket, threading, time, urllib.error, urllib.request
 from urllib.parse import urlparse
 
 from . import engine, ha, mailer
@@ -106,6 +106,42 @@ def _clean_url(raw):
     if p.scheme not in ("http", "https") or not p.hostname or len(u) > 500 or any(c.isspace() for c in u):
         raise Invalid("The webhook address must start with http:// or https:// and look like http://homeassistant.local:8123/api/webhook/<id>")
     return u
+
+
+def _camera_key(n):
+    """A camera node's identity (one camera two sources both report is one camera), or None. Read from the snapshot's own shape."""
+    cs = n.get("checks") or []
+    if n.get("kind") != "aggregate" and len(cs) == 1 and cs[0].get("target") == "camera":
+        return "camera:" + re.sub(r"^camera\s+", "", str(n.get("name", "")), flags=re.I).strip().lower()
+    return None
+
+
+def _one_per_camera(snap):
+    """A camera that UniFi Protect and Scrypted both watch alerts ONCE, as one thing: it is down when either says so (the worse word wins) and back only when both
+    are fine. The screen still shows both sources; only the alerting reads them as one."""
+    nodes = snap.get("nodes") or {}
+    groups = {}
+    for nid, n in nodes.items():
+        k = _camera_key(n)
+        if k:
+            groups.setdefault(k, []).append(nid)
+    groups = {k: ids for k, ids in groups.items() if len(ids) > 1}
+    if not groups:
+        return snap
+    sev = {"failed": 3, "degraded": 2, "unknown": 1, "healthy": 0, "pending": 0}
+    out_nodes, attention = dict(nodes), list(snap.get("attention") or [])
+    for k, ids in groups.items():
+        worst = max(sorted(ids), key=lambda i: sev.get(nodes[i].get("state"), 0))
+        merged = dict(nodes[worst], id=k, muted=all(nodes[i].get("muted") for i in ids), critical=any(nodes[i].get("critical") for i in ids))
+        for i in ids:
+            out_nodes.pop(i, None)
+        out_nodes[k] = merged
+        mine = [a for a in attention if a.get("id") in ids]
+        attention = [a for a in attention if a.get("id") not in ids]
+        if mine:
+            top = max(mine, key=lambda a: sev.get(a.get("state"), 0))
+            attention.append(dict(top, id=k))
+    return dict(snap, nodes=out_nodes, attention=attention)
 
 
 class Alerts:
@@ -392,6 +428,7 @@ class Alerts:
             return []
         site = self._site(c["site"])
         out = []
+        snap = _one_per_camera(snap)
         with self.lock:
             nodes = snap.get("nodes", {})
             allowed = {st for k, st in TRIGGER_STATE.items() if c["triggers"][k]}

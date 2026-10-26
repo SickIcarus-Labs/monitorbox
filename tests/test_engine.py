@@ -340,6 +340,28 @@ class CameraCount(unittest.TestCase):
         self.assertEqual(c["big"], "2 of 3 up")
         self.assertEqual(c["line"], "Camera Patio is down", "named once, not 'Camera Patio and Camera Patio are down'")
 
+    def test_sources_that_disagree_make_a_camera_degraded_and_agreeing_makes_it_down_with_one_attention_entry(self):
+        nodes = [self.cam("p-patio", "Camera Patio", "unifi-protect"), self.cam("s-patio", "Camera Patio", "scrypted"), self.cam("p-pool", "Camera Pool", "unifi-protect")]
+        ok = {"ok": True, "detail": "", "ms": 1, "at": "t", "since": "s"}
+        bad = {"ok": False, "detail": "offline", "ms": 1, "at": "t", "since": "s"}
+        # only UniFi Protect says it is down: Degraded, yellow, one entry; each source keeps what it observed
+        out = engine.evaluate(nodes, {"p-patio/c0": bad, "s-patio/c0": ok, "p-pool/c0": ok})
+        self.assertEqual([(a["name"], a["state"]) for a in out["attention"]], [("Camera Patio", "degraded")])
+        self.assertIn("the other source reports it fine", out["attention"][0]["detail"])
+        self.assertEqual((out["nodes"]["p-patio"]["state"], out["nodes"]["s-patio"]["state"]), ("failed", "healthy"))
+        self.assertEqual(out["banner"]["status"], "yellow")
+        # the other way round (Scrypted says down, Protect fine): the same
+        out = engine.evaluate(nodes, {"p-patio/c0": ok, "s-patio/c0": bad, "p-pool/c0": ok})
+        self.assertEqual([(a["name"], a["state"]) for a in out["attention"]], [("Camera Patio", "degraded")])
+        # both say it is down: Down, red, still one entry
+        out = engine.evaluate(nodes, {"p-patio/c0": bad, "s-patio/c0": bad, "p-pool/c0": ok})
+        self.assertEqual([(a["name"], a["state"]) for a in out["attention"]], [("Camera Patio", "failed")])
+        self.assertEqual(out["banner"]["status"], "red")
+        # one source cannot be asked (unknown) while the other says down: that is Down, not a disagreement
+        unk = {"ok": None, "detail": "cannot ask", "ms": None, "at": "t", "since": "s"}
+        out = engine.evaluate(nodes, {"p-patio/c0": bad, "s-patio/c0": unk, "p-pool/c0": ok})
+        self.assertEqual([(a["name"], a["state"]) for a in out["attention"]], [("Camera Patio", "failed")])
+
 if __name__ == "__main__":
     unittest.main()
 
