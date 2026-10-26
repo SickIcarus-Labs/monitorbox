@@ -6,7 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
-Nothing yet.
+- **1.0.1** The busiest-client card says "The network is quiet" when nothing is busy, not "The wired LAN is quiet": it watches wifi devices too.
 
 ## 1.0.0 and 0.83.18 to 0.83.22 (stable, October 25)
 
