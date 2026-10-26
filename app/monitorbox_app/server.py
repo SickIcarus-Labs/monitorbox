@@ -1083,6 +1083,15 @@ class App:
         m["portwatch"] = {"on": on}
         if not on:
             return
+        flap = set()          # link drops only count on uplinks, links between switches and servers
+        for n in m.get("nodes", []):
+            link = n.get("link")
+            if link and (link.get("keys") or {}).get("self"):
+                flap |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
+            for p in n.get("ports", []):
+                if p.get("server") or p.get("infra"):
+                    flap |= {self.portwatch.key(*k) for k in p.get("keys") or []}
+        self.portwatch.set_flap_ports(flap)
         for n in m.get("nodes", []):
             link = n.get("link")
             if link and (link.get("keys") or {}).get("self"):
