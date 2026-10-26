@@ -15,10 +15,10 @@ MODULE_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 SECRET_RE = re.compile(r"pass|secret|token|key|community", re.I)  # fields shown as dots in the editor
 MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 MAX_CHECKS = 300         # a NAS with many shared folders, disks and ports is one system with a hundred checks
-TYPES = {"ping": {"target"}, "tcp": {"target", "port"}, "http": {"url"}, "dns": {"server"}, "module": {"module"}, "site": {"site"}, "manager": {"manager"}}
+TYPES = {"ping": {"target"}, "tcp": {"target", "port"}, "http": {"url"}, "dns": {"server"}, "module": {"module"}, "site": {"site"}, "manager": {"manager"}, "ports": set()}
 OPTIONAL = {"ping": {"timeout", "interval"}, "tcp": {"timeout", "interval"},
             "http": {"timeout", "interval", "expect", "insecure", "contains", "connection"}, "dns": {"timeout", "interval", "name", "port"},
-            "module": {"timeout", "interval", "connection", "check", "params"}, "site": {"interval"}, "manager": {"interval"}}
+            "module": {"timeout", "interval", "connection", "check", "params"}, "site": {"interval"}, "manager": {"interval"}, "ports": {"interval"}}
 NODE_KEYS = {"id", "name", "group", "critical", "checks", "rule", "dependsOn", "poweredBy", "kind", "children", "wake", "service", "link", "confirmFailures", "confirmSeconds"}
 SERVICE_KEYS = {"title", "env", "container", "stack", "icon", "url"}
 WAKE_KEYS = {"macs", "broadcast", "port", "timeout", "retry"}

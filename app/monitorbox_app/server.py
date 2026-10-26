@@ -7,7 +7,7 @@ from http.cookies import SimpleCookie
 from .modules import current as modules_current
 from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
-from . import thisbox, followups, graphs, alerts, peer, perfstats, lanmap, portpeers, lansampler, busiest, security, passkeys
+from . import thisbox, followups, graphs, alerts, peer, perfstats, lanmap, portpeers, portwatch, lansampler, busiest, security, passkeys
 from .monitor import Monitor
 from .auth import Auth
 from .modules import Modules
@@ -88,8 +88,9 @@ class App:
         self.gw_cache = {}
         self.minute_flows = []           # the gateway's flow log for the last minute, kept fresh by flow_loop, for the Busiest client
         self.busiest = busiest.Busiest(self.series)
+        self.portwatch = portwatch.PortWatch(self.paths)          # rising port errors, drops and link drops (off until ticked)
         self.lansampler = lansampler.LanSampler(self.series, lambda: monconfig.load_config(self.paths).get("connections", []), lambda m, meth, p, t: self.modules.call(m, meth, p, t),
-                                                after=lambda: self.last_map and self.busiest.update(self.last_map, flows=self.minute_flows, opts=self.busiest_opts()))
+                                                after=lambda: self.last_map and self.busiest.update(self.last_map, flows=self.minute_flows, opts=self.busiest_opts()), watch=self.portwatch)
         self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), self.monitor.snapshot,
                                    hostname=lambda: self.peer.name())     # alerts say the site's own name (Settings, Sites), the computer name only when none is set
         self.peer = peer.Peer(self.paths.p("config", "sites.json"), self.port, self.internal_session, version)
@@ -176,6 +177,8 @@ class App:
             return self.peer.link_check(check["site"])
         if check["type"] == "manager":
             return self.peer.manager_check(check["manager"])
+        if check["type"] == "ports":
+            return self.portwatch.check()
         if check["type"] != "module":
             return probes.run(check)
         cid = check.get("connection")
@@ -1071,7 +1074,40 @@ class App:
         srcs = self.lan_report(wait=0)["sources"]
         self.last_sources = srcs
         self.last_map = lanmap.build(srcs)
+        self.annotate_ports(self.last_map)
         return self.last_map
+
+    def annotate_ports(self, m):
+        """Adds what the port watch knows to each map port and uplink (only while it is switched on): `watch` = {learning, rising, perHour, was, known}."""
+        on = self.portwatch.enabled()
+        m["portwatch"] = {"on": on}
+        if not on:
+            return
+        for n in m.get("nodes", []):
+            link = n.get("link")
+            if link and (link.get("keys") or {}).get("self"):
+                keys = [self.portwatch.key(*link["keys"]["self"])]
+                link["watch"] = self.portwatch.state(keys)
+                link["watchKeys"] = keys
+            for p in n.get("ports", []):
+                keys = [self.portwatch.key(*k) for k in p.get("keys") or []]
+                if keys:
+                    p["watch"] = self.portwatch.state(keys)
+                    p["watchKeys"] = keys
+
+    def set_portwatch(self, body):
+        """The tick for watching rising port errors, and the 'known issue' mark on a port. The tick adds or removes the one built-in 'Port errors' system."""
+        if "on" in body:
+            on = bool(body["on"])
+            self.portwatch.set_enabled(on)
+            if not on:
+                self.portwatch.forget()
+            mk = {"id": "port-errors", "name": "Port errors", "group": "Network", "checks": [{"id": "ports", "type": "ports", "interval": 30}]}
+            monconfig.sync_nodes(self.paths, "port-errors", [mk] if on else [])
+            self.reload_monitoring()
+        if isinstance(body.get("keys"), list) and "known" in body:
+            self.portwatch.set_known([str(k) for k in body["keys"] if k], bool(body["known"]))
+        return {"on": self.portwatch.enabled(), "known": sorted(self.portwatch.known())}
 
     def graph_port(self, g, conns, nodes):
         """(node id, port, host) of the map port a graph's interface is plugged into, or (None, None, host). The graph is one interface of a device, so match by that
@@ -2465,6 +2501,14 @@ class App:
                         except monconfig.Conflict as e:
                             return self.send(409, {"error": str(e)})
                         app.reload_monitoring()
+                        return self.send(200, out)
+                    if path == "/api/portwatch":
+                        try:
+                            out = app.set_portwatch(body)
+                        except monconfig.Invalid as e:
+                            return self.send(400, {"error": "; ".join(e.errors), "errors": e.errors})
+                        except monconfig.Conflict as e:
+                            return self.send(409, {"error": str(e)})
                         return self.send(200, out)
                     if path in ("/api/expected", "/api/stopwatching", "/api/critical"):
                         try:

@@ -1,0 +1,207 @@
+"""Port errors, drops and link flaps: watch the change, not the lifetime total (#194).
+
+A switch port's counters only ever go up, so 122 million drops says nothing by itself. What matters is whether a port is getting worse *now*,
+compared with how that same port normally behaves. Every few seconds the sampler hands over each port's counters (read-only, from the UniFi
+port table). Here they are kept for a few hours, in memory, per port.
+
+A port is "rising" when, in the last 15 minutes, it gained at least a floor's worth of errors (or drops, or link flaps) AND that is at least
+5 times the worst 15 minutes it has had before (a port that has always had a trickle of errors is not news, and neither is one that only
+errors while a big transfer fills the link: that burst is its normal; a port that never had any and suddenly does, is). The worst earlier
+window is used, not the average, so a port that is quiet most of the day and noisy under load is not flagged every time the load comes. The
+box needs half an hour of readings of a port before it says anything: until then the port is "learning". A counter that goes backwards means
+the device restarted: that port starts again from there.
+
+Off by default. When it is switched on, one built-in check ("Port errors") reports Degraded (never Down: the link still works) while any port
+that is not marked "known issue" is rising; the usual 2-in-a-row confirmation and the alert triggers apply on top. A port marked known still
+shows its numbers, but never raises anything: the same rule as everywhere else, observed state is never hidden, only the alerting is."""
+import threading, time
+from collections import deque
+
+from .store import read_json, write_json
+
+KEEP = 24 * 3600          # seconds of readings kept per port (a day, so the last busy spell is still remembered)
+EVERY = 30                # at most one kept reading per port per this many seconds
+RECENT = 900              # the window that is compared with the port's earlier pace (15 minutes)
+MIN_HISTORY = 1800        # readings of a port needed before it can be called rising (30 minutes)
+RISE = 5                  # the recent pace must be at least this many times the earlier pace
+FLOOR = {"errors": 20, "drops": 1000, "flaps": 3}      # new in the window, at least, before it is worth a line
+WORDS = {"errors": "errors", "drops": "drops", "flaps": "link drops"}
+KINDS = ("errors", "drops", "flaps")
+
+
+def _num(x):
+    return x if isinstance(x, (int, float)) and not isinstance(x, bool) else None
+
+
+def _at(q, t):
+    """The latest reading at or before time t (the oldest one when t is older than all of them)."""
+    best = q[0]
+    for p in q:
+        if p[0] > t:
+            break
+        best = p
+    return best
+
+
+def _worst(q, end_t, i):
+    """The most one port gained in any 15-minute stretch ending at or before end_t, for counter i (None when its history is shorter than one stretch)."""
+    pts = [p for p in q if p[0] <= end_t]
+    best, j, full = 0, 0, False
+    for k, p in enumerate(pts):
+        while j + 1 <= k and pts[j + 1][0] <= p[0] - RECENT:
+            j += 1
+        if p[0] - pts[j][0] >= RECENT * 0.8:
+            full = True
+            best = max(best, p[i] - pts[j][i])
+    return best if full else None
+
+
+def judge(q):
+    """How one port is doing, from its readings [[t, errors, drops, flaps], ...] (oldest first).
+    -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}"""
+    out = {"learning": True, "rising": [], "perHour": {}, "was": {}}
+    if len(q) < 2:
+        return out
+    now, first = q[-1][0], q[0][0]
+    if now - first < RECENT:
+        return out
+    cut = _at(q, now - RECENT)
+    span_before = cut[0] - first
+    out["learning"] = now - first < MIN_HISTORY
+    for i, kind in enumerate(KINDS, start=1):
+        new = q[-1][i] - cut[i]
+        out["perHour"][kind] = round(new * 3600 / RECENT)
+        worst = _worst(q, cut[0], i)
+        if worst is None and span_before >= 60:
+            worst = cut[i] - q[0][i]                                  # less than one stretch of history: what there was
+        was = None if worst is None else worst * 3600 / RECENT
+        out["was"][kind] = None if was is None else round(was)
+        if out["learning"] or new < FLOOR[kind]:
+            continue
+        if was is None or new * 3600 / RECENT >= RISE * was:
+            out["rising"].append(kind)
+    return out
+
+
+class PortWatch:
+    def __init__(self, paths, clock=time.time):
+        self.paths, self.clock = paths, clock
+        self.lock = threading.Lock()
+        self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
+        self.labels = {}          # the same keys -> "Switch name, Port 5"
+
+    # ---- settings (in the box's config file) ----
+    def _cfg(self):
+        c = read_json(self.paths.config, {"schema": 4}).get("portwatch")
+        return c if isinstance(c, dict) else {}
+
+    def enabled(self):
+        return self._cfg().get("on") is True
+
+    def known(self):
+        return set(str(k) for k in self._cfg().get("known") or [])
+
+    def _save(self, **changes):
+        cfg = read_json(self.paths.config, {"schema": 4})
+        pw = cfg.get("portwatch") if isinstance(cfg.get("portwatch"), dict) else {}
+        pw.update(changes)
+        cfg["portwatch"] = pw
+        write_json(self.paths.config, cfg)
+
+    def set_enabled(self, on):
+        self._save(on=bool(on))
+
+    def set_known(self, keys, known):
+        """Mark ports (each one a list of "device id|port name" keys, like a bonded pair) as a known issue, or take the mark off."""
+        now = self.known()
+        for k in keys:
+            (now.add if known else now.discard)(str(k))
+        self._save(known=sorted(now))
+
+    # ---- readings ----
+    @staticmethod
+    def key(dev_id, port_name):
+        return f"{dev_id}|{port_name}"
+
+    def feed(self, devices, ids, now=None):
+        """devices: the controller's devices with their `ports` (rx_errors, tx_errors, rx_dropped, tx_dropped, link_down_count); ids: their ids."""
+        now = self.clock() if now is None else now
+        seen = set()
+        with self.lock:
+            for d, i in zip(devices, ids):
+                for p in d.get("ports") or []:
+                    if not isinstance(p, dict) or not p.get("name"):
+                        continue
+                    e = [_num(p.get("rx_errors")), _num(p.get("tx_errors"))]
+                    dr = [_num(p.get("rx_dropped")), _num(p.get("tx_dropped"))]
+                    fl = _num(p.get("link_down_count"))
+                    if None in e or None in dr:
+                        continue                                  # that switch gave no counters for this port: nothing to watch, nothing invented
+                    k = self.key(i, p["name"])
+                    seen.add(k)
+                    self.labels[k] = f"{d.get('name') or 'A switch'}, {p['name']}"
+                    row = [now, sum(e), sum(dr), fl or 0]
+                    q = self.series.setdefault(k, deque())
+                    if q and any(row[j] < q[-1][j] for j in (1, 2, 3)):
+                        q.clear()                                 # a counter went backwards: the device restarted, so start again from here
+                    if not q or now - q[-1][0] >= EVERY:
+                        q.append(row)
+                    else:
+                        q[-1] = row                               # same slot, newer figures
+                    while q and q[0][0] < now - KEEP:
+                        q.popleft()
+            for k in [k for k in self.series if k not in seen]:   # a port or device that is gone
+                del self.series[k]
+                self.labels.pop(k, None)
+
+    def forget(self):
+        with self.lock:
+            self.series.clear()
+            self.labels.clear()
+
+    # ---- answers ----
+    def state(self, keys):
+        """One map port (one or several keys, a bonded pair) in words and figures, or None when there is nothing to say."""
+        known = self.known()
+        with self.lock:
+            js = [judge(list(self.series[k])) for k in keys if k in self.series]
+        if not js:
+            return None
+        per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
+        was = {kind: (None if any(j["was"].get(kind) is None for j in js) else sum(j["was"][kind] for j in js)) for kind in KINDS}
+        rising = sorted({kind for j in js for kind in j["rising"]}, key=KINDS.index)
+        return {"learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was,
+                "known": any(k in known for k in keys)}
+
+    def findings(self):
+        """[(label, [kinds], perHour, was)] for ports that are rising and not marked known."""
+        known = self.known()
+        with self.lock:
+            snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
+        out = []
+        for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
+            j = judge(q)
+            if j["rising"] and k not in known:
+                out.append((label, j["rising"], j["perHour"], j["was"]))
+        return out
+
+    def check(self):
+        """The built-in check: (ok, detail, ms, extra). Degraded (a warning) while any watched port is rising; never a failure."""
+        if not self.enabled():
+            return None, "port watching is switched off", None, {}
+        with self.lock:
+            n = len(self.series)
+            ready = sum(1 for q in self.series.values() if len(q) >= 2 and q[-1][0] - q[0][0] >= MIN_HISTORY)
+        if not n:
+            return None, "no switch port counters to read yet", None, {}
+        found = self.findings()
+        if not found:
+            if ready < n:
+                return True, f"nothing rising so far ({ready} of {n} ports have half an hour of readings)", None, {}
+            return True, f"no port is getting worse ({n} ports watched)", None, {}
+        parts = []
+        for label, kinds, per, was in found[:3]:
+            what = " and ".join(f"{WORDS[k]} rising (about {per[k]:,} an hour" + (f", was {was[k]:,}" if was[k] is not None else "") + ")" for k in kinds)
+            parts.append(f"{label}: {what}")
+        more = f" (and {len(found) - 3} more)" if len(found) > 3 else ""
+        return True, "; ".join(parts) + more, None, {"warn": True}

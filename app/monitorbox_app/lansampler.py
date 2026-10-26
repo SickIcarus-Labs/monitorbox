@@ -12,9 +12,10 @@ WIFI = "wifi"           # the history's stand-in for a switch: every Wi-Fi clien
 
 
 class LanSampler:
-    def __init__(self, series, load_conns, call, clock=time.time, after=None):
+    def __init__(self, series, load_conns, call, clock=time.time, after=None, watch=None):
         """call(module, method, params, timeout) -> result, like the module runner."""
         self.series, self.load_conns, self.call, self.clock, self.after = series, load_conns, call, clock, after
+        self.watch = watch      # portwatch.PortWatch: fed the error and drop counters only while its tick is on
         self.stopping = threading.Event()
         self.thread = None
         self.status = {"at": 0.0, "switches": 0, "snmp": 0, "unifi": 0}
@@ -43,6 +44,11 @@ class LanSampler:
                     wifi[f"{name}|{c.get('mac') or ''}"] = {"name": name, "ap": c.get("ap"), "rx": c["rxBps"], "tx": c["txBps"]}
         ids = lanmap.device_ids(devices)
         now = self.clock()
+        if self.watch is not None:
+            if self.watch.enabled():
+                self.watch.feed(devices, ids, now)
+            else:
+                self.watch.forget()
         by_ip = {str(d.get("ip") or "").strip().lower(): i for d, i in zip(devices, ids) if d.get("ip")}
         covered = set()
         for c in conns:
