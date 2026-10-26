@@ -56,6 +56,14 @@ def _leaf_state(node, results):
     return HEALTHY, None
 
 
+def _camera_key(n):
+    """The identity of a camera node (so one camera that two sources both report counts once), or None for anything else."""
+    cs = n.get("checks") or []
+    if n.get("kind") != "aggregate" and len(cs) == 1 and cs[0].get("type") == "module" and cs[0].get("check") == "camera":
+        return "camera:" + re.sub(r"^camera\s+", "", str(n.get("name", "")), flags=re.I).strip().lower()
+    return None
+
+
 def _aggregate_state(node, states):
     kids = [states[c] for c in node["children"] if c in states]
     kids = [k for k in kids if k != PENDING]
@@ -323,6 +331,25 @@ def evaluate(nodes, results, now_iso=""):
                 worst = state[n["id"]]
         up = sum(1 for s in sts if s == HEALTHY)
         total = len(leaves)
+        # one camera seen by two sources (UniFi Protect and Scrypted both list it) is one camera; a card of cameras counts the cameras, not the integrations
+        by_cam = {}
+        for n in leaves:
+            if _camera_key(n):
+                by_cam.setdefault(_camera_key(n), []).append(n)
+        if by_cam:
+            cam_states = [max((state[m["id"]] for m in ms if state[m["id"]] != PENDING), key=lambda s: _SEVERITY[s], default=PENDING) for ms in by_cam.values()]
+            up, total = sum(1 for s in cam_states if s == HEALTHY), len(by_cam)
+
+        def distinct(items):
+            out_ = []
+            for n in items:
+                k = _camera_key(n)
+                if k and k in seen_cam_for[0]:
+                    continue
+                if k:
+                    seen_cam_for[0].add(k)
+                out_.append(n)
+            return out_
         if worst == PENDING:
             big, line = "…", "Checking"
         elif total == 1:
@@ -333,7 +360,8 @@ def evaluate(nodes, results, now_iso=""):
             parts = []
             for st, verb_one, verb_many in ((FAILED, "is down", "are down"), (DEGRADED, "is degraded", "are degraded"),
                                             (UNKNOWN, "cannot be checked", "cannot be checked")):
-                who = [n["name"] for n in leaves if state[n["id"]] == st]
+                seen_cam_for = [set()]
+                who = [n["name"] for n in distinct([n for n in leaves if state[n["id"]] == st])]
                 if who:
                     shown = who[:3]
                     label = (", ".join(shown[:-1]) + " and " + shown[-1]) if len(shown) > 1 else shown[0]
