@@ -883,6 +883,24 @@ def set_expected(paths, nid, on):
     return {"revision": save_monitoring(paths, mon, cur["revision"])}
 
 
+def set_critical(paths, ids, on):
+    """Mark systems as critical (or clear it): when a critical one is Down the whole banner goes red with the loudest message. Only what the owner set up can change;
+    the built-in internet checks stay as they are. Several ids are saved together."""
+    import copy
+    cur = get_monitoring(paths)
+    mon = copy.deepcopy(cur["monitoring"])
+    by = {n.get("id"): n for n in mon.get("nodes", [])}
+    bad = [i for i in ids if i not in by]
+    if bad:
+        raise Invalid([f"'{bad[0]}' is built in or no longer exists, so its importance cannot be changed here."])
+    for i in ids:
+        if on:
+            by[i]["critical"] = True
+        else:
+            by[i].pop("critical", None)
+    return {"revision": save_monitoring(paths, mon, cur["revision"])}
+
+
 def _prune(mon, gone):
     """Take the nodes in `gone` out of mon, then anything left pointing at them: a group with nothing left in it goes too,
     and dependsOn, children and expectedDown forget them. Returns the full set of removed ids."""

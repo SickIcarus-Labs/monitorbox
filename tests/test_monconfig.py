@@ -650,6 +650,41 @@ class OneItemPerCamera(unittest.TestCase):
         self.assertEqual({n["rule"] for n in nodes.values()}, {"primary"})
         self.assertFalse(monconfig.split_shared_items(paths))
 
+class CriticalTick(unittest.TestCase):
+    """The owner decides which things turn the whole banner red when they are down."""
+    def setUp(self):
+        self.paths = Paths(tempfile.mkdtemp(prefix="mb-crit-"))
+        mon = {"confirm": {"failures": 1, "seconds": 0}, "builtinInternet": True, "nodes": [
+            {"id": "a3", "name": "Anchor3", "group": "Servers", "rule": "primary", "checks": [{"id": "ping", "type": "ping", "target": "192.0.2.13"}]},
+            {"id": "goliath", "name": "Goliath", "group": "Servers", "rule": "primary", "checks": [{"id": "ping", "type": "ping", "target": "192.0.2.14"}]}]}
+        monconfig.save_monitoring(self.paths, mon, monconfig.get_monitoring(self.paths)["revision"])
+
+    def crit(self):
+        return {n["id"]: bool(n.get("critical")) for n in monconfig.get_monitoring(self.paths)["monitoring"]["nodes"]}
+
+    def test_ticking_and_clearing_it_changes_only_the_named_systems(self):
+        monconfig.set_critical(self.paths, ["a3"], True)
+        self.assertEqual(self.crit(), {"a3": True, "goliath": False})
+        monconfig.set_critical(self.paths, ["a3", "goliath"], True)
+        self.assertEqual(self.crit(), {"a3": True, "goliath": True})
+        monconfig.set_critical(self.paths, ["a3"], False)
+        self.assertEqual(self.crit(), {"a3": False, "goliath": True})
+
+    def test_a_system_that_is_not_there_or_is_built_in_is_refused_and_nothing_changes(self):
+        with self.assertRaises(monconfig.Invalid):
+            monconfig.set_critical(self.paths, ["a3", "internet"], True)
+        self.assertEqual(self.crit(), {"a3": False, "goliath": False})
+
+    def test_a_critical_system_that_is_down_makes_the_banner_red_with_the_loud_message(self):
+        from monitorbox_app import engine
+        monconfig.set_critical(self.paths, ["a3"], True)
+        nodes, _ = monconfig.all_nodes(self.paths)
+        res = {"a3/ping": {"ok": False, "detail": "no answer"}, "goliath/ping": {"ok": True, "detail": ""}}
+        self.assertEqual(engine.evaluate(nodes, res, "t")["banner"]["headline"], "Everything is fucked.")
+        monconfig.set_critical(self.paths, ["a3"], False)
+        nodes, _ = monconfig.all_nodes(self.paths)
+        self.assertEqual(engine.evaluate(nodes, res, "t")["banner"]["headline"], "Something's down")
+
 
 if __name__ == "__main__":
     unittest.main()
