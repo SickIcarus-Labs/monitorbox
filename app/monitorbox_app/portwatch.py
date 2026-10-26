@@ -5,7 +5,9 @@ compared with how that same port normally behaves. Every few seconds the sampler
 port table). Here they are kept for a few hours, in memory, per port.
 
 A port is "rising" when, in the last 15 minutes, it gained at least a floor's worth of errors (or drops, or link flaps) AND that is at least
-5 times its own earlier pace (a port that has always had a trickle of errors is not news; a port that never had any and suddenly does, is). The
+5 times the worst 15 minutes it has had before (a port that has always had a trickle of errors is not news, and neither is one that only
+errors while a big transfer fills the link: that burst is its normal; a port that never had any and suddenly does, is). The worst earlier
+window is used, not the average, so a port that is quiet most of the day and noisy under load is not flagged every time the load comes. The
 box needs half an hour of readings of a port before it says anything: until then the port is "learning". A counter that goes backwards means
 the device restarted: that port starts again from there.
 
@@ -17,7 +19,7 @@ from collections import deque
 
 from .store import read_json, write_json
 
-KEEP = 6 * 3600           # seconds of readings kept per port
+KEEP = 24 * 3600          # seconds of readings kept per port (a day, so the last busy spell is still remembered)
 EVERY = 30                # at most one kept reading per port per this many seconds
 RECENT = 900              # the window that is compared with the port's earlier pace (15 minutes)
 MIN_HISTORY = 1800        # readings of a port needed before it can be called rising (30 minutes)
@@ -41,6 +43,19 @@ def _at(q, t):
     return best
 
 
+def _worst(q, end_t, i):
+    """The most one port gained in any 15-minute stretch ending at or before end_t, for counter i (None when its history is shorter than one stretch)."""
+    pts = [p for p in q if p[0] <= end_t]
+    best, j, full = 0, 0, False
+    for k, p in enumerate(pts):
+        while j + 1 <= k and pts[j + 1][0] <= p[0] - RECENT:
+            j += 1
+        if p[0] - pts[j][0] >= RECENT * 0.8:
+            full = True
+            best = max(best, p[i] - pts[j][i])
+    return best if full else None
+
+
 def judge(q):
     """How one port is doing, from its readings [[t, errors, drops, flaps], ...] (oldest first).
     -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}"""
@@ -56,7 +71,10 @@ def judge(q):
     for i, kind in enumerate(KINDS, start=1):
         new = q[-1][i] - cut[i]
         out["perHour"][kind] = round(new * 3600 / RECENT)
-        was = (cut[i] - q[0][i]) * 3600 / span_before if span_before >= 60 else None
+        worst = _worst(q, cut[0], i)
+        if worst is None and span_before >= 60:
+            worst = cut[i] - q[0][i]                                  # less than one stretch of history: what there was
+        was = None if worst is None else worst * 3600 / RECENT
         out["was"][kind] = None if was is None else round(was)
         if out["learning"] or new < FLOOR[kind]:
             continue

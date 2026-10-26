@@ -39,6 +39,18 @@ class Judge(unittest.TestCase):
         slight = base + [(270 + 45 * k, 0, 0) for k in range(1, 4)]       # 45 per 5 min: only 1.5 times the old pace
         self.assertEqual(portwatch.judge(self.series(5, slight))["rising"], [])
 
+    def test_a_port_that_only_errors_under_a_big_transfer_is_not_flagged_each_time(self):
+        # quiet, then a 10 GbE transfer at minute 20 (300 errors in 15 minutes), quiet, and the same again at minute 100: its normal
+        vals, total = [], 0
+        for m in range(0, 121, 5):
+            if 20 <= m < 35 or 100 <= m < 115:
+                total += 100
+            vals.append((total, 0, 0))
+        q = self.series(5, vals[:23])                                  # minute 110: mid-burst
+        self.assertEqual(portwatch.judge(q)["rising"], [], "the same burst as last time is not news")
+        louder = vals[:21] + [(vals[20][0] + 1500 * k, 0, 0) for k in range(1, 4)]      # five times the worst before: that is news
+        self.assertEqual(portwatch.judge(self.series(5, louder))["rising"], ["errors"])
+
     def test_a_few_errors_an_hour_are_not_worth_a_line(self):
         q = self.series(5, [(0, 0, 0)] * 10 + [(2, 0, 0), (4, 0, 0), (6, 0, 0)])
         self.assertEqual(portwatch.judge(q)["rising"], [])
