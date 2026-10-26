@@ -431,7 +431,7 @@ class App:
 
     def reload_monitoring(self):
         try:
-            monconfig.split_shared_cameras(self.paths)         # older boxes watched all cameras as one item
+            monconfig.split_shared_items(self.paths)         # older boxes watched everything one integration found as one item
         except Exception:
             pass
         nodes, err = monconfig.all_nodes(self.paths)

@@ -222,7 +222,7 @@ class UnifiChecks(unittest.TestCase):
                          ["UniFi VPN Ferndale", "UniFi VPN PIA Cali", "UniFi VPN Tidewater"])   # sorted; the plain network is not a tunnel
         self.assertEqual({t["name"]: t["status"] for t in d["tunnels"]}, {"Ferndale": "paused", "PIA Cali": "connected", "Tidewater": "connected"})
         self.assertIn("UniFi Garage", labels)
-        self.assertEqual({(s["node"], s["group"], s["rule"]) for s in d["suggest"]}, {("UniFi", "Network", "any")})
+        self.assertEqual({(s["node"], s["group"], s["rule"]) for s in d["suggest"]}, {(s["label"] if s["batch"] != "Overview" else "UniFi", "Network", "primary") for s in d["suggest"]})      # the overview shares one item; every device and tunnel is its own
         self.assertEqual({s["batch"] for s in d["suggest"]}, {"Overview", "Devices", "VPN tunnels"})
         for s in d["suggest"]:                                  # every suggestion is a check that really runs
             want = "failed" if s["params"].get("name") == "Ferndale" else "healthy"       # Ferndale is paused in the fake
