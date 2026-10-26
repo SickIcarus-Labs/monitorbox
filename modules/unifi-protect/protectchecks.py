@@ -161,11 +161,10 @@ def camera_list(boot, now=None):
 
 def discover(boot, now=None):
     cams = camera_list(boot, now)
-    sug = [{"label": "Protect cameras", "check": "cameras", "params": {}, "batch": "Overview"},
-           {"label": "Protect recorder", "check": "nvr", "params": {}, "batch": "Overview"},
-           {"label": "Protect storage", "check": "storage", "params": {}, "batch": "Overview"}]
-    for c in cams:
-        sug.append({"label": f"Camera {c['name']}", "check": "camera", "params": {"name": c["name"]}, "batch": "Cameras"})
+    sug = [{"label": "Protect recorder", "check": "nvr", "params": {}, "batch": "Overview", "node": "UniFi Protect", "rule": "primary"},       # "is it there" comes first
+           {"label": "Protect storage", "check": "storage", "params": {}, "batch": "Overview", "node": "UniFi Protect", "rule": "primary"}]
+    for c in cams:      # every camera is its own item, so one that is off shows as Down by name (the all-cameras summary check is no longer offered: it would repeat what they say)
+        sug.append({"label": f"Camera {c['name']}", "check": "camera", "params": {"name": c["name"]}, "batch": "Cameras", "node": f"Camera {c['name']}", "rule": "primary"})
     for s in sug:
-        s.update({"node": "Cameras", "group": "Cameras", "rule": "any"})
+        s["group"] = "Cameras"
     return {"cameras": cams, "suggest": sug}

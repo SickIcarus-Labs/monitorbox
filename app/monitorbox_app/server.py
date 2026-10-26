@@ -430,6 +430,10 @@ class App:
             pass          # the pairing itself is already saved; the nodes are caught up at the next start
 
     def reload_monitoring(self):
+        try:
+            monconfig.split_shared_cameras(self.paths)         # older boxes watched all cameras as one item
+        except Exception:
+            pass
         nodes, err = monconfig.all_nodes(self.paths)
         mon = monconfig.load_config(self.paths).get("monitoring", {})
         self.monitor.configure(nodes, err, mon.get("confirm") if isinstance(mon, dict) and not err else None)

@@ -602,6 +602,33 @@ class ConfirmSettings(unittest.TestCase):
         self.assertTrue(monconfig.validate({"nodes": [dict(n, confirmFailures=99)]}, None)[1])
 
 
+
+class OneItemPerCamera(unittest.TestCase):
+    """An earlier version watched every camera as a check inside one shared 'Cameras' item, so one camera off only made it Degraded. Watching again gives each camera its own item."""
+    def test_the_shared_cameras_item_is_split_and_the_old_summary_check_goes(self):
+        d = tempfile.mkdtemp(prefix="mb-cam-"); paths = Paths(d)
+        monconfig.save_connections(paths, [{"id": "nvr", "module": "unifi-protect", "base_url": "https://192.0.2.71", "username": "fake-reader-1", "password": "fake-pw-77", "name": "Protect"}], 0)
+        chk = lambda label, check, **p: {"id": monconfig.check_id(label), "type": "module", "module": "unifi-protect", "connection": "nvr", "check": check, "params": p, "label": label}
+        mon = {"confirm": {"failures": 1, "seconds": 0}, "builtinInternet": False, "nodes": [
+            {"id": "cameras", "name": "Cameras", "group": "Cameras", "rule": "any", "checks": [chk("Protect cameras", "cameras"), chk("Protect recorder", "nvr"), chk("Camera Patio", "camera", name="Patio"), chk("Camera Garage", "camera", name="Garage")]}]}
+        monconfig.save_monitoring(paths, mon, monconfig.get_monitoring(paths)["revision"])
+        items = [{"label": "Protect recorder", "check": "nvr", "params": {}, "node": "UniFi Protect", "group": "Cameras", "rule": "primary"},
+                 {"label": "Camera Patio", "check": "camera", "params": {"name": "Patio"}, "node": "Camera Patio", "group": "Cameras", "rule": "primary"},
+                 {"label": "Camera Garage", "check": "camera", "params": {"name": "Garage"}, "node": "Camera Garage", "group": "Cameras", "rule": "primary"}]
+        self.assertTrue(monconfig.split_shared_cameras(paths))
+        self.assertFalse(monconfig.split_shared_cameras(paths), "the second time there is nothing left to split")
+        monconfig.add_watches(paths, "nvr", items)             # and watching again from the detect list leaves it as it is
+        nodes = {n["name"]: n for n in monconfig.get_monitoring(paths)["monitoring"]["nodes"]}
+        self.assertEqual(sorted(nodes), ["Camera Garage", "Camera Patio", "UniFi Protect"], "the shared item is gone, the old all-cameras check with it")
+        self.assertEqual({n["rule"] for n in nodes.values()}, {"primary"})
+        self.assertEqual([c["params"].get("name") for c in nodes["Camera Patio"]["checks"]], ["Patio"])
+        self.assertEqual([c["label"] for c in nodes["UniFi Protect"]["checks"]], ["Protect recorder"])
+        self.assertTrue(all(n["rule"] == "primary" for n in nodes.values()))
+        before = monconfig.get_monitoring(paths)["revision"]
+        monconfig.add_watches(paths, "nvr", items)                        # doing it again changes nothing
+        self.assertEqual(monconfig.get_monitoring(paths)["revision"], before)
+
+
 if __name__ == "__main__":
     unittest.main()
 

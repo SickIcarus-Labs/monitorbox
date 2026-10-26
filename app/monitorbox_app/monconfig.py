@@ -488,6 +488,52 @@ def watch_item(x):
     return {k: x[k] for k in ITEM_KEYS if x.get(k) is not None}
 
 
+def split_shared_cameras(paths):
+    """Earlier versions watched every UniFi Protect camera as a check inside one shared 'Cameras' item with the 'any' rule, so a camera that was
+    off only made that item Degraded. Give each camera its own item (rule 'primary', so an offline camera is Down by name), keep the recorder and
+    storage together in 'UniFi Protect' with the recorder first, and drop the old all-cameras summary, which the cameras now say themselves.
+    Does nothing unless the shared item is exactly that, and nothing the second time. Returns whether it changed anything."""
+    cur = get_monitoring(paths)
+    mon = cur["monitoring"]
+    old = next((n for n in mon.get("nodes", []) if n.get("id") == "cameras" and n.get("kind") != "aggregate" and n.get("rule") == "any"), None)
+    checks = (old or {}).get("checks") or []
+    if not checks or not all(c.get("type") == "module" and c.get("module") == "unifi-protect" and c.get("check") in ("camera", "cameras", "nvr", "storage") for c in checks):
+        return False
+    import copy
+    mon = copy.deepcopy(mon)
+    old = next(n for n in mon["nodes"] if n.get("id") == "cameras")
+    taken = {n.get("id") for n in mon["nodes"]} - {"cameras"}
+    mon["nodes"].remove(old)
+
+    def make(name, rule):
+        base = node_slug(name)
+        nid, k = base, 2
+        while nid in taken:
+            nid, k = f"{base[:31 - len(str(k)) - 1].rstrip('-')}-{k}", k + 1
+        taken.add(nid)
+        n = {"id": nid, "name": name, "group": old.get("group") or "Cameras", "rule": rule, "checks": []}
+        if old.get("critical"):
+            n["critical"] = True
+        if old.get("dependsOn"):
+            n["dependsOn"] = list(old["dependsOn"])
+        mon["nodes"].append(n)
+        return n
+    protect = None
+    for c in sorted(checks, key=lambda c: c.get("check") != "nvr"):          # the recorder first: it is the "is it there" check
+        if c["check"] == "cameras":
+            continue
+        if c["check"] == "camera":
+            make("Camera " + str((c.get("params") or {}).get("name") or c.get("label") or "camera"), "primary")["checks"].append(c)
+        else:
+            protect = protect or make("UniFi Protect", "primary")
+            protect["checks"].append(c)
+    for n in mon["nodes"]:
+        if "cameras" in n.get("dependsOn", []):
+            n["dependsOn"] = [d for d in n["dependsOn"] if d != "cameras"]
+    save_monitoring(paths, mon, cur["revision"])
+    return True
+
+
 def add_watches(paths, cid, items):
     """Re-detect's Watch button. Each item is {label, check, params, node?, group?}. Without `node` the check
     goes under the device that already pings this connection's host (or a new device). With `node` (a UPS,
@@ -531,6 +577,19 @@ def add_watches(paths, cid, items):
         taken = {n.get("id") for n in mon["nodes"]}
         if it.get("node"):
             nid = node_slug(str(it["node"]))
+            legacy_cams = next((n for n in mon["nodes"] if n.get("id") == "cameras" and nid != "cameras" and n.get("kind") != "aggregate"), None)
+            if legacy_cams is not None:       # earlier versions put every camera check in one shared "Cameras" item: this check moves to its own
+                moved = [c for c in legacy_cams["checks"] if c.get("id") == spec["id"] and c.get("connection") == cid and c.get("type") == "module"]
+                if moved:
+                    legacy_cams["checks"] = [c for c in legacy_cams["checks"] if c not in moved]
+                    state["changed"] = True
+                    if all(c.get("type") == "module" and c.get("check") == "cameras" for c in legacy_cams["checks"]):
+                        legacy_cams["checks"] = []             # only the old all-cameras summary is left: the cameras themselves replace it
+                    if not legacy_cams["checks"]:
+                        mon["nodes"].remove(legacy_cams)
+                        for n in mon["nodes"]:
+                            if "cameras" in n.get("dependsOn", []):
+                                n["dependsOn"] = [d for d in n["dependsOn"] if d != "cameras"]
             dev = next((n for n in mon["nodes"] if n.get("id") == nid), None) or new_node(str(it["node"]), str(it.get("group") or "Servers"), taken, "any" if it.get("rule") == "any" else "primary")
         else:
             host = conn.get("host")
