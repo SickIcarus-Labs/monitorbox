@@ -405,7 +405,6 @@ class PowerHold(Storms):
         self.assertEqual(again.observe(power_snap("unknown", False), self.now), [])
 
 
-
 class Triggers(unittest.TestCase):
     """The owner ticks what sends an alert: Down, Degraded, Unknown, Restored."""
     NODES = [node("a", "Anchor3"), node("b", "Granite")]
@@ -473,6 +472,43 @@ class Triggers(unittest.TestCase):
         self.assertEqual([e["event"] for e in self.sent], ["problem"])
         self.go(bad, 5); self.go(bad, 70)                    # the open alert was closed quietly, so a new problem is announced again
         self.assertEqual(len(self.sent), 2)
+
+
+class OneCameraOneAlert(unittest.TestCase):
+    """A camera both UniFi Protect and Scrypted watch alerts once, and is 'back' only when both are fine."""
+    def cam(self, i, source):
+        return {"id": i, "name": "Camera Patio", "group": "Cameras", "critical": False, "dependsOn": [], "rule": "primary",
+                "checks": [{"id": "c0", "type": "module", "module": source, "check": "camera", "params": {"name": "Patio"}}]}
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.sent, self.now = [], 1000.0
+        self.a = alerts.Alerts(os.path.join(self.d, "alerts.json"), os.path.join(self.d, "state.json"), lambda: None,
+                               send=lambda url, ev: self.sent.append(ev), clock=lambda: self.now, hostname=lambda: "box-host")
+        self.a.set({"enabled": True, "homeAssistant": {"webhook": HOOK}, "delaySeconds": 60})
+        self.nodes = [self.cam("p-patio", "unifi-protect"), self.cam("s-patio", "scrypted")]
+
+    def res(self, p, s):
+        r = lambda ok: {"ok": ok, "detail": "offline" if ok is False else "", "ms": 1, "at": "t", "since": "s"}
+        return {"p-patio/c0": r(p), "s-patio/c0": r(s)}
+
+    def go(self, p, s, secs=0):
+        self.now += secs
+        self.a.observe(engine.evaluate(self.nodes, self.res(p, s)), self.now)
+        self.a.flush(self.now)
+
+    def test_down_in_both_sources_is_one_alert_and_one_all_clear(self):
+        self.go(False, False); self.go(False, False, 70)
+        self.assertEqual([e["event"] for e in self.sent], ["problem"])
+        self.assertEqual(self.sent[0]["name"], "Camera Patio")
+        self.go(True, False, 5); self.go(True, False, 60)                        # Protect is fine again, Scrypted still says down: not back yet, and now only Degraded (the sources disagree), which is one update
+        self.assertEqual([(e["event"], e["state"]) for e in self.sent], [("problem", "failed"), ("problem", "degraded")])
+        self.go(True, True, 5); self.go(True, True, 40)
+        self.assertEqual([e["event"] for e in self.sent], ["problem", "problem", "recovered"])
+
+    def test_one_source_down_alone_still_alerts_once_and_only_as_degraded(self):
+        self.go(True, False); self.go(True, False, 70)
+        self.assertEqual([(e["event"], e["state"], e["name"]) for e in self.sent], [("problem", "degraded", "Camera Patio")])      # the sources disagree: Degraded, not Down
 
 if __name__ == "__main__":
     unittest.main()

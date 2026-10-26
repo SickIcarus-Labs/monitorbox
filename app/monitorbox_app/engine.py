@@ -231,29 +231,58 @@ def evaluate(nodes, results, now_iso=""):
             "checks": check_rows(n), "children": list(n.get("children", [])), "service": n.get("service"), "link": n.get("link"),
         }
 
+    # a camera two sources both report (UniFi Protect and Scrypted) is one camera: both say it is down, it is Down; one says down and the other says it is fine,
+    # it is only Degraded (the trouble may be with one source, such as Scrypted acting up). Each node keeps what its own source observed; only the banner,
+    # the attention list (one entry per camera, so one alert) and the card tallies use this.
+    eff = dict(state)
+    cam_members = {}
+    for n in nodes:
+        k = _camera_key(n)
+        if k and n["id"] not in muted:
+            cam_members.setdefault(k, []).append(n["id"])
+    cam_rep = {}
+    for ids in cam_members.values():
+        if len(ids) < 2:
+            continue
+        ids.sort()
+        seen = [state[i] for i in ids if state[i] != PENDING]
+        if FAILED in seen and (HEALTHY in seen or DEGRADED in seen):
+            for i in ids:
+                if state[i] == FAILED:
+                    eff[i] = DEGRADED
+        for i in ids:
+            cam_rep[i] = ids
+
     # --- what is worth the person's attention: roots only; aggregates only when they are down
     def counts_for_banner(n):
-        return n.get("kind") != "aggregate" or state[n["id"]] == FAILED
+        return n.get("kind") != "aggregate" or eff[n["id"]] == FAILED
 
     attention = []
     for n in nodes:
-        s = state[n["id"]]
-        if s not in (FAILED, DEGRADED, UNKNOWN) or n["id"] in affected_by or not counts_for_banner(n) or n["id"] in muted:
+        ids = cam_rep.get(n["id"])
+        if ids and n["id"] != ids[0]:
+            continue                              # the same camera from another source: the first one speaks for it
+        src = by_id[max(ids, key=lambda i: _SEVERITY[eff[i]])] if ids else n          # the source with the most to say
+        s = eff[src["id"]]
+        if s not in (FAILED, DEGRADED, UNKNOWN) or src["id"] in affected_by or not counts_for_banner(src) or n["id"] in muted:
             continue
-        o = out_nodes[n["id"]]
-        w = why[n["id"]]
-        bad = next((c.get("label") or "" for c in n.get("checks", []) if w is not None and results.get(f"{n['id']}/{c['id']}") is w), "")
-        attention.append({**{k: o[k] for k in ("id", "name", "group", "critical", "state", "label", "detail", "since")},
-                          "check": bad if len(n.get("checks", [])) > 1 else "",
+        o = out_nodes[src["id"]]
+        w = why[src["id"]]
+        bad = next((c.get("label") or "" for c in src.get("checks", []) if w is not None and results.get(f"{src['id']}/{c['id']}") is w), "")
+        detail = o["detail"]
+        if ids and state[src["id"]] == FAILED and s == DEGRADED:
+            detail = (detail + " (the other source reports it fine)").strip()
+        attention.append({"id": n["id"], "name": n["name"], "group": n["group"], "critical": o["critical"], "state": s, "label": LABEL[s],
+                          "detail": detail, "since": o["since"], "check": bad if len(src.get("checks", [])) > 1 else "",
                           "affects": [by_id[a]["name"] for a in o["affects"]]})
     attention.sort(key=lambda a: (-_SEVERITY[a["state"]], not a["critical"], a["name"].lower()))
 
-    visible = [n for n in nodes if counts_for_banner(n) and state[n["id"]] != PENDING and n["id"] not in muted]
-    failed_crit = [n for n in visible if state[n["id"]] == FAILED and n.get("critical")]
-    any_down = [n for n in visible if state[n["id"]] in (FAILED, DEGRADED)]
-    any_unknown = [n for n in visible if state[n["id"]] == UNKNOWN]
+    visible = [n for n in nodes if counts_for_banner(n) and eff[n["id"]] != PENDING and n["id"] not in muted]
+    failed_crit = [n for n in visible if eff[n["id"]] == FAILED and n.get("critical")]
+    any_down = [n for n in visible if eff[n["id"]] in (FAILED, DEGRADED)]
+    any_unknown = [n for n in visible if eff[n["id"]] == UNKNOWN]
     leaf_total = sum(1 for n in nodes if n.get("kind") != "aggregate")
-    pending = any(state[n["id"]] == PENDING for n in nodes)
+    pending = any(eff[n["id"]] == PENDING for n in nodes)
 
     def names(items):
         items = [i["name"] for i in items]
@@ -264,7 +293,7 @@ def evaluate(nodes, results, now_iso=""):
 
     down = [a for a in attention if a["state"] == FAILED]
     shaky = [a for a in attention if a["state"] == DEGRADED]
-    any_failed = [n for n in visible if state[n["id"]] == FAILED]
+    any_failed = [n for n in visible if eff[n["id"]] == FAILED]
 
     def who(items, one, many, fallback):
         """"A and B are down" for a few things, "5 things are down" for more."""
@@ -323,12 +352,12 @@ def evaluate(nodes, results, now_iso=""):
             cards.append({"name": g, "state": "expected", "label": "Expected down", "big": "Expected down",
                           "line": ", ".join(quiet_names), "nodes": [n["id"] for n in members]})
             continue
-        sts = [state[n["id"]] for n in leaves if state[n["id"]] != PENDING]
+        sts = [eff[n["id"]] for n in leaves if eff[n["id"]] != PENDING]
         worst = max(sts, key=lambda s: _SEVERITY[s]) if sts else PENDING
         # an aggregate that is down outranks its healthy-looking leaves (e.g. all DNS servers failed)
         for n in members:
-            if n.get("kind") == "aggregate" and n["id"] not in muted and _SEVERITY[state[n["id"]]] > _SEVERITY.get(worst, 0):
-                worst = state[n["id"]]
+            if n.get("kind") == "aggregate" and n["id"] not in muted and _SEVERITY[eff[n["id"]]] > _SEVERITY.get(worst, 0):
+                worst = eff[n["id"]]
         up = sum(1 for s in sts if s == HEALTHY)
         total = len(leaves)
         # one camera seen by two sources (UniFi Protect and Scrypted both list it) is one camera; a card of cameras counts the cameras, not the integrations
@@ -337,7 +366,7 @@ def evaluate(nodes, results, now_iso=""):
             if _camera_key(n):
                 by_cam.setdefault(_camera_key(n), []).append(n)
         if by_cam:
-            cam_states = [max((state[m["id"]] for m in ms if state[m["id"]] != PENDING), key=lambda s: _SEVERITY[s], default=PENDING) for ms in by_cam.values()]
+            cam_states = [max((eff[m["id"]] for m in ms if eff[m["id"]] != PENDING), key=lambda s: _SEVERITY[s], default=PENDING) for ms in by_cam.values()]
             up, total = sum(1 for s in cam_states if s == HEALTHY), len(by_cam)
 
         def distinct(items):
@@ -361,7 +390,7 @@ def evaluate(nodes, results, now_iso=""):
             for st, verb_one, verb_many in ((FAILED, "is down", "are down"), (DEGRADED, "is degraded", "are degraded"),
                                             (UNKNOWN, "cannot be checked", "cannot be checked")):
                 seen_cam_for = [set()]
-                who = [n["name"] for n in distinct([n for n in leaves if state[n["id"]] == st])]
+                who = [n["name"] for n in distinct([n for n in leaves if eff[n["id"]] == st])]
                 if who:
                     shown = who[:3]
                     label = (", ".join(shown[:-1]) + " and " + shown[-1]) if len(shown) > 1 else shown[0]
