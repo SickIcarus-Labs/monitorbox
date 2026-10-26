@@ -51,6 +51,11 @@ class Judge(unittest.TestCase):
         louder = vals[:21] + [(vals[20][0] + 1500 * k, 0, 0) for k in range(1, 4)]      # five times the worst before: that is news
         self.assertEqual(portwatch.judge(self.series(5, louder))["rising"], ["errors"])
 
+    def test_link_drops_count_only_on_uplinks_and_servers(self):
+        q = self.series(5, [(0, 0, 0)] * 10 + [(0, 0, 1), (0, 0, 3), (0, 0, 6)])
+        self.assertEqual(portwatch.judge(q, flaps=True)["rising"], ["flaps"])
+        self.assertEqual(portwatch.judge(q, flaps=False)["rising"], [], "a laptop that sleeps drops its port: not news")
+
     def test_a_few_errors_an_hour_are_not_worth_a_line(self):
         q = self.series(5, [(0, 0, 0)] * 10 + [(2, 0, 0), (4, 0, 0), (6, 0, 0)])
         self.assertEqual(portwatch.judge(q)["rising"], [])
@@ -105,6 +110,20 @@ class Watch(unittest.TestCase):
         self.assertTrue(ok)
         self.assertFalse(extra.get("warn"))
         self.assertIn("half an hour", detail)
+
+    def test_a_flapping_client_port_is_quiet_and_a_flapping_server_port_is_not(self):
+        self.w.set_enabled(True)
+        laptop, server = self.w.key("sw1", "Port 3"), self.w.key("sw1", "Port 4")
+        for m in range(0, 61):
+            n = 0 if m < 45 else (m - 45) // 2
+            self.w.feed([dev("Core switch", **{"Port 3": (0, 0, 0, 0, n), "Port 4": (0, 0, 0, 0, n)})], ["sw1"], now=m * 60)
+        self.assertEqual(self.w.check()[3], {}, "no port is marked as an uplink or server yet, so nothing is flagged")
+        self.w.set_flap_ports({server})
+        self.assertEqual(self.w.state([laptop])["rising"], [])
+        self.assertEqual(self.w.state([server])["rising"], ["flaps"])
+        ok, detail, _, extra = self.w.check()
+        self.assertTrue(extra.get("warn"))
+        self.assertIn("Port 4", detail); self.assertNotIn("Port 3", detail)
 
     def test_a_known_port_keeps_its_numbers_but_never_raises_anything(self):
         self.w.set_enabled(True)

@@ -56,7 +56,7 @@ def _worst(q, end_t, i):
     return best if full else None
 
 
-def judge(q):
+def judge(q, flaps=True):
     """How one port is doing, from its readings [[t, errors, drops, flaps], ...] (oldest first).
     -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}"""
     out = {"learning": True, "rising": [], "perHour": {}, "was": {}}
@@ -69,6 +69,8 @@ def judge(q):
     span_before = cut[0] - first
     out["learning"] = now - first < MIN_HISTORY
     for i, kind in enumerate(KINDS, start=1):
+        if kind == "flaps" and not flaps:
+            continue                                              # a client port drops whenever a laptop sleeps: only uplinks and servers are worth it
         new = q[-1][i] - cut[i]
         out["perHour"][kind] = round(new * 3600 / RECENT)
         worst = _worst(q, cut[0], i)
@@ -89,6 +91,7 @@ class PortWatch:
         self.lock = threading.Lock()
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
+        self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
 
     # ---- settings (in the box's config file) ----
     def _cfg(self):
@@ -154,6 +157,10 @@ class PortWatch:
                 del self.series[k]
                 self.labels.pop(k, None)
 
+    def set_flap_ports(self, keys):
+        """The ports whose link drops are worth reporting. A port with a laptop or a TV on it drops every time that sleeps, so it is left out."""
+        self.flap_ports = set(keys)
+
     def forget(self):
         with self.lock:
             self.series.clear()
@@ -164,7 +171,7 @@ class PortWatch:
         """One map port (one or several keys, a bonded pair) in words and figures, or None when there is nothing to say."""
         known = self.known()
         with self.lock:
-            js = [judge(list(self.series[k])) for k in keys if k in self.series]
+            js = [judge(list(self.series[k]), k in self.flap_ports) for k in keys if k in self.series]
         if not js:
             return None
         per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
@@ -180,7 +187,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         out = []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q)
+            j = judge(q, k in self.flap_ports)
             if j["rising"] and k not in known:
                 out.append((label, j["rising"], j["perHour"], j["was"]))
         return out
