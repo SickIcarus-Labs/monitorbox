@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.1.0** Watch for rising port errors (off until you tick it, on the Network map page). MonitorBox learns what is normal for each switch port and shows a yellow heads-up, never red, when a port's errors, drops or link drops climb well above that. A port you mark "known issue" keeps its numbers but never raises anything. It needs about half an hour of readings before it says anything, and starts over after a restart of the box or of a switch.
 - **1.0.1** The busiest-client card says "The network is quiet" when nothing is busy, not "The wired LAN is quiet": it watches wifi devices too.
 
 ## 1.0.0 and 0.83.18 to 0.83.22 (stable, October 25)
