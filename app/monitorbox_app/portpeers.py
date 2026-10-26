@@ -81,6 +81,22 @@ class PortSeries:
             for k in [k for k in d if k[0] not in switches]:
                 del d[k]
 
+    def recent(self, keys, seconds, now=None):
+        """How busy these ports (one, or a bonded pair added together) were over the last `seconds`: {"avgBps", "peakBps"} of the busier direction,
+        or None when the box has no readings of them."""
+        now = self.clock() if now is None else now
+        lo, tot_in, tot_out, peak, any_ = now - seconds, 0.0, 0.0, 0.0, False
+        with self.lock:
+            qs = [[p for p in self.points.get(k) or [] if p[0] >= lo] for k in keys]
+        for q in qs:
+            if not q:
+                continue
+            any_ = True
+            tot_in += sum(p[1] for p in q) / len(q)
+            tot_out += sum(p[2] for p in q) / len(q)
+            peak += max(max(p[1], p[2]) for p in q)
+        return {"avgBps": round(max(tot_in, tot_out)), "peakBps": round(peak)} if any_ else None
+
     def history_seconds(self, keys, now=None):
         """How long the box has been reading these ports: seconds back to the oldest reading of any of them (0 when there is none)."""
         now = self.clock() if now is None else now

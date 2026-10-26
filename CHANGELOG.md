@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.1.2** Port watch says what kind of errors: receive and transmit counted apart ("29,000 receive, 68 transmit"), and how busy the port was while they happened ("carrying about 4.1 Gbit/s, peak 9.2"). Receive errors point at the cable, optic or the far end; transmit errors and drops point at a port backing up.
 - **1.1.1** Port watch: link drops are only reported for uplinks, links between switches and servers, not for ports with a laptop or TV on them (they drop whenever the device sleeps). A port is also compared with the worst 15 minutes it has had in the last day, so errors that only come under a big transfer are not flagged each time.
 - **1.1.0** Watch for rising port errors (off until you tick it, on the Network map page). MonitorBox learns what is normal for each switch port and shows a yellow heads-up, never red, when a port's errors, drops or link drops climb well above that. A port you mark "known issue" keeps its numbers but never raises anything. It needs about half an hour of readings before it says anything, and starts over after a restart of the box or of a switch.
 - **1.0.1** The busiest-client card says "The network is quiet" when nothing is busy, not "The wired LAN is quiet": it watches wifi devices too.

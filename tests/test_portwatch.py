@@ -125,6 +125,21 @@ class Watch(unittest.TestCase):
         self.assertTrue(extra.get("warn"))
         self.assertIn("Port 4", detail); self.assertNotIn("Port 3", detail)
 
+    def test_the_line_says_receive_or_transmit_and_how_busy_the_link_was(self):
+        busy = lambda keys, secs: {"avgBps": 4_100_000_000, "peakBps": 9_200_000_000}
+        w = portwatch.PortWatch(self.paths, traffic=busy)
+        w.set_enabled(True)
+        for m in range(0, 61):
+            rx = 0 if m < 45 else (m - 45) * 700            # receive errors climb, transmit errors stay a trickle
+            w.feed([dev("Broad Leaf", **{"SFP+ 2": (rx, 0 if m < 45 else (m - 45) * 2, 0, 0, 0)})], ["gw"], now=m * 60)
+        st = w.state([w.key("gw", "SFP+ 2")])
+        self.assertEqual(st["split"]["errors"], {"rx": 42000, "tx": 120})
+        self.assertEqual(st["traffic"], {"avgBps": 4_100_000_000, "peakBps": 9_200_000_000})
+        ok, detail, _, extra = w.check()
+        self.assertTrue(extra.get("warn"))
+        self.assertIn("42,000 receive, 120 transmit", detail)
+        self.assertIn("carrying about 4.1 Gbit/s (peak 9.2 Gbit/s)", detail)
+
     def test_a_known_port_keeps_its_numbers_but_never_raises_anything(self):
         self.w.set_enabled(True)
         key = self.w.key("sw1", "Port 5")
@@ -165,6 +180,21 @@ class Watch(unittest.TestCase):
         again = portwatch.PortWatch(self.paths)
         self.assertTrue(again.enabled())
         self.assertEqual(again.known(), {a, c})
+
+
+class Busy(unittest.TestCase):
+    def test_the_port_history_says_how_busy_a_port_was(self):
+        from monitorbox_app import portpeers
+        t = [1000.0]
+        series = portpeers.PortSeries(clock=lambda: t[0])
+        for i, (rin, rout) in enumerate([(100, 50), (300, 70), (200, 90)]):
+            series.feed_rates("sw1", {"Port 1": {"in_bps": rin, "out_bps": rout}, "Port 2": {"in_bps": 10, "out_bps": 1000}}, 1000.0 - 20 + i * 10)
+        one = series.recent([("sw1", "Port 1")], 900)
+        self.assertEqual(one, {"avgBps": 200, "peakBps": 300})
+        pair = series.recent([("sw1", "Port 1"), ("sw1", "Port 2")], 900)
+        self.assertEqual(pair["avgBps"], 1070)             # the busier direction: out, 70 + 1000
+        self.assertIsNone(series.recent([("sw9", "Port 1")], 900))
+        self.assertEqual(portwatch.bps_words(9_200_000_000), "9.2 Gbit/s"); self.assertEqual(portwatch.bps_words(2_500_000), "2.5 Mbit/s")
 
 
 class AsASystem(unittest.TestCase):

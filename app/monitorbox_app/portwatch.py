@@ -29,6 +29,17 @@ WORDS = {"errors": "errors", "drops": "drops", "flaps": "link drops"}
 KINDS = ("errors", "drops", "flaps")
 
 
+SPLIT = {"errors": (4, 5), "drops": (6, 7)}      # which stored columns are the receive and transmit parts
+
+
+def bps_words(x):
+    x = float(x or 0)
+    for div, unit in ((1e9, "Gbit/s"), (1e6, "Mbit/s"), (1e3, "kbit/s")):
+        if x >= div:
+            return f"{x / div:.1f} {unit}"
+    return f"{round(x)} bit/s"
+
+
 def _num(x):
     return x if isinstance(x, (int, float)) and not isinstance(x, bool) else None
 
@@ -59,7 +70,7 @@ def _worst(q, end_t, i):
 def judge(q, flaps=True):
     """How one port is doing, from its readings [[t, errors, drops, flaps], ...] (oldest first).
     -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}"""
-    out = {"learning": True, "rising": [], "perHour": {}, "was": {}}
+    out = {"learning": True, "rising": [], "perHour": {}, "was": {}, "split": {}}
     if len(q) < 2:
         return out
     now, first = q[-1][0], q[0][0]
@@ -73,6 +84,9 @@ def judge(q, flaps=True):
             continue                                              # a client port drops whenever a laptop sleeps: only uplinks and servers are worth it
         new = q[-1][i] - cut[i]
         out["perHour"][kind] = round(new * 3600 / RECENT)
+        if kind in SPLIT and len(q[-1]) >= 8 and len(cut) >= 8:     # receive and transmit apart: a bad link shows as receive errors, a backed-up port as transmit drops
+            a, b = SPLIT[kind]
+            out["split"][kind] = {"rx": round((q[-1][a] - cut[a]) * 3600 / RECENT), "tx": round((q[-1][b] - cut[b]) * 3600 / RECENT)}
         worst = _worst(q, cut[0], i)
         if worst is None and span_before >= 60:
             worst = cut[i] - q[0][i]                                  # less than one stretch of history: what there was
@@ -86,8 +100,9 @@ def judge(q, flaps=True):
 
 
 class PortWatch:
-    def __init__(self, paths, clock=time.time):
+    def __init__(self, paths, clock=time.time, traffic=None):
         self.paths, self.clock = paths, clock
+        self.traffic = traffic      # traffic(keys, seconds) -> {avgBps, peakBps} or None: how busy the port was, from the port history
         self.lock = threading.Lock()
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
@@ -143,7 +158,7 @@ class PortWatch:
                     k = self.key(i, p["name"])
                     seen.add(k)
                     self.labels[k] = f"{d.get('name') or 'A switch'}, {p['name']}"
-                    row = [now, sum(e), sum(dr), fl or 0]
+                    row = [now, sum(e), sum(dr), fl or 0, e[0], e[1], dr[0], dr[1]]
                     q = self.series.setdefault(k, deque())
                     if q and any(row[j] < q[-1][j] for j in (1, 2, 3)):
                         q.clear()                                 # a counter went backwards: the device restarted, so start again from here
@@ -177,11 +192,13 @@ class PortWatch:
         per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
         was = {kind: (None if any(j["was"].get(kind) is None for j in js) else sum(j["was"][kind] for j in js)) for kind in KINDS}
         rising = sorted({kind for j in js for kind in j["rising"]}, key=KINDS.index)
-        return {"learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was,
+        split = {kind: {side: sum(j["split"][kind][side] for j in js if kind in j["split"]) for side in ("rx", "tx")} for kind in SPLIT if any(kind in j["split"] for j in js)}
+        busy = self.traffic(list(keys), RECENT) if self.traffic else None
+        return {"learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was, "split": split, "traffic": busy,
                 "known": any(k in known for k in keys)}
 
     def findings(self):
-        """[(label, [kinds], perHour, was)] for ports that are rising and not marked known."""
+        """[{label, kinds, perHour, was, split, traffic}] for ports that are rising and not marked known."""
         known = self.known()
         with self.lock:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
@@ -189,7 +206,8 @@ class PortWatch:
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
             j = judge(q, k in self.flap_ports)
             if j["rising"] and k not in known:
-                out.append((label, j["rising"], j["perHour"], j["was"]))
+                out.append({"label": label, "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"],
+                            "traffic": self.traffic([k], RECENT) if self.traffic else None})
         return out
 
     def check(self):
@@ -207,8 +225,12 @@ class PortWatch:
                 return True, f"nothing rising so far ({ready} of {n} ports have half an hour of readings)", None, {}
             return True, f"no port is getting worse ({n} ports watched)", None, {}
         parts = []
-        for label, kinds, per, was in found[:3]:
-            what = " and ".join(f"{WORDS[k]} rising (about {per[k]:,} an hour" + (f", was {was[k]:,}" if was[k] is not None else "") + ")" for k in kinds)
-            parts.append(f"{label}: {what}")
+        for f in found[:3]:
+            per, was, split = f["perHour"], f["was"], f["split"]
+            what = " and ".join(f"{WORDS[k]} rising (about {per[k]:,} an hour"
+                                + (f": {split[k]['rx']:,} receive, {split[k]['tx']:,} transmit" if k in split else "")
+                                + (f", was {was[k]:,}" if was[k] is not None else "") + ")" for k in f["kinds"])
+            busy = f["traffic"]
+            parts.append(f"{f['label']}: {what}" + (f", carrying about {bps_words(busy['avgBps'])} (peak {bps_words(busy['peakBps'])})" if busy else ""))
         more = f" (and {len(found) - 3} more)" if len(found) > 3 else ""
         return True, "; ".join(parts) + more, None, {"warn": True}

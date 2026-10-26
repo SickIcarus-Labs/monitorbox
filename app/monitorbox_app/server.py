@@ -88,7 +88,7 @@ class App:
         self.gw_cache = {}
         self.minute_flows = []           # the gateway's flow log for the last minute, kept fresh by flow_loop, for the Busiest client
         self.busiest = busiest.Busiest(self.series)
-        self.portwatch = portwatch.PortWatch(self.paths)          # rising port errors, drops and link drops (off until ticked)
+        self.portwatch = portwatch.PortWatch(self.paths, traffic=lambda keys, secs: self.series.recent([tuple(k.rsplit("|", 1)) for k in keys], secs))          # rising port errors, drops and link drops (off until ticked)
         self.lansampler = lansampler.LanSampler(self.series, lambda: monconfig.load_config(self.paths).get("connections", []), lambda m, meth, p, t: self.modules.call(m, meth, p, t),
                                                 after=lambda: self.last_map and self.busiest.update(self.last_map, flows=self.minute_flows, opts=self.busiest_opts()), watch=self.portwatch)
         self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), self.monitor.snapshot,
