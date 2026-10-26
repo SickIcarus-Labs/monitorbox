@@ -1140,7 +1140,7 @@ class App:
         if g.get("kind") == "busiest":
             leader = self.busiest.data(win).get("leader")
             if not leader:
-                return {**out, "why": "The wired LAN is quiet in that time."}
+                return {**out, "why": "The network is quiet in that time."}
             if leader.get("node") is None:                  # a device the gateway's flow log named (wifi): its flows are the list
                 mac = leader.get("mac")
                 fr = self.flow_rows(win)

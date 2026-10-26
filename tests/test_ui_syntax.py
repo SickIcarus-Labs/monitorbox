@@ -20,5 +20,12 @@ class PageScript(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stderr[:600])
 
 
+class Wording(unittest.TestCase):
+    def test_the_busiest_card_does_not_call_the_network_wired_only(self):
+        # the busiest-client card watches wifi devices too, so its quiet message must not say "wired" (found on the first day of 1.0)
+        self.assertIn("The network is quiet", ui.PAGE)
+        self.assertNotIn("wired LAN is quiet", ui.PAGE)
+
+
 if __name__ == "__main__":
     unittest.main()
