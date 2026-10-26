@@ -2466,9 +2466,12 @@ class App:
                             return self.send(409, {"error": str(e)})
                         app.reload_monitoring()
                         return self.send(200, out)
-                    if path in ("/api/expected", "/api/stopwatching"):
+                    if path in ("/api/expected", "/api/stopwatching", "/api/critical"):
                         try:
-                            if path == "/api/expected":
+                            if path == "/api/critical":
+                                ids = body.get("ids") if isinstance(body.get("ids"), list) else [body.get("id")]
+                                out = monconfig.set_critical(app.paths, [str(i) for i in ids if i], bool(body.get("critical")))
+                            elif path == "/api/expected":
                                 out = monconfig.set_expected(app.paths, str(body.get("id", "")), bool(body.get("expected")))
                             else:
                                 out = monconfig.remove_node(app.paths, str(body.get("id", "")), bool(body.get("children")))
