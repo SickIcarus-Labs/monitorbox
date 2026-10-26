@@ -42,6 +42,11 @@ class CardSections(unittest.TestCase):
             trouble = pg.evaluate(NODES_JS, "Patio")
             self.assertIn("Camera Patio", trouble, "a camera that is down opens its own fold")
             self.assertIn("3 of 4 good", trouble)
+            # a long name with a middling detail ("Camera Garage" + "G6 Instant · recording · connected") gets two lines like its neighbours, not a cut-off one
+            row = lambda name, dt: pg.evaluate("([n, d]) => line('go()', 'healthy', n, d, 1)", [name, dt])
+            self.assertIn("rw two", row("Camera Garage", "G6 Instant · recording · connected"))
+            self.assertIn("rw two", row("Scrypted", "Scrypted 0.147.0 · 9 cameras"))
+            self.assertNotIn("rw two", row("Gateway", "reply from 192.168.77.1"), "short ones stay on one line")
             self.assertEqual(errs, [])
             b.close()
 

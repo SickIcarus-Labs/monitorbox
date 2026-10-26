@@ -362,6 +362,20 @@ class CameraCount(unittest.TestCase):
         out = engine.evaluate(nodes, {"p-patio/c0": bad, "s-patio/c0": unk, "p-pool/c0": ok})
         self.assertEqual([(a["name"], a["state"]) for a in out["attention"]], [("Camera Patio", "failed")])
 
+class SitesCard(unittest.TestCase):
+    def test_the_sites_card_counts_its_sites_even_when_there_is_only_one(self):
+        link = lambda i, name: {"id": i, "name": name, "group": "Sites", "critical": False, "dependsOn": [], "rule": "primary", "checks": [{"id": "c0", "type": "site", "site": i}]}
+        ok = {"ok": True, "detail": "", "ms": 1, "at": "t", "since": "s"}
+        bad = {"ok": False, "detail": "no answer", "ms": 1, "at": "t", "since": "s"}
+        card = lambda nodes, res: next(c for c in engine.evaluate(nodes, res)["cards"] if c["name"] == "Sites")
+        one = [link("site-a", "Tidewater link")]
+        self.assertEqual((card(one, {"site-a/c0": ok})["big"], card(one, {"site-a/c0": ok})["line"]), ("1 of 1 up", "Tidewater link"))
+        self.assertEqual(card(one, {"site-a/c0": bad})["big"], "0 of 1 up")
+        two = one + [link("site-b", "Riverside link")]
+        self.assertEqual(card(two, {"site-a/c0": ok, "site-b/c0": bad})["big"], "1 of 2 up")
+        other = [{"id": "x", "name": "Only one", "group": "Servers", "critical": False, "dependsOn": [], "rule": "primary", "checks": [{"id": "c0", "type": "ping", "target": "x"}]}]
+        self.assertEqual(next(c for c in engine.evaluate(other, {"x/c0": ok})["cards"])["big"], "Up", "other cards with one item still say Up")
+
 if __name__ == "__main__":
     unittest.main()
 

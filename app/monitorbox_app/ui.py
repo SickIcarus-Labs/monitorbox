@@ -326,7 +326,7 @@ function membersOf(n){const all=Object.values(snap.nodes),owned=new Set(all.flat
 const ds=(n,st)=>n.muted&&st!=='healthy'&&st!=='pending'?'expected':st;   // expected down shows grey; the observed state stays in the data
 const padOf=d=>d?` style="padding-left:${d*20}px"`:'';
 function line(go,st,name,dt,d,note){dt=dt||'';const nt=note?' note':'';   // note: fine, but worth a line (a busy CPU): the text turns amber, the light stays green
- return dt.length>34?`<button class="rw two${nt}${d?' sub1':''}"${padOf(d)} onclick="${go}">${dotc(st)}<span class=tx><span class=nm>${esc(name)}</span><span class=dt>${esc(dt)}</span></span></button>`
+ return (dt.length>34||name.length+dt.length>34)?`<button class="rw two${nt}${d?' sub1':''}"${padOf(d)} onclick="${go}">${dotc(st)}<span class=tx><span class=nm>${esc(name)}</span><span class=dt>${esc(dt)}</span></span></button>`
   :`<button class="rw${nt}${d?' sub1':''}"${padOf(d)} onclick="${go}">${dotc(st)}<span class=nm>${esc(name)}</span><span class=dt>${esc(dt)}</span></button>`}
 function fold(key,st,name,states,inner,d,bold,unit){
  const good=states.filter(x=>x==='healthy'||x==='pending'||x==='expected').length, bad=states.length-good, open=openN.has(key)||states.some(x=>x==='failed'||x==='degraded');   // a check still waiting for its first answer is not a problem, and neither is one that simply cannot be checked (it opens when tapped, but is not forced open)

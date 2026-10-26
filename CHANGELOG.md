@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **0.83.22** The Sites card counts the sites it watches even when there is only one ("1 of 1 up"), like the other cards. A row with a long name and a middling detail (a camera called "Camera Garage") now gets two lines instead of a cut-off one.
 - **0.83.21** A camera that UniFi Protect and Scrypted both watch is one camera: both say it is down, it is Down; they disagree (one says down, the other says fine), it is only Degraded, since one source may be the one acting up. One attention line and one alert per camera, and the detail says the other source reports it fine.
 - **0.83.20** Cards fold their many alike items: cameras, switches and access points, and VPN tunnels each sit under one heading per source (for example "UniFi Protect cameras"). A problem inside opens its heading by itself. A camera that two sources both report counts once, so the Cameras summary counts cameras instead of 19 of 19.
 - **0.83.19** Choose what counts as critical: a Critical tick on each item's detail and on each server's settings page (and for Portainer as a whole). When a critical thing is Down, the whole banner goes red.

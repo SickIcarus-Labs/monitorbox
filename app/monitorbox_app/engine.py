@@ -381,7 +381,7 @@ def evaluate(nodes, results, now_iso=""):
             return out_
         if worst == PENDING:
             big, line = "…", "Checking"
-        elif total == 1:
+        elif total == 1 and g != "Sites":          # sites are counted even when there is one, so the card reads like the others ("1 of 1 up")
             big = {HEALTHY: "Up", DEGRADED: "Degraded", FAILED: "Down", UNKNOWN: "Unknown"}[worst]
             line = leaves[0]["name"]
         else:
