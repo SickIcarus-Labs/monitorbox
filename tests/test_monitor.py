@@ -1,4 +1,4 @@
-import os, sys, threading, time, unittest
+import json, os, sys, threading, time, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 from monitorbox_app import engine, monitor  # noqa: E402
 
@@ -334,6 +334,91 @@ class QuietStart(unittest.TestCase):
         clock.t += monitor.STARTUP_QUIET + 5
         m.run_due(); m.record_history()
         self.assertEqual([s for _t, _n, s in hist.events], ["unknown"], "a thing still unreachable after that is recorded")
+
+
+class FastStart(unittest.TestCase):
+    """A restart opens with the readings from before it (marked as old), and a check whose module is still coming up shows "checking", not "unknown"."""
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.TemporaryDirectory(); self.addCleanup(self.dir.cleanup)
+        self.cache = os.path.join(self.dir.name, "data", "app", "last-readings.json")
+
+    def box(self, runner, clock):
+        m = monitor.Monitor(runner=runner, clock=clock, inline=True, cache_path=self.cache)
+        m.configure([node("nas", "n"), node("pi", "p")], None, {"failures": 1, "seconds": 0})
+        return m
+
+    def before_restart(self, answers):
+        clock = Clock()
+        m = self.box(lambda c: answers[c["target"]], clock)
+        m.run_due()
+        clock.t += 3; m.run_due()                        # a first failure is confirmed by a second look before it is shown
+        clock.t += 200                                   # past the first two minutes, when saving starts
+        m.version += 1
+        m.save_cache()
+        return clock
+
+    def test_a_check_whose_module_is_coming_up_stays_checking_and_leaves_no_trace(self):
+        clock, answers = Clock(), [(None, "the snmp module is starting", None, {"starting": True})] * 2 + [(True, "ok", 1.0, {})]
+        m = monitor.Monitor(runner=lambda c: answers.pop(0), clock=clock, inline=True)
+        m.configure([node("nas", "n")], None, {"failures": 1, "seconds": 0})
+        for _ in range(2):
+            m.run_due()
+            self.assertEqual(m.snapshot()["nodes"]["nas"]["state"], "pending", "still checking, not unknown")
+            self.assertEqual(m.raw, {}, "nothing recorded for history")
+            clock.t += 1.5
+        m.run_due()
+        self.assertEqual(m.snapshot()["nodes"]["nas"]["state"], "healthy", "asked again every second or so, answered as soon as the module was up")
+
+    def test_the_page_opens_with_the_old_readings_marked_and_fresh_ones_replace_them(self):
+        old = self.before_restart({"n": (True, "ok", 1.0), "p": (False, "no reply", None)})
+        clock = Clock(); clock.t = old.t + 30                        # thirty seconds later: the box is back
+        answers = {"n": (None, "the snmp module is starting", None, {"starting": True}), "p": (None, "the snmp module is starting", None, {"starting": True})}
+        m = self.box(lambda c: answers[c["target"]], clock)
+        self.assertEqual(m.restore(), 2)
+        snap = m.snapshot()["nodes"]
+        self.assertEqual((snap["nas"]["state"], snap["pi"]["state"]), ("healthy", "failed"), "the page opens as it was")
+        self.assertIn("(last reading before the restart)", snap["nas"]["detail"] or snap["nas"]["checks"][0]["detail"])
+        self.assertEqual(m.snapshot(fresh=True)["nodes"]["nas"]["state"], "pending", "alerts never see the old readings")
+        since = m.results["nas/ping"]["since"]
+        v0 = m.version
+        answers["n"] = (True, "ok", 2.0)                             # its module is up: the real answer, the same as before
+        clock.t += 1; m.run_due()
+        self.assertNotIn("stale", m.results["nas/ping"]); self.assertEqual(m.results["nas/ping"]["since"], since, "'since' still says when it became healthy")
+        self.assertGreater(m.version, v0, "the screens are told the mark is gone")
+        self.assertNotIn("before the restart", json.dumps(m.snapshot()["nodes"]["nas"]))
+        answers["p"] = (False, "still no reply", None)               # a down one confirmed fresh: also no longer marked
+        clock.t += 1; m.run_due()
+        self.assertNotIn("stale", m.results["pi/ping"])
+
+    def test_old_readings_that_nothing_replaces_are_dropped_after_two_minutes(self):
+        old = self.before_restart({"n": (True, "ok", 1.0), "p": (True, "ok", 1.0)})
+        clock = Clock(); clock.t = old.t + 30
+        starting = (None, "the snmp module is starting", None, {"starting": True})
+        m = self.box(lambda c: starting, clock)
+        m.restore()
+        clock.t += 60; m.expire_stale()
+        self.assertEqual(m.snapshot()["nodes"]["nas"]["state"], "healthy", "still inside the first two minutes")
+        clock.t += 61; m.expire_stale()
+        self.assertEqual(m.snapshot()["nodes"]["nas"]["state"], "pending", "nobody answered: it is simply not known")
+
+    def test_a_cache_is_not_used_when_old_or_for_unknowns_or_for_checks_that_no_longer_exist_and_is_not_written_in_the_first_two_minutes(self):
+        old = self.before_restart({"n": (True, "ok", 1.0), "p": (None, "could not ask", None, {})})
+        m = monitor.Monitor(runner=lambda c: (True, "ok", 1.0), clock=lambda: old.t + 30, inline=True, cache_path=self.cache)
+        m.configure([node("nas", "n"), node("pi", "p")], None, {"failures": 1, "seconds": 0})
+        self.assertEqual(m.restore(), 1, "an unknown tells nothing")
+        late = monitor.Monitor(runner=lambda c: (True, "ok", 1.0), clock=lambda: old.t + 900, inline=True, cache_path=self.cache)
+        late.configure([node("nas", "n")], None, {})
+        self.assertEqual(late.restore(), 0, "saved more than ten minutes ago: not 'just a restart'")
+        gone = monitor.Monitor(runner=lambda c: (True, "ok", 1.0), clock=lambda: old.t + 30, inline=True, cache_path=self.cache)
+        gone.configure([node("other", "o")], None, {})
+        self.assertEqual(gone.restore(), 0)
+        read = lambda: open(self.cache).read()
+        before = read()
+        young = monitor.Monitor(runner=lambda c: (True, "ok", 1.0), clock=lambda: old.t + 30, inline=True, cache_path=self.cache)
+        young.configure([node("nas", "n")], None, {})
+        young.version += 1; young.save_cache(force=False)
+        self.assertEqual(read(), before, "the old file is not replaced by a half-empty one while the box is still starting")
 
 
 if __name__ == "__main__":

@@ -10,16 +10,21 @@
 - check_now() runs checks immediately and shows the answer without hold-down
 - snapshot() = engine.evaluate(...) on the latest results; wait_for_change() lets the web layer push
 """
-import threading, time
+import json, os, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import engine, probes
+from .store import write_json
 
 SLOW_PING_MS = 200.0
 DEFAULT_INTERVAL = {"ping": 5.0, "tcp": 5.0, "dns": 5.0, "http": 30.0, "module": 15.0}
 RECHECK_AFTER = 2.0     # a first failure is confirmed by a second look this soon
 FAILING_INTERVAL = 3.0  # something that is down is watched closely, so recovery shows quickly
 CONFIRM_FAILURES = 2
+STARTING_RECHECK = 1.0  # a check whose module is still coming up is asked again this soon
+STALE_FOR = 120         # seconds after the App starts that readings saved before the restart may be shown while the fresh ones come in
+CACHE_EVERY = 20        # seconds between saves of the latest readings
+CACHE_MAX_AGE = 600     # saved readings older than this are not shown (a long outage is not "just a restart")
 
 
 STARTUP_QUIET = 90     # seconds after the App starts when 'could not be checked' is not written to history: modules are still logging in
@@ -36,8 +41,10 @@ def _iso(t):
 
 
 class Monitor:
-    def __init__(self, runner=probes.run, clock=time.time, workers=8, inline=False, history=None):
+    def __init__(self, runner=probes.run, clock=time.time, workers=8, inline=False, history=None, cache_path=None):
         self.runner, self.clock, self.inline, self.history = runner, clock, inline, history
+        self.cache_path = cache_path       # where the latest readings are kept so a restart can open with them
+        self._saved, self._saved_at, self._stale = -1, 0.0, False
         self._recorded = -1
         self.pool = None if inline else ThreadPoolExecutor(max_workers=workers, thread_name_prefix="probe")
         self.nodes = []
@@ -98,7 +105,62 @@ class Monitor:
         while not self.stopped:
             self.run_due()
             self.record_history()
+            self.expire_stale()
+            self.save_cache()
             time.sleep(0.5)
+
+    # -- the last readings, kept across a restart ---------------------------
+    def save_cache(self, force=False):
+        """Keeps the latest readings on disk (at most every 20 seconds, only when something changed) so a restart can open with them. Not in the first
+        two minutes after a start: until then what is held is mostly the old file's, and it must not be replaced by a half-empty one."""
+        if not self.cache_path:
+            return
+        with self.lock:
+            now = self.clock()
+            if not force and (self.version == self._saved or now - self._saved_at < CACHE_EVERY or now - self.started < STALE_FOR):
+                return
+            out = {"saved": now, "results": {k: v for k, v in self.results.items() if not v.get("stale")}}
+            self._saved, self._saved_at = self.version, now
+        try:
+            write_json(self.cache_path, out, mode=0o600)
+        except Exception:
+            pass                        # a cache that cannot be written is only a slower start next time
+
+    def restore(self):
+        """Call after configure(), before the checks run: the readings saved before the restart are shown, marked as old, until each check's own answer replaces them.
+        Only healthy or down ones (an unknown tells nothing), only for checks that still exist, only if saved recently."""
+        if not self.cache_path:
+            return 0
+        try:
+            with open(self.cache_path) as f:
+                data = json.load(f)
+        except Exception:
+            return 0
+        if not isinstance(data, dict) or not isinstance(data.get("results"), dict) or self.clock() - float(data.get("saved") or 0) > CACHE_MAX_AGE:
+            return 0
+        n = 0
+        with self.lock:
+            for k, v in data["results"].items():
+                if k in self.tasks and k not in self.results and isinstance(v, dict) and v.get("ok") in (True, False) and isinstance(v.get("at"), str) and isinstance(v.get("since"), str):
+                    self.results[k] = {"ok": v["ok"], "detail": str(v.get("detail") or ""), "ms": v.get("ms"), "at": v["at"], "since": v["since"],
+                                       "warn": bool(v.get("warn")), "notice": bool(v.get("notice")), "stale": True}
+                    n += 1
+            if n:
+                self._stale = True
+                self._bump()
+        return n
+
+    def expire_stale(self):
+        """Readings from before the restart are shown for two minutes at most: after that a check that has not answered is simply not known."""
+        if not self._stale or self.clock() - self.started < STALE_FOR:
+            return
+        with self.lock:
+            gone = [k for k, v in self.results.items() if v.get("stale")]
+            for k in gone:
+                del self.results[k]
+            self._stale = False
+            if gone:
+                self._bump()
 
     def record_history(self):
         """Write state changes to the 30-day history (cheap: only when something changed, plus a heartbeat)."""
@@ -135,6 +197,13 @@ class Monitor:
             check = task["check"]
         try:
             r = self.runner(check)
+            if len(r) > 3 and r[3].get("starting"):         # its module is still coming up: no answer yet, so nothing is recorded and the screen keeps saying "checking"
+                with self.lock:
+                    t = self.tasks.get(key)
+                    if t is not None and t["check"] == check:
+                        t["busy"] = False
+                        t["due"] = self.clock() + STARTING_RECHECK
+                return
             ok, detail, ms = r[:3]
             warn = bool(len(r) > 3 and r[3].get("warn"))
             notice = bool(len(r) > 3 and r[3].get("notice"))
@@ -171,6 +240,9 @@ class Monitor:
                     if prev is None:
                         return                          # nothing shown yet: stay "checking"
                     if prev["ok"] is not True or prev.get("warn"):
+                        if prev.get("stale"):           # the saved reading from before the restart is confirmed: now it is a fresh one
+                            self.results[key] = {**{k: v for k, v in prev.items() if k != "stale"}, "detail": detail, "at": _iso(now)}
+                            self._bump()
                         return                          # already not healthy: keep showing what was observed
                     ok, warn, notice, detail = True, False, True, f"{'failed' if ok is False else 'warning'} just now, confirming ({task['streak']} of {need_n} in a row, {int(now - task['streak_since'])} s of {int(need_s)} s): {detail}"
             else:
@@ -181,7 +253,7 @@ class Monitor:
             since = _iso(now) if changed else prev["since"]
             new = {"ok": ok, "detail": detail, "ms": ms, "at": _iso(now), "since": since, "warn": warn, "notice": notice}
             self.results[key] = new
-            if changed or (prev and (prev["detail"] != detail)):
+            if changed or (prev and (prev["detail"] != detail or prev.get("stale"))):
                 self._bump()
 
     def _set_raw(self, key, ok, detail, ms, warn, notice, now):
@@ -224,9 +296,12 @@ class Monitor:
             nodes = [dict(n, poweredBy=by[f[n["id"]]]["poweredBy"]) if n.get("id") in f and by.get(f[n["id"]], {}).get("poweredBy") else n for n in nodes]
         return nodes
 
-    def snapshot(self):
+    def snapshot(self, fresh=False):
+        """The screen's view. Readings saved before a restart carry "(last reading before the restart)" until the fresh one arrives; fresh=True leaves them out (alerts never act on them)."""
         with self.lock:
-            snap = engine.evaluate(self._eval_nodes(), dict(self.results), _iso(self.clock()))
+            res = {k: v for k, v in self.results.items() if not (fresh and v.get("stale"))}
+            res = {k: (dict(v, detail=(f"{v['detail']} " if v.get("detail") else "") + "(last reading before the restart)") if v.get("stale") else v) for k, v in res.items()}
+            snap = engine.evaluate(self._eval_nodes(), res, _iso(self.clock()))
             snap["version"] = self.version
             snap["configError"] = self.config_error
             return snap

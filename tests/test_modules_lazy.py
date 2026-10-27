@@ -12,6 +12,7 @@ class Fake(modules.Modules):
         self.lock = threading.Lock()
         self.wanted = lambda: None
         self._st, self.started = st, []
+        self.starting, self.boot = set(), 0.0       # the module list now also remembers which modules are coming up (a stand-in class, so it is set here)
 
     def state(self): return self._st
     def _save(self, st): pass
@@ -22,6 +23,38 @@ class Fake(modules.Modules):
             def alive(s): return True
             def call(s, *a, **k): return {"state": "healthy", "detail": "ok"}
         self.running[mid] = P()
+
+
+class Together(unittest.TestCase):
+    """The modules the app starts are started all at once, and a check for one that is still coming up waits instead of reporting it as not running."""
+    def test_slow_modules_start_together_not_one_after_another(self):
+        import time
+        m = Fake({"a": {"active": "1"}, "b": {"active": "1"}, "c": {"active": "1"}})
+
+        def slow(mid, version):
+            time.sleep(0.4)
+            m.started.append(mid)
+            m.running[mid] = type("P", (), {"alive": lambda s: True})()
+        m._start = slow
+        t0 = time.monotonic()
+        m.start_all()
+        self.assertEqual(sorted(m.started), ["a", "b", "c"])
+        self.assertLess(time.monotonic() - t0, 0.9, "three 0.4 s starts took about one, not three")
+        self.assertEqual(m.starting, set(), "nothing is 'starting' once they are up")
+
+    def test_a_check_for_a_module_that_is_coming_up_waits_and_a_failed_start_is_then_reported(self):
+        m = Fake({"snmp": {"active": "1"}})
+        m.mark_starting()
+        self.assertEqual(m.starting, {"snmp"})
+        got = m.check({"module": "snmp", "check": "x"}, {})
+        self.assertEqual((got[0], got[3]), (None, {"starting": True}))
+        self.assertIn("starting", got[1])
+        m.starting.discard("snmp")                     # its start failed or finished: now a missing module is reported as before
+        m._revive = lambda mid: None
+        got = m.check({"module": "snmp", "check": "x"}, {})
+        self.assertEqual((got[0], got[1], got[3]), (None, "the snmp module is not running", {}))
+        m.starting.add("snmp"); m.boot = -1e9           # still "starting" long after boot: it must not wait forever
+        self.assertIn("not running", m.check({"module": "snmp", "check": "x"}, {})[1])
 
 
 class LazyStart(unittest.TestCase):
