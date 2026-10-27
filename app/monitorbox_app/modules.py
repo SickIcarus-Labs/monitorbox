@@ -112,6 +112,9 @@ class ModuleProcess:
                 self.proc.kill()
 
 
+STARTUP_HOLD = 90        # seconds after the app starts during which a module that is still coming up is waited for, not reported
+
+
 class Modules:
     def __init__(self, paths, installer):
         self.paths = paths
@@ -122,6 +125,8 @@ class Modules:
         self.last_try = {}
         self.cards = {}                   # (module id, version) -> its describe answer, kept once known
         self.wanted = lambda: None        # () -> set of module ids some connection uses, or None for "all"
+        self.starting = set()             # modules the app is bringing up right now: a check for one of them waits instead of reporting "not running"
+        self.boot = time.monotonic()
 
     def state(self):
         return read_json(self.paths.modules_state, {})
@@ -144,6 +149,15 @@ class Modules:
         if old:
             old.stop()
 
+    def _to_start(self, st):
+        want = self.wanted()
+        return {mid: rec["active"] for mid, rec in st.items() if mid not in RETIRED and rec.get("active") and (want is None or mid in want)}      # the rest start the first time something asks for them
+
+    def mark_starting(self):
+        """Called before the checks begin: which modules are about to be started, so a check that runs first waits for its module instead of saying it is not running."""
+        self.boot = time.monotonic()
+        self.starting = set(self._to_start(self.state()))
+
     def start_all(self):
         with self.lock:
             st = self.state()
@@ -151,13 +165,23 @@ class Modules:
                 for mid in RETIRED:
                     st.pop(mid, None)
                 self._save(st)
-            want = self.wanted()
-            for mid, rec in st.items():
+            todo = self._to_start(st)
+            self.starting |= set(todo)
+
+            def one(mid, version):
                 try:
-                    if rec.get("active") and (want is None or mid in want):     # the rest start the first time something asks for them
-                        self._start(mid, rec["active"])
+                    self._start(mid, version)
                 except Exception:
                     pass  # shown as not running in the UI
+                finally:
+                    self.starting.discard(mid)
+            # all at once: the wait is the slowest module, not all of them added up
+            threads = [threading.Thread(target=one, args=(mid, v), daemon=True) for mid, v in todo.items()]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.starting.clear()
 
     def apply_one(self, mid, entry):
         """Install and start one specific release. The old one keeps running if the new one will not start.
@@ -263,6 +287,8 @@ class Modules:
         only the module itself can say a device is down, because it is the one that talked to it."""
         mid = spec["module"]
         p = self.running.get(mid)
+        if (not p or not p.alive()) and mid in self.starting and time.monotonic() - self.boot < STARTUP_HOLD:
+            return None, f"the {mid} module is starting", None, {"starting": True}          # not an answer yet: the monitor asks again in a moment
         if not p or not p.alive():
             p = self._revive(mid)
         if not p or not p.alive():

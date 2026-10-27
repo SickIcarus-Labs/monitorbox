@@ -66,7 +66,7 @@ class App:
         self.check_seconds = int(os.environ.get("MB_CHECK_SECONDS", "1800"))
         self.thisbox_scan = thisbox.scan      # replaceable in tests
         self.history = History(os.path.join(self.paths.root, "config", "history.jsonl"))
-        self.monitor = Monitor(runner=self.run_check, history=self.history)
+        self.monitor = Monitor(runner=self.run_check, history=self.history, cache_path=self.paths.p("data", "app", "last-readings.json"))
         self.wakes = {}   # node id -> {state, detail, at}; state: sending | waiting | up | timeout | error
         self.wake_lock = threading.Lock()
         self.pt_cache, self.pt_running = {}, set()
@@ -91,7 +91,7 @@ class App:
         self.portwatch = portwatch.PortWatch(self.paths, traffic=lambda keys, secs: self.series.recent([tuple(k.rsplit("|", 1)) for k in keys], secs))          # rising port errors, drops and link drops (off until ticked)
         self.lansampler = lansampler.LanSampler(self.series, lambda: monconfig.load_config(self.paths).get("connections", []), lambda m, meth, p, t: self.modules.call(m, meth, p, t),
                                                 after=lambda: self.last_map and self.busiest.update(self.last_map, flows=self.minute_flows, opts=self.busiest_opts()), watch=self.portwatch)
-        self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), self.monitor.snapshot,
+        self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), lambda: self.monitor.snapshot(fresh=True),
                                    hostname=lambda: self.peer.name())     # alerts say the site's own name (Settings, Sites), the computer name only when none is set
         self.peer = peer.Peer(self.paths.p("config", "sites.json"), self.port, self.internal_session, version)
         self.peer.relay_lookup = self.live_relay
@@ -2672,6 +2672,8 @@ class App:
         self.httpd = ThreadingHTTPServer(("0.0.0.0", self.port), H)
         self.sync_site_nodes()
         self.reload_monitoring()
+        self.modules.mark_starting()            # before any check runs: they wait for their module, they do not report it as not running
+        self.monitor.restore()                  # open with the readings from before the restart (marked as old) until the fresh ones arrive
         self.monitor.start()
         self.graphs.start()
         self.lansampler.start()
