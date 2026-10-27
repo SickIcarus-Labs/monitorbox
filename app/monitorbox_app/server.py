@@ -84,6 +84,9 @@ class App:
         self.graphs = graphs.Graphs(lambda: read_json(self.graphs_file, []) or [], self.graph_sample)
         self.series = portpeers.PortSeries()          # the last hour of every switch port's traffic, for "where does it go"
         self.last_map = None
+        self.map_at = 0.0
+        self.map_lock = threading.Lock()
+        self._load_map()
         self.last_sources = []           # what every source said when the map was last built (the SNMP ones say which MAC each interface has)
         self.gw_cache = {}
         self.minute_flows = []           # the gateway's flow log for the last minute, kept fresh by flow_loop, for the Busiest client
@@ -1074,7 +1077,56 @@ class App:
         srcs = self.lan_report(wait=0)["sources"]
         self.last_sources = srcs
         self.last_map = lanmap.build(srcs)
+        self.map_at = time.time()
         self.annotate_ports(self.last_map)
+        self._save_map()
+        return self.last_map
+
+    MAP_FRESH = 60        # seconds a map is served as it is; an older one is served at once and rebuilt in the background
+
+    def _map_file(self):
+        return self.paths.p("data", "app", "last-map.json")
+
+    def _save_map(self):
+        """Keeps the last map on disk (0600), so the page opens at once after a restart too. Only the picture of the network; no logins."""
+        try:
+            path = self._map_file()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump({"at": self.map_at, "map": self.last_map}, f, separators=(",", ":"))
+            os.replace(path + ".tmp", path)
+        except (OSError, TypeError, ValueError):
+            pass
+
+    def _load_map(self):
+        try:
+            with open(self._map_file()) as f:
+                d = json.load(f)
+            if isinstance(d.get("map"), dict) and isinstance(d.get("map", {}).get("nodes"), list):
+                self.last_map, self.map_at = d["map"], float(d.get("at") or 0)
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+
+    def map_now(self):
+        """What the map page gets: the last map at once (with the port watch's current state), rebuilt in the background when it is more than a minute old.
+        Only a box that has never built one waits for the scan."""
+        if self.last_map is None:
+            return self.build_map()
+        if time.time() - (self.map_at or 0) > self.MAP_FRESH and self.map_lock.acquire(blocking=False):
+            def refresh():
+                try:
+                    self.build_map()
+                except Exception:
+                    pass
+                finally:
+                    self.map_lock.release()
+            threading.Thread(target=refresh, daemon=True, name="map-refresh").start()
+        else:
+            try:
+                self.annotate_ports(self.last_map)
+            except Exception:
+                pass
         return self.last_map
 
     def annotate_ports(self, m):
@@ -2096,7 +2148,7 @@ class App:
                 if self.path == "/api/lan/map":
                     if not app.auth.valid(self.token()):
                         return self.send(401, {"error": "sign in"})
-                    return self.send(200, app.build_map())
+                    return self.send(200, app.map_now())
                 if self.path.startswith("/api/power"):
                     if not app.auth.valid(self.token()):
                         return self.send(401, {"error": "sign in"})
