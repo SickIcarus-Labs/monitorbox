@@ -91,7 +91,7 @@ class App:
         self.gw_cache = {}
         self.minute_flows = []           # the gateway's flow log for the last minute, kept fresh by flow_loop, for the Busiest client
         self.busiest = busiest.Busiest(self.series)
-        self.portwatch = portwatch.PortWatch(self.paths, traffic=lambda keys, secs: self.series.recent([tuple(k.rsplit("|", 1)) for k in keys], secs))          # rising port errors, drops and link drops (off until ticked)
+        self.portwatch = portwatch.PortWatch(self.paths, traffic=lambda keys, secs: self.series.recent([tuple(k.rsplit("|", 1)) for k in keys], secs), available=self.can_read_ports)          # rising port errors, drops and link drops (off until ticked)
         self.lansampler = lansampler.LanSampler(self.series, lambda: monconfig.load_config(self.paths).get("connections", []), lambda m, meth, p, t: self.modules.call(m, meth, p, t),
                                                 after=lambda: self.last_map and self.busiest.update(self.last_map, flows=self.minute_flows, opts=self.busiest_opts()), watch=self.portwatch)
         self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), lambda: self.monitor.snapshot(fresh=True),
@@ -819,6 +819,7 @@ class App:
         stop.wait(8)
         while not stop.is_set():
             try:
+                self.ensure_port_node()                 # a switch login added since the start brings Port errors with it
                 if any(c.get("module") == "unifi-network" for c in monconfig.load_config(self.paths).get("connections", []) if isinstance(c, dict)):
                     self.build_map()
             except Exception:
@@ -1183,6 +1184,26 @@ class App:
                     p["watch"] = self.portwatch.state(keys)
                     p["watchKeys"] = keys
 
+    def can_read_ports(self):
+        """True when the box has a login that reads switch port counters (UniFi or SNMP)."""
+        try:
+            return any(isinstance(c, dict) and c.get("module") in ("unifi-network", "snmp") for c in monconfig.load_config(self.paths).get("connections", []))
+        except Exception:
+            return False
+
+    PORT_NODE = {"id": "port-errors", "name": "Port errors", "group": "Network", "checks": [{"id": "ports", "type": "ports", "interval": 30}]}
+
+    def ensure_port_node(self):
+        """Port errors is on by default: a box that never chose and has a switch to read gets its one built-in system (once; switching it off by hand stays off)."""
+        try:
+            if self.portwatch.enabled() and not self.portwatch.chosen():
+                nodes, _ = monconfig.all_nodes(self.paths)
+                if not any(n.get("id") == "port-errors" for n in nodes):
+                    monconfig.sync_nodes(self.paths, "port-errors", [self.PORT_NODE])
+                    self.reload_monitoring()
+        except Exception:
+            pass
+
     def set_portwatch(self, body):
         """The tick for watching rising port errors, and the 'known issue' mark on a port. The tick adds or removes the one built-in 'Port errors' system."""
         if "on" in body:
@@ -1190,7 +1211,7 @@ class App:
             self.portwatch.set_enabled(on)
             if not on:
                 self.portwatch.forget()
-            mk = {"id": "port-errors", "name": "Port errors", "group": "Network", "checks": [{"id": "ports", "type": "ports", "interval": 30}]}
+            mk = self.PORT_NODE
             monconfig.sync_nodes(self.paths, "port-errors", [mk] if on else [])
             self.reload_monitoring()
         if isinstance(body.get("keys"), list) and "known" in body:
@@ -2145,6 +2166,10 @@ class App:
                         return self.send(401, {"error": "sign in"})
                     return self.send(200, {"version": version(), "requests": perfstats.summary("request"), "modules": perfstats.summary("module"),
                                            "processes": sysinfo.processes(app.modules.pids()), "about": sysinfo.about(), "since": int(perfstats.started()), "cpus": os.cpu_count()})
+                if self.path == "/api/portwatch":
+                    if not app.auth.valid(self.token()):
+                        return self.send(401, {"error": "sign in"})
+                    return self.send(200, app.portwatch.page())
                 if self.path == "/api/lan/map":
                     if not app.auth.valid(self.token()):
                         return self.send(401, {"error": "sign in"})
@@ -2723,6 +2748,7 @@ class App:
         self.apply_start_files()
         self.httpd = ThreadingHTTPServer(("0.0.0.0", self.port), H)
         self.sync_site_nodes()
+        self.ensure_port_node()
         self.reload_monitoring()
         self.modules.mark_starting()            # before any check runs: they wait for their module, they do not report it as not running
         self.monitor.restore()                  # open with the readings from before the restart (marked as old) until the fresh ones arrive
