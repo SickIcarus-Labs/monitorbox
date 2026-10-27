@@ -88,6 +88,16 @@ class Counters(unittest.TestCase):
         self.assertEqual(C.counters(conn(old, "cnt2")), {"ports": {"eth0": {"in": 7, "out": 8, "bits": 32}}})
 
 
+    def test_error_and_discard_counters_come_along_when_the_device_has_them(self):
+        X, T = "1.3.6.1.2.1.31.1.1.1", "1.3.6.1.2.1.2.2.1"
+        agent = F.Agent(community="fake-community"); self.addCleanup(agent.close)
+        agent.mib = {f"{X}.1.1": "port1", f"{X}.6.1": ("c64", 111), f"{X}.10.1": ("c64", 222), f"{T}.14.1": 31, f"{T}.20.1": 42, f"{T}.13.1": 53, f"{T}.19.1": 64,
+                     f"{X}.1.2": "port2", f"{X}.6.2": ("c64", 333), f"{X}.10.2": ("c64", 444), f"{T}.14.2": 7}
+        got = C.counters(conn(agent, "cnt3"))["ports"]
+        self.assertEqual({k: got["port1"][k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, {"rxErr": 31, "txErr": 42, "rxDrop": 53, "txDrop": 64}, "each counter keeps its own value")
+        self.assertEqual({k: got["port2"][k] for k in got["port2"] if k.endswith(("Err", "Drop"))}, {"rxErr": 7}, "only what the device answered")
+
+
 class ByName(unittest.TestCase):
     def setUp(self):
         self.agent = F.Agent(community="fake-community")

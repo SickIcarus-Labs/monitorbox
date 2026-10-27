@@ -142,8 +142,8 @@ class PortWatch:
     def key(dev_id, port_name):
         return f"{dev_id}|{port_name}"
 
-    def feed(self, devices, ids, now=None):
-        """devices: the controller's devices with their `ports` (rx_errors, tx_errors, rx_dropped, tx_dropped, link_down_count); ids: their ids."""
+    def feed(self, devices, ids, now=None, hold=()):
+        """devices: the controller's devices with their `ports` (rx_errors, tx_errors, rx_dropped, tx_dropped, link_down_count); ids: their ids. `hold`: ids of devices that could not be read this round: what is known of them is kept, not forgotten."""
         now = self.clock() if now is None else now
         seen = set()
         with self.lock:
@@ -169,7 +169,7 @@ class PortWatch:
                         q[-1] = row                               # same slot, newer figures
                     while q and q[0][0] < now - KEEP:
                         q.popleft()
-            for k in [k for k in self.series if k not in seen]:   # a port or device that is gone
+            for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold]:   # a port or device that is gone
                 del self.series[k]
                 self.labels.pop(k, None)
 

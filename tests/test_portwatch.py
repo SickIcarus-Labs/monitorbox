@@ -201,6 +201,50 @@ class Watch(unittest.TestCase):
         self.assertEqual(again.known(), {a, c})
 
 
+class FromSnmp(unittest.TestCase):
+    """A switch that is also an SNMP connection gives its error and discard counters over SNMP; the others use UniFi's. Never mixed on one device."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory(); self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name); os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.w = portwatch.PortWatch(self.paths); self.w.set_enabled(True)
+        self.t = [1000.0]
+        self.snmp_ok = [True]
+
+    def sampler(self):
+        from monitorbox_app import lansampler, portpeers
+        uni = lambda name, mac, ip, errs: {"name": name, "mac": mac, "type": "usw", "ip": ip,
+                                           "ports": [{"port_idx": 1, "name": "Port 1", "inBps": 1, "outBps": 1, "rx_errors": errs, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "link_down_count": 9}]}
+        devices = [uni("Core-B", "..:00:00:02", "192.0.2.2", 1_000_000), uni("Rack-C", "..:00:00:03", "192.0.2.3", 2_000_000)]
+
+        def call(mod, method, params, timeout):
+            if mod == "unifi-network":
+                return {"devices": devices}
+            if not self.snmp_ok[0]:
+                raise RuntimeError("no answer")
+            return {"ports": {"te1/0/1": {"in": 1, "out": 1, "bits": 64, "label": "Port 1", "rxErr": 5, "txErr": 6, "rxDrop": 7, "txDrop": 8}}}
+        conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "s", "module": "snmp", "host": "192.0.2.2"}]
+        return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
+
+    def last(self, dev):
+        return list(self.w.series[self.w.key(dev, "Port 1")])[-1][1:]
+
+    def test_snmp_counters_replace_unifis_on_that_device_and_the_others_keep_theirs(self):
+        sm = self.sampler()
+        sm.tick()
+        # errors 5+6, drops 7+8 from SNMP; link drops 9 still from UniFi's port table
+        self.assertEqual(self.last("..:00:00:02"), [11, 15, 9, 5, 6, 7, 8])
+        self.assertEqual(self.last("..:00:00:03"), [2_000_000, 0, 9, 2_000_000, 0, 0, 0], "Rack-C has no SNMP connection: UniFi's counters")
+
+    def test_an_snmp_switch_that_did_not_answer_is_left_out_not_read_from_unifi(self):
+        sm = self.sampler()
+        sm.tick()
+        self.snmp_ok[0] = False
+        self.t[0] += 10
+        sm.tick()
+        self.assertEqual(self.last("..:00:00:02"), [11, 15, 9, 5, 6, 7, 8], "no mixing of two ways of counting: nothing new for it this round")
+        self.assertEqual(self.last("..:00:00:03"), [2_000_000, 0, 9, 2_000_000, 0, 0, 0])
+
+
 class Busy(unittest.TestCase):
     def test_the_port_history_says_how_busy_a_port_was(self):
         from monitorbox_app import portpeers
