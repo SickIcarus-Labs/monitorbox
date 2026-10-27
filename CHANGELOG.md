@@ -6,6 +6,10 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+Nothing yet.
+
+## 1.0.1 to 1.4.2
+
 - **1.4.2** Port errors no longer turns Unknown after a restart. For the first three minutes it shows "checking" ("waiting for the first port readings") while the switch counters come in, and what each port normally does is now saved (every five minutes, up to a day, in the app's data folder) so a restart does not start the 30 minutes of learning again. Turning the watch off deletes the saved history.
 - **1.4.1** Start-up fix on top of 1.4.0 (1.4.0 was never offered: its release check failed once, when all eight modules were started at the same instant on the small test machine). Modules now start four at a time and have 20 seconds to say hello.
 - **1.4.0** Faster, calmer start. After a restart the modules start all at once instead of one after another, and a check whose module is still coming up shows "checking" instead of "Unknown, the snmp module is not running", then runs again the moment its module answers. The page also opens with the readings from before the restart, marked "(last reading before the restart)", until each check's own fresh answer replaces its reading (two minutes at most; readings older than ten minutes are not used, and alerts never act on them). A module that really cannot start is still reported after 90 seconds.
