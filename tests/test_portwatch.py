@@ -245,6 +245,68 @@ class FromSnmp(unittest.TestCase):
         self.assertEqual(self.last("..:00:00:03"), [2_000_000, 0, 9, 2_000_000, 0, 0, 0])
 
 
+class Servers(unittest.TestCase):
+    """The network cards of SNMP servers are watched too, and a server card is the other end of the switch port it plugs into."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory(); self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name); os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.w = portwatch.PortWatch(self.paths); self.w.set_enabled(True)
+        self.t = [1000.0]
+        self.calls = []
+
+    def sampler(self, answer=True):
+        from monitorbox_app import lansampler, portpeers
+
+        def call(mod, method, params, timeout):
+            if mod == "unifi-network":
+                return {"devices": [{"name": "Core-B", "mac": "..:00:00:02", "type": "usw", "ip": "192.0.2.2", "ports": []}]}
+            self.calls.append(params["connection"]["id"])
+            if not answer:
+                raise RuntimeError("no answer")
+            return {"ports": {"eth0": {"in": 1, "out": 1, "bits": 64, "rxErr": 10, "txErr": 20, "rxDrop": 30, "txDrop": 40}, "docker0": {"in": 1, "out": 1, "bits": 64}}}
+        conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "apollo", "module": "snmp", "host": "192.0.2.77"}]
+        return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
+
+    def test_a_servers_cards_are_read_every_third_round_and_only_the_ones_with_counters(self):
+        sm = self.sampler()
+        for _ in range(4):
+            sm.tick(); self.t[0] += 10
+        self.assertEqual(self.calls, ["apollo", "apollo"], "rounds 1 and 4: every third round, not every one")
+        self.assertEqual(list(self.w.series), [self.w.key("snmp:apollo", "eth0")], "a card with no error counters has nothing to watch")
+        self.assertEqual(self.w.labels[self.w.key("snmp:apollo", "eth0")], "apollo, eth0")
+        self.assertEqual(list(self.w.series[self.w.key("snmp:apollo", "eth0")])[-1][1:], [30, 70, 0, 10, 20, 30, 40], "history is held between reads, not forgotten")
+
+    def test_nothing_is_read_while_the_watch_is_off(self):
+        self.w.set_enabled(False)
+        self.sampler().tick()
+        self.assertEqual(self.calls, [])
+
+    def test_a_server_that_does_not_answer_keeps_what_was_learned(self):
+        sm = self.sampler()
+        sm.tick()
+        sm2 = self.sampler(answer=False); sm2.rounds = 3
+        self.t[0] += 30; sm2.tick()
+        self.assertIn(self.w.key("snmp:apollo", "eth0"), self.w.series)
+
+    def test_marking_a_switch_port_known_silences_its_server_card_too(self):
+        sw, nic = self.w.key("sw1", "Port 5"), self.w.key("snmp:apollo", "eth0")
+        self.w.set_peers({sw: (nic, "apollo, eth0"), nic: (sw, "Core, Port 5")})
+        self.w.set_known([sw], True)
+        self.assertEqual(self.w.known(), {sw, nic})
+        self.w.set_known([sw], False)
+        self.assertEqual(self.w.known(), set())
+
+    def test_the_map_pairs_a_server_card_with_its_switch_port_by_hardware_address(self):
+        from types import SimpleNamespace
+        from monitorbox_app import server
+        me = SimpleNamespace(portwatch=self.w, last_sources=[{"connection": "apollo", "module": "snmp", "report": {"ports": [{"name": "eth0", "mac": "AA:BB:CC:00:11:22"}, {"name": "eth1", "mac": "aa:bb:cc:00:11:33"}]}}])
+        m = {"nodes": [{"id": "sw1", "name": "Core-B", "link": None, "ports": [{"port": "5", "keys": [["sw1", "Port 5"]], "macs": ["aa:bb:cc:00:11:22"], "server": True}, {"port": "6", "keys": [["sw1", "Port 6"]], "macs": ["de:ad:be:ef:00:01"]}]}]}
+        server.App.annotate_ports(me, m)
+        self.assertEqual(self.w.peers[self.w.key("sw1", "Port 5")], (self.w.key("snmp:apollo", "eth0"), "apollo, eth0"))
+        self.assertEqual(self.w.peers[self.w.key("snmp:apollo", "eth0")], (self.w.key("sw1", "Port 5"), "Core-B, Port 5"))
+        self.assertNotIn(self.w.key("sw1", "Port 6"), self.w.peers, "a port with something else on it has no server card at the other end")
+
+
 class Busy(unittest.TestCase):
     def test_the_port_history_says_how_busy_a_port_was(self):
         from monitorbox_app import portpeers
