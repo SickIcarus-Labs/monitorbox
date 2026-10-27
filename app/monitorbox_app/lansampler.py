@@ -44,19 +44,15 @@ class LanSampler:
                     wifi[f"{name}|{c.get('mac') or ''}"] = {"name": name, "ap": c.get("ap"), "rx": c["rxBps"], "tx": c["txBps"]}
         ids = lanmap.device_ids(devices)
         now = self.clock()
-        if self.watch is not None:
-            if self.watch.enabled():
-                self.watch.feed(devices, ids, now)
-            else:
-                self.watch.forget()
         by_ip = {str(d.get("ip") or "").strip().lower(): i for d, i in zip(devices, ids) if d.get("ip")}
-        covered = set()
+        covered, snmp_bad, snmp_conf = set(), {}, set()      # snmp_bad: device id -> {port label: error and drop counters over SNMP}; snmp_conf: devices that have an SNMP connection at all
         for c in conns:
             if c.get("module") != "snmp":
                 continue
             dev = by_ip.get(followups.host_of(c))
             if not dev:
                 continue
+            snmp_conf.add(dev)
             try:
                 r = self.call("snmp", "counters", {"connection": c}, 20)
             except Exception:
@@ -65,11 +61,18 @@ class LanSampler:
             if ports:
                 self.series.feed_counters(dev, ports, now)
                 covered.add(dev)
+                snmp_bad[dev] = {lab: {"rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"]}
+                                 for lab, v in ports.items() if all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))}
         for d, i in zip(devices, ids):
             if i in covered or d.get("type") not in ("usw", "udm", "ugw", "uxg"):
                 continue
             self.series.feed_rates(i, {p["name"]: {"in_bps": p.get("inBps"), "out_bps": p.get("outBps")} for p in d.get("ports") or []
                                       if isinstance(p, dict) and p.get("name") and p.get("inBps") is not None and p.get("outBps") is not None}, now)
+        if self.watch is not None:
+            if self.watch.enabled():
+                self._feed_watch(devices, ids, snmp_bad, snmp_conf, now)
+            else:
+                self.watch.forget()
         if wifi:
             self.series.feed_rates(WIFI, {k: {"in_bps": v["rx"], "out_bps": v["tx"]} for k, v in wifi.items()}, now)
         self.series.forget_ports(WIFI, set(wifi))
@@ -78,6 +81,22 @@ class LanSampler:
         self.status.update(at=now, switches=sum(1 for d in devices if d.get("type") == "usw"), snmp=len(covered), unifi=len(unifis))
         if self.after:
             self.after()
+
+    def _feed_watch(self, devices, ids, snmp_bad, snmp_conf, now):
+        """The port watch's counters. UniFi's port table has them for every UniFi device; a switch that is also an SNMP connection gives them over SNMP
+        instead (straight from the interface). The two count differently, so one device never mixes them: an SNMP device whose answer did not come this
+        round is left out of this round altogether, not read from UniFi. Link drops (UniFi's link_down_count) stay from UniFi."""
+        use, keep, held = [], [], set()
+        for d, i in zip(devices, ids):
+            if i in snmp_bad:
+                bad = snmp_bad[i]
+                d = {**d, "ports": [{**p, **bad[p["name"]]} if isinstance(p, dict) and p.get("name") in bad else p for p in d.get("ports") or []]}
+            elif i in snmp_conf:
+                held.add(i)
+                continue
+            use.append(d)
+            keep.append(i)
+        self.watch.feed(use, keep, now, hold=held)
 
     def run(self):
         while not self.stopping.is_set():

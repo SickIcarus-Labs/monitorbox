@@ -229,6 +229,7 @@ def run_check(name, params, conn):
 
 # ---------------------------------------------------------------- traffic counters ----
 IF_HC_IN, IF_HC_OUT = "1.3.6.1.2.1.31.1.1.1.6", "1.3.6.1.2.1.31.1.1.1.10"      # 64-bit octet counters
+IF_IN_DISC, IF_IN_ERR, IF_OUT_DISC, IF_OUT_ERR = "1.3.6.1.2.1.2.2.1.13", "1.3.6.1.2.1.2.2.1.14", "1.3.6.1.2.1.2.2.1.19", "1.3.6.1.2.1.2.2.1.20"   # errors and discards, per direction
 IF_IN, IF_OUT = "1.3.6.1.2.1.2.2.1.10", "1.3.6.1.2.1.2.2.1.16"                  # 32-bit ones, for devices without the 64-bit pair
 
 
@@ -260,7 +261,8 @@ def sample(conn, names):
 
 def counters(conn):
     """Raw octet counters for every real interface, in a handful of column reads (not one lookup per port). The App turns two readings
-    into rates and keeps the history. {"ports": {name: {"in", "out", "bits", "speedMbps"?, "label"?}}}; `label` is the port's description (on UniFi
+    into rates and keeps the history. {"ports": {name: {"in", "out", "bits", "speedMbps"?, "label"?, "rxErr"?, "txErr"?, "rxDrop"?, "txDrop"?}}} (the last four are the interface's
+    error and discard counters, when the device has them); `label` is the port's description (on UniFi
     switches the same name UniFi uses, "Port 10"). Virtual interfaces are left out."""
     s = session(conn)
     names = s.column(IF_NAME) or s.column(IF_DESCR)
@@ -268,6 +270,7 @@ def counters(conn):
     wide = bool(hi) and bool(ho)
     li, lo = (hi, ho) if wide else (s.column(IF_IN), s.column(IF_OUT))
     speed, alias = s.column(IF_HIGHSPEED), _safe(s, IF_ALIAS)
+    bad = {k: _safe(s, oid) for k, oid in (("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC))}      # not every device has them
     out = {}
     for idx, n in names.items():
         nm = L.text(n)
@@ -275,7 +278,8 @@ def counters(conn):
         if not nm or nm.startswith(VIRTUAL_IF) or not isinstance(a, int) or not isinstance(b, int):
             continue
         sp, lab = clean(speed.get(idx)), L.text(alias.get(idx) or b"")[:60]
-        out[nm] = {"in": a, "out": b, "bits": 64 if wide else 32, **({"speedMbps": int(sp)} if isinstance(sp, int) and sp > 0 else {}), **({"label": lab} if lab else {})}
+        out[nm] = {"in": a, "out": b, "bits": 64 if wide else 32, **({"speedMbps": int(sp)} if isinstance(sp, int) and sp > 0 else {}), **({"label": lab} if lab else {}),
+                    **{k: v for k, col in bad.items() for v in [clean(col.get(idx))] if isinstance(v, int)}}
     return {"ports": out}
 
 
