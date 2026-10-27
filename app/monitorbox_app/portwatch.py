@@ -14,7 +14,7 @@ the device restarted: that port starts again from there.
 Off by default. When it is switched on, one built-in check ("Port errors") reports Degraded (never Down: the link still works) while any port
 that is not marked "known issue" is rising; the usual 2-in-a-row confirmation and the alert triggers apply on top. A port marked known still
 shows its numbers, but never raises anything: the same rule as everywhere else, observed state is never hidden, only the alerting is."""
-import threading, time
+import json, os, threading, time
 from collections import deque
 
 from .store import read_json, write_json
@@ -27,6 +27,8 @@ RISE = 5                  # the recent pace must be at least this many times the
 FLOOR = {"errors": 20, "drops": 1000, "flaps": 3}      # new in the window, at least, before it is worth a line
 WORDS = {"errors": "errors", "drops": "drops", "flaps": "link drops"}
 KINDS = ("errors", "drops", "flaps")
+SAVE_EVERY = 300          # seconds between saves of the history; it is kept thinned to one reading per this long
+FIRST_READINGS = 180      # seconds after a start that the first counters are waited for before the check says it cannot read any
 
 
 SPLIT = {"errors": (4, 5), "drops": (6, 7)}      # which stored columns are the receive and transmit parts
@@ -102,12 +104,16 @@ def judge(q, flaps=True):
 class PortWatch:
     def __init__(self, paths, clock=time.time, traffic=None):
         self.paths, self.clock = paths, clock
+        self.history_path = paths.p("data", "app", "port-history.json")
+        self.started, self.fed, self._saved_at = clock(), False, 0.0
+        self.restored = 0
         self.traffic = traffic      # traffic(keys, seconds) -> {avgBps, peakBps} or None: how busy the port was, from the port history
         self.lock = threading.Lock()
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
+        self.restore()
 
     # ---- settings (in the box's config file) ----
     def _cfg(self):
@@ -177,6 +183,9 @@ class PortWatch:
             for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold]:   # a port or device that is gone
                 del self.series[k]
                 self.labels.pop(k, None)
+            if seen:
+                self.fed = True
+        self.save(now)
 
     def set_peers(self, peers):
         """The port at the other end of each link between two devices, so a port can say what its far end is doing."""
@@ -206,6 +215,68 @@ class PortWatch:
         with self.lock:
             self.series.clear()
             self.labels.clear()
+        try:
+            os.remove(self.history_path)
+        except OSError:
+            pass
+
+    # ---- the history, kept across a restart ----
+    def save(self, now=None, force=False):
+        """Keeps the last day of readings on disk, thinned to one reading every five minutes, at most every five minutes: a restart then resumes with what
+        each port normally does instead of learning for half an hour again. Read-only data about the network (names and counters); not readable by other users."""
+        now = self.clock() if now is None else now
+        if not force and now - self._saved_at < SAVE_EVERY:
+            return
+        with self.lock:
+            if not self.series:
+                return
+            thin = {}
+            for k, q in self.series.items():
+                keep, slot = [], None
+                for row in q:
+                    b = int(row[0] // SAVE_EVERY)
+                    if b == slot:
+                        keep[-1] = row                      # the last reading of each five minutes
+                    else:
+                        keep.append(row); slot = b
+                thin[k] = {"label": self.labels.get(k, k), "rows": keep}
+            self._saved_at = now
+        try:
+            os.makedirs(os.path.dirname(self.history_path), exist_ok=True)
+            tmp = self.history_path + ".tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump({"saved": now, "ports": thin}, f, separators=(",", ":"))
+            os.replace(tmp, self.history_path)
+        except OSError:
+            pass                                            # only a slower start next time
+
+    def restore(self):
+        """Loads the saved history (only while the watch is on, and only what is less than a day old)."""
+        if not self.enabled():
+            return 0
+        try:
+            with open(self.history_path) as f:
+                data = json.load(f)
+            ports = data["ports"]
+            now = self.clock()
+            if not isinstance(ports, dict) or now - float(data["saved"]) > KEEP:
+                return 0
+        except (OSError, ValueError, KeyError, TypeError):
+            return 0
+        n = 0
+        with self.lock:
+            for k, v in ports.items():
+                try:
+                    rows = [[float(r[0])] + [int(x) for x in r[1:]] for r in v["rows"] if now - float(r[0]) <= KEEP and len(r) >= 4]
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if rows:
+                    self.series[str(k)] = deque(rows)
+                    self.labels[str(k)] = str(v.get("label") or k)
+                    n += 1
+        self.restored = n
+        return n
 
     # ---- answers ----
     def state(self, keys):
@@ -244,6 +315,10 @@ class PortWatch:
         with self.lock:
             n = len(self.series)
             ready = sum(1 for q in self.series.values() if len(q) >= 2 and q[-1][0] - q[0][0] >= MIN_HISTORY)
+        if not self.fed and self.clock() - self.started < FIRST_READINGS:
+            return None, "waiting for the first port readings", None, {"starting": True}      # a restart: its counters come in a moment, that is not "unknown"
+        if not self.fed:
+            return None, "no switch port counters to read yet", None, {}
         if not n:
             return None, "no switch port counters to read yet", None, {}
         found = self.findings()

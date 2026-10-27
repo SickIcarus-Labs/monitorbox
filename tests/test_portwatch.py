@@ -339,3 +339,77 @@ class AsASystem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Restart(unittest.TestCase):
+    """#297: after a restart the check must not report Unknown while the first readings are on their way, and what each port normally does is remembered."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name)
+        os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.now = 1_000_000.0
+        self.w = portwatch.PortWatch(self.paths, clock=lambda: self.now)
+        self.w.set_enabled(True)
+
+    def second(self):
+        return portwatch.PortWatch(self.paths, clock=lambda: self.now)
+
+    def feed(self, w, minutes, errs=lambda m: 0):
+        for m in range(minutes + 1):
+            self.now = 1_000_000.0 + m * 60
+            w.feed([dev("Core switch", **{"Port 5": (errs(m), 0, 0, 0, 0)})], ["sw1"], now=self.now)
+
+    def test_before_the_first_readings_the_check_is_starting_not_unknown(self):
+        ok, detail, _, extra = self.w.check()
+        self.assertIsNone(ok)
+        self.assertTrue(extra.get("starting"))
+        self.assertEqual(detail, "waiting for the first port readings")
+
+    def test_if_no_readings_ever_come_it_is_unknown_after_the_wait(self):
+        self.now += portwatch.FIRST_READINGS + 1
+        ok, detail, _, extra = self.w.check()
+        self.assertIsNone(ok)
+        self.assertFalse(extra.get("starting"))
+        self.assertEqual(detail, "no switch port counters to read yet")
+
+    def test_the_learned_history_survives_a_restart(self):
+        self.feed(self.w, 40)
+        self.w.save(self.now, force=True)
+        self.assertEqual(oct(os.stat(self.w.history_path).st_mode & 0o777), "0o600")
+        again = self.second()
+        self.assertEqual(again.restored, 1)
+        self.now += 60
+        self.assertTrue(again.check()[0] is None and again.check()[3].get("starting"), "readings not in yet: still starting")
+        self.now += 30
+        again.feed([dev("Core switch", **{"Port 5": (0, 0, 0, 0, 0)})], ["sw1"], now=self.now)
+        ok, detail, _, extra = again.check()
+        self.assertTrue(ok)
+        self.assertNotIn("learning", detail, "forty minutes of history were kept: nothing to learn again")
+
+    def test_a_rise_after_a_restart_is_still_caught(self):
+        self.feed(self.w, 60, lambda m: 0 if m < 45 else (m - 45) * 40)
+        self.w.save(self.now, force=True)
+        again = self.second()
+        self.assertEqual(again.restored, 1)
+        self.now += 60
+        again.feed([dev("Core switch", **{"Port 5": (600, 0, 0, 0, 0)})], ["sw1"], now=self.now)
+        self.assertTrue(again.check()[3].get("warn") or again.check()[0] is True)
+
+    def test_old_or_broken_history_is_ignored(self):
+        self.feed(self.w, 40)
+        self.w.save(self.now, force=True)
+        self.now += portwatch.KEEP + 10
+        self.assertEqual(self.second().restored, 0)
+        with open(self.w.history_path, "w") as f:
+            f.write("{not json")
+        self.assertEqual(self.second().restored, 0)
+
+    def test_turning_it_off_removes_the_saved_history(self):
+        self.feed(self.w, 40)
+        self.w.save(self.now, force=True)
+        self.assertTrue(os.path.exists(self.w.history_path))
+        self.w.set_enabled(False)
+        self.w.forget()
+        self.assertFalse(os.path.exists(self.w.history_path))
+        self.assertEqual(self.second().restored, 0)
