@@ -8,6 +8,7 @@ import threading, time
 from . import lanmap, followups
 
 EVERY = 10.0
+SERVER_EVERY = 3        # a server's network cards are read every third round (30 s): the port watch moves slowly
 WIFI = "wifi"           # the history's stand-in for a switch: every Wi-Fi client is a "port" under it
 
 
@@ -19,6 +20,7 @@ class LanSampler:
         self.stopping = threading.Event()
         self.thread = None
         self.status = {"at": 0.0, "switches": 0, "snmp": 0, "unifi": 0}
+        self.rounds = 0
         self.wifi = {}          # port name in the history (under WIFI) -> {"name", "ap"}: the Wi-Fi clients read this round
 
     def tick(self):
@@ -70,7 +72,9 @@ class LanSampler:
                                       if isinstance(p, dict) and p.get("name") and p.get("inBps") is not None and p.get("outBps") is not None}, now)
         if self.watch is not None:
             if self.watch.enabled():
-                self._feed_watch(devices, ids, snmp_bad, snmp_conf, now)
+                self.rounds += 1
+                servers, held = self._read_servers(conns, by_ip)
+                self._feed_watch(devices, ids, snmp_bad, snmp_conf, now, servers, held)
             else:
                 self.watch.forget()
         if wifi:
@@ -82,7 +86,31 @@ class LanSampler:
         if self.after:
             self.after()
 
-    def _feed_watch(self, devices, ids, snmp_bad, snmp_conf, now):
+    def _read_servers(self, conns, by_ip):
+        """The network cards of SNMP servers (SNMP connections that are not UniFi devices): errors and discards per interface, for the port watch only.
+        -> ([(id, pseudo device)], ids that could not be read this round and are held). An id is "snmp:<connection id>"."""
+        out, held = [], set()
+        for c in conns:
+            if c.get("module") != "snmp" or by_ip.get(followups.host_of(c)):
+                continue
+            sid = "snmp:" + str(c["id"])
+            if (self.rounds - 1) % SERVER_EVERY:
+                held.add(sid)
+                continue
+            try:
+                r = self.call("snmp", "counters", {"connection": c}, 20)
+            except Exception:
+                held.add(sid)
+                continue
+            ports = [{"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"]}
+                     for nm, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict) and all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))]
+            if ports:
+                out.append((sid, {"name": str(c.get("name") or c["id"]), "ports": ports}))
+            else:
+                held.add(sid)
+        return out, held
+
+    def _feed_watch(self, devices, ids, snmp_bad, snmp_conf, now, servers=(), held_servers=()):
         """The port watch's counters. UniFi's port table has them for every UniFi device; a switch that is also an SNMP connection gives them over SNMP
         instead (straight from the interface). The two count differently, so one device never mixes them: an SNMP device whose answer did not come this
         round is left out of this round altogether, not read from UniFi. Link drops (UniFi's link_down_count) stay from UniFi."""
@@ -96,7 +124,10 @@ class LanSampler:
                 continue
             use.append(d)
             keep.append(i)
-        self.watch.feed(use, keep, now, hold=held)
+        for sid, d in servers:
+            use.append(d)
+            keep.append(sid)
+        self.watch.feed(use, keep, now, hold=held | set(held_servers))
 
     def run(self):
         while not self.stopping.is_set():

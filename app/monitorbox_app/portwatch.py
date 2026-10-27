@@ -118,6 +118,11 @@ class PortWatch:
         return self._cfg().get("on") is True
 
     def known(self):
+        """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""
+        marked = self._marked()
+        return marked | {self.peers[k][0] for k in marked if k in self.peers}
+
+    def _marked(self):
         return set(str(k) for k in self._cfg().get("known") or [])
 
     def _save(self, **changes):
@@ -132,7 +137,7 @@ class PortWatch:
 
     def set_known(self, keys, known):
         """Mark ports (each one a list of "device id|port name" keys, like a bonded pair) as a known issue, or take the mark off."""
-        now = self.known()
+        now = self._marked()          # only what was marked by hand is saved, never a far end that was silenced with it
         for k in keys:
             (now.add if known else now.discard)(str(k))
         self._save(known=sorted(now))

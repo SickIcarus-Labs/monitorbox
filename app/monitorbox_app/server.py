@@ -1100,6 +1100,24 @@ class App:
                 a, b = self.portwatch.key(*ks["self"]), self.portwatch.key(*ks["parent"])
                 peers[a] = (b, f"{link.get('to')}, {ks['parent'][1]}")
                 peers[b] = (a, f"{n.get('name')}, {ks['self'][1]}")
+        # a server's network card is the other end of the switch port it is plugged into: matched by the card's hardware address
+        norm = lambda mac: "".join(ch for ch in str(mac or "").lower() if ch in "0123456789abcdef")
+        cards = {}
+        for src in self.last_sources:
+            rep = src.get("report") or {}
+            if src.get("module") == "snmp" and src.get("connection"):
+                for p in rep.get("ports") or []:
+                    if isinstance(p, dict) and p.get("mac") and p.get("name"):
+                        cards.setdefault(norm(p["mac"]), (self.portwatch.key("snmp:" + str(src["connection"]), p["name"]), f"{src['connection']}, {p['name']}"))
+        for n in m.get("nodes", []):
+            for p in n.get("ports", []):
+                if len(p.get("keys") or []) != 1:
+                    continue
+                sw = self.portwatch.key(*p["keys"][0])
+                card = next((cards[norm(x)] for x in p.get("macs") or [] if norm(x) in cards), None)
+                if card and sw not in peers:
+                    peers[sw] = (card[0], card[1])
+                    peers[card[0]] = (sw, f"{n.get('name')}, {p['keys'][0][1]}")
         self.portwatch.set_peers(peers)
         for n in m.get("nodes", []):
             link = n.get("link")
