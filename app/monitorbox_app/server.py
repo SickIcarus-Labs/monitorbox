@@ -1092,6 +1092,15 @@ class App:
                 if p.get("server") or p.get("infra"):
                     flap |= {self.portwatch.key(*k) for k in p.get("keys") or []}
         self.portwatch.set_flap_ports(flap)
+        peers = {}            # the two ends of every link between devices
+        for n in m.get("nodes", []):
+            link = n.get("link")
+            ks = (link or {}).get("keys") or {}
+            if ks.get("self") and ks.get("parent"):
+                a, b = self.portwatch.key(*ks["self"]), self.portwatch.key(*ks["parent"])
+                peers[a] = (b, f"{link.get('to')}, {ks['parent'][1]}")
+                peers[b] = (a, f"{n.get('name')}, {ks['self'][1]}")
+        self.portwatch.set_peers(peers)
         for n in m.get("nodes", []):
             link = n.get("link")
             if link and (link.get("keys") or {}).get("self"):

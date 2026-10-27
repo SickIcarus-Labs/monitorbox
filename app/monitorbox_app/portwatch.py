@@ -106,6 +106,7 @@ class PortWatch:
         self.lock = threading.Lock()
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
+        self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
 
     # ---- settings (in the box's config file) ----
@@ -172,6 +173,26 @@ class PortWatch:
                 del self.series[k]
                 self.labels.pop(k, None)
 
+    def set_peers(self, peers):
+        """The port at the other end of each link between two devices, so a port can say what its far end is doing."""
+        self.peers = dict(peers)
+
+    def other_end(self, key):
+        """What the port at the other end of this link is doing, or None when this port is not one end of a link between two devices.
+        {"label", "state": "figures"|"learning"|"none", "split": {kind: {rx, tx}}}. "none": that end gave no counters."""
+        peer = self.peers.get(key)
+        if not peer:
+            return None
+        pk, label = peer
+        with self.lock:
+            q = list(self.series.get(pk) or [])
+        if not q:
+            return {"label": label, "state": "none", "split": {}}
+        j = judge(q, pk in self.flap_ports)
+        if not j["split"]:
+            return {"label": label, "state": "learning", "split": {}}
+        return {"label": label, "state": "figures", "split": j["split"]}
+
     def set_flap_ports(self, keys):
         """The ports whose link drops are worth reporting. A port with a laptop or a TV on it drops every time that sleeps, so it is left out."""
         self.flap_ports = set(keys)
@@ -194,7 +215,8 @@ class PortWatch:
         rising = sorted({kind for j in js for kind in j["rising"]}, key=KINDS.index)
         split = {kind: {side: sum(j["split"][kind][side] for j in js if kind in j["split"]) for side in ("rx", "tx")} for kind in SPLIT if any(kind in j["split"] for j in js)}
         busy = self.traffic(list(keys), RECENT) if self.traffic else None
-        return {"learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was, "split": split, "traffic": busy,
+        other = self.other_end(keys[0]) if len(keys) == 1 else None
+        return {"other": other, "learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was, "split": split, "traffic": busy,
                 "known": any(k in known for k in keys)}
 
     def findings(self):
@@ -206,7 +228,7 @@ class PortWatch:
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
             j = judge(q, k in self.flap_ports)
             if j["rising"] and k not in known:
-                out.append({"label": label, "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"],
+                out.append({"label": label, "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
         return out
 
@@ -230,7 +252,12 @@ class PortWatch:
             what = " and ".join(f"{WORDS[k]} rising (about {per[k]:,} an hour"
                                 + (f": {split[k]['rx']:,} receive, {split[k]['tx']:,} transmit" if k in split else "")
                                 + (f", was {was[k]:,}" if was[k] is not None else "") + ")" for k in f["kinds"])
-            busy = f["traffic"]
-            parts.append(f"{f['label']}: {what}" + (f", carrying about {bps_words(busy['avgBps'])} (peak {bps_words(busy['peakBps'])})" if busy else ""))
+            busy, other = f["traffic"], f["other"]
+            kind = next((k for k in f["kinds"] if k in SPLIT), None)
+            far = ""
+            if other and kind:
+                far = (f" · other end ({other['label']}): " + (f"{other['split'][kind]['rx']:,} receive, {other['split'][kind]['tx']:,} transmit an hour" if other["state"] == "figures"
+                                                          else "still learning" if other["state"] == "learning" else "no counters"))
+            parts.append(f"{f['label']}: {what}" + (f", carrying about {bps_words(busy['avgBps'])} (peak {bps_words(busy['peakBps'])})" if busy else "") + far)
         more = f" (and {len(found) - 3} more)" if len(found) > 3 else ""
         return True, "; ".join(parts) + more, None, {"warn": True}
