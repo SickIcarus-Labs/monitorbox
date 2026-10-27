@@ -6,7 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
-Nothing yet.
+- **1.4.3** The network map page opens at once. It shows the last map straight away (kept on disk, so it works right after a restart too) and refreshes it in the background when it is more than a minute old, instead of waiting for a fresh scan of the network.
 
 ## 1.0.1 to 1.4.2
 
