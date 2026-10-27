@@ -102,8 +102,9 @@ def judge(q, flaps=True):
 
 
 class PortWatch:
-    def __init__(self, paths, clock=time.time, traffic=None):
+    def __init__(self, paths, clock=time.time, traffic=None, available=None):
         self.paths, self.clock = paths, clock
+        self.available = available      # available() -> True when the box has a switch it could read counters from (a UniFi or SNMP login)
         self.history_path = paths.p("data", "app", "port-history.json")
         self.started, self.fed, self._saved_at = clock(), False, 0.0
         self.restored = 0
@@ -121,7 +122,33 @@ class PortWatch:
         return c if isinstance(c, dict) else {}
 
     def enabled(self):
-        return self._cfg().get("on") is True
+        """On when it was switched on, or when nobody has chosen yet and the box has something to read. Switched off by hand stays off."""
+        on = self._cfg().get("on")
+        if on is None:
+            return bool(self.available and self.available())
+        return on is True
+
+    def chosen(self):
+        """True once someone switched it on or off by hand."""
+        return "on" in self._cfg()
+
+    def page(self):
+        """What the Port errors item page lists: the ports rising now and the ports ticked off (not alerting), each with the key that the tick uses."""
+        known = self._marked()
+        with self.lock:
+            snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
+        rising, off = [], []
+        for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
+            j = judge(q, k in self.flap_ports)
+            row = {"key": k, "label": label, "alert": k not in known}
+            if k in known:
+                off.append({**row, "kinds": j["rising"]})
+            elif j["rising"]:
+                rising.append({**row, "kinds": j["rising"], "perHour": j["perHour"], "learning": False})
+        stale = sorted(k for k in known if k not in snap)
+        for k in stale:
+            off.append({"key": k, "label": k.split("|", 1)[-1] if "|" in k else k, "alert": False, "kinds": []})
+        return {"on": self.enabled(), "ports": len(snap), "rising": rising, "off": off}
 
     def known(self):
         """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""

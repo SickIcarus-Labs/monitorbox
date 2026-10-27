@@ -413,3 +413,42 @@ class Restart(unittest.TestCase):
         self.w.forget()
         self.assertFalse(os.path.exists(self.w.history_path))
         self.assertEqual(self.second().restored, 0)
+
+
+class OnByDefault(unittest.TestCase):
+    """#295: Port errors is on by default where there is a switch to read, and stays off when switched off by hand."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name)
+        os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.have = [True]
+        self.w = portwatch.PortWatch(self.paths, available=lambda: self.have[0])
+
+    def test_on_when_there_is_a_switch_to_read_and_nobody_chose(self):
+        self.assertTrue(self.w.enabled())
+        self.assertFalse(self.w.chosen())
+
+    def test_off_when_there_is_nothing_to_read(self):
+        self.have[0] = False
+        self.assertFalse(self.w.enabled())
+
+    def test_switching_it_off_by_hand_stays_off(self):
+        self.w.set_enabled(False)
+        self.assertFalse(self.w.enabled())
+        self.assertTrue(self.w.chosen())
+        self.assertFalse(portwatch.PortWatch(self.paths, available=lambda: True).enabled(), "a restart does not switch it back on")
+
+    def test_the_page_lists_rising_ports_and_the_ones_not_alerting(self):
+        for m in range(61):
+            self.w.feed([dev("Core switch", **{"Port 5": (0 if m < 45 else (m - 45) * 40, 0, 0, 0, 0), "Port 6": (0, 0, 0, 0, 0)})], ["sw1"], now=m * 60)
+        page = self.w.page()
+        self.assertEqual([r["label"] for r in page["rising"]], ["Core switch, Port 5"])
+        self.assertTrue(page["rising"][0]["alert"])
+        self.w.set_known([page["rising"][0]["key"]], True)
+        page = self.w.page()
+        self.assertEqual(page["rising"], [])
+        self.assertEqual([r["label"] for r in page["off"]], ["Core switch, Port 5"])
+        self.assertFalse(page["off"][0]["alert"])
+        self.w.set_known([page["off"][0]["key"]], False)
+        self.assertEqual(len(self.w.page()["rising"]), 1, "ticking it again brings it back")
