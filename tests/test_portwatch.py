@@ -140,6 +140,25 @@ class Watch(unittest.TestCase):
         self.assertIn("42,000 receive, 120 transmit", detail)
         self.assertIn("carrying about 4.1 Gbit/s (peak 9.2 Gbit/s)", detail)
 
+    def test_a_port_says_what_the_other_end_of_its_link_is_doing(self):
+        w = portwatch.PortWatch(self.paths)
+        w.set_enabled(True)
+        a, b = w.key("gw", "SFP+ 2"), w.key("agg", "Port 3")
+        w.set_peers({a: (b, "Aggregation, Port 3"), b: (a, "Broad Leaf, SFP+ 2")})
+        for m in range(0, 61):
+            rx = 0 if m < 45 else (m - 45) * 700
+            w.feed([dev("Broad Leaf", **{"SFP+ 2": (rx, 0, 0, 0, 0)}), dev("Aggregation", **{"Port 3": (0, 0, 0, 0, 0)})], ["gw", "agg"], now=m * 60)
+        far = w.state([a])["other"]
+        self.assertEqual((far["label"], far["state"], far["split"]["errors"]), ("Aggregation, Port 3", "figures", {"rx": 0, "tx": 0}))
+        self.assertIn("other end (Aggregation, Port 3): 0 receive, 0 transmit an hour", w.check()[1])
+        self.assertIsNone(w.state([w.key("gw", "SFP+ 1")]) and w.state([w.key("gw", "SFP+ 1")])["other"], "a port that is not one end of a link between devices has no other end")
+        # the other end gave no counters at all
+        w2 = portwatch.PortWatch(self.paths); w2.set_peers({a: (b, "Aggregation, Port 3")})
+        for m in range(0, 61):
+            w2.feed([dev("Broad Leaf", **{"SFP+ 2": (0 if m < 45 else (m - 45) * 700, 0, 0, 0, 0)})], ["gw"], now=m * 60)
+        self.assertEqual(w2.state([a])["other"]["state"], "none")
+        self.assertIn("other end (Aggregation, Port 3): no counters", w2.check()[1])
+
     def test_a_known_port_keeps_its_numbers_but_never_raises_anything(self):
         self.w.set_enabled(True)
         key = self.w.key("sw1", "Port 5")
