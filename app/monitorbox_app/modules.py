@@ -112,6 +112,8 @@ class ModuleProcess:
                 self.proc.kill()
 
 
+HELLO_WAIT = 20          # seconds a starting module has to say hello: several coming up together on a small computer can be slow
+START_AT_ONCE = 4        # modules started at the same time (all eight at once can starve each other on a small CPU)
 STARTUP_HOLD = 90        # seconds after the app starts during which a module that is still coming up is waited for, not reported
 
 
@@ -143,7 +145,7 @@ class Modules:
         if not man or man.get("id") != mid or man.get("version") != version:
             raise ValueError(f"{mid} {version}: manifest does not match")
         p = ModuleProcess(mid, version, d, man["entry"])
-        p.call("hello")  # must answer before we call it healthy
+        p.call("hello", timeout=HELLO_WAIT)  # must answer before we call it healthy
         old = self.running.get(mid)
         self.running[mid] = p
         if old:
@@ -175,12 +177,10 @@ class Modules:
                     pass  # shown as not running in the UI
                 finally:
                     self.starting.discard(mid)
-            # all at once: the wait is the slowest module, not all of them added up
-            threads = [threading.Thread(target=one, args=(mid, v), daemon=True) for mid, v in todo.items()]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+            # a few at a time: the wait is a fraction of all of them added up, without eight programs starving each other on a small computer
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=START_AT_ONCE, thread_name_prefix="modstart") as pool:
+                list(pool.map(lambda kv: one(*kv), todo.items()))
             self.starting.clear()
 
     def apply_one(self, mid, entry):

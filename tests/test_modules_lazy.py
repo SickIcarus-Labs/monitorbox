@@ -57,6 +57,25 @@ class Together(unittest.TestCase):
         self.assertIn("not running", m.check({"module": "snmp", "check": "x"}, {})[1])
 
 
+    def test_no_more_than_a_few_modules_start_at_the_same_time(self):
+        import threading, time
+        m = Fake({f"m{i}": {"active": "1"} for i in range(8)})
+        now, peak, lock = [0], [0], threading.Lock()
+
+        def slow(mid, version):
+            with lock:
+                now[0] += 1; peak[0] = max(peak[0], now[0])
+            time.sleep(0.15)
+            with lock:
+                now[0] -= 1
+            m.running[mid] = type("P", (), {"alive": lambda s: True})()
+        m._start = slow
+        m.start_all()
+        self.assertEqual(len(m.running), 8)
+        self.assertGreater(peak[0], 1, "together, not one by one")
+        self.assertLessEqual(peak[0], modules.START_AT_ONCE, "but not all eight at once (CI starved them on a small runner, #1.4.0)")
+
+
 class LazyStart(unittest.TestCase):
     def setUp(self):
         self.m = Fake({"snmp": {"active": "1"}, "scrypted": {"active": "1"}, "wol": {"active": "1"}})
