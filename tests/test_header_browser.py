@@ -100,6 +100,24 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_updates_page_offers_what_changed_for_the_app(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+            self.assertEqual(pg.locator("[data-sw=app] details").count(), 0, "no notes, no link")
+            pg.evaluate("""()=>{const f=window.fetch;window.fetch=(u,o)=>String(u).endsWith('/api/versions')?f(u,o).then(async r=>{const j=await r.json();j.app.changed=[{version:'9.2.0',changes:['The thing now works <b>better</b>.']},{version:'9.1.5',changes:['An earlier fix.']}];return new Response(JSON.stringify(j))}):f(u,o);route()}""")
+            pg.wait_for_selector("[data-sw=app] details summary")
+            self.assertEqual(pg.inner_text("[data-sw=app] details summary"), "What changed")
+            pg.click("[data-sw=app] details summary")
+            t = pg.inner_text("[data-sw=app] details")
+            self.assertLess(t.index("9.2.0"), t.index("9.1.5"), "newest first")
+            self.assertIn("The thing now works <b>better</b>.", t, "shown as text, never as markup")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_bell_says_when_the_container_image_needs_re_pulling_and_the_updates_page_explains(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:

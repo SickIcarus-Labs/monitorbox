@@ -1373,7 +1373,7 @@ async function renderSettings(){
   const opts=[`<option value=latest ${c.pin=='latest'?'selected':''}>Latest${c.latest?' ('+esc(c.latest)+')':''}</option>`]
    .concat(c.options.map(o=>`<option value="${esc(o.version)}" ${c.pin==o.version?'selected':''}>${esc(o.version)}${c.failed.includes(o.version)?' (failed to start)':''}${o.version==c.running?' (running)':''}</option>`)).join('');
   return `<div class=box data-sw="${esc(kind==='app'?'app':id)}"><div class=row><b>${esc(label)}</b><small>${kind==='module'?esc(id)+' · ':''}${c.running?'running '+esc(c.running):'not installed'}</small></div>
-   ${desc?`<div class=sub>${desc}</div>`:''}<div class=row style="margin-top:.5rem"><select onchange="pick('${kind}','${esc(id||'')}',this.value)">${opts}</select>
+   ${desc?`<div class=sub>${desc}</div>`:''}${kind==='app'&&(c.changed||[]).length?`<details class=sub style="margin-top:.4rem"><summary>What changed</summary>${c.changed.map(x=>`<div style="margin-top:.4rem"><b>${esc(x.version)}</b>${x.changes.map(t=>`<div>${esc(t)}</div>`).join('')}</div>`).join('')}</details>`:''}<div class=row style="margin-top:.5rem"><select onchange="pick('${kind}','${esc(id||'')}',this.value)">${opts}</select>
    ${c.needsApply?`<button class="btn" onclick="act('apply',{kind:'${kind}',id:'${esc(id||'')}'})">${c.running?(c.target==c.latest&&c.pin=='latest'?'Update to ':'Switch to '):'Install '}${esc(c.target)}</button>`:'<small>Up to date</small>'}
    ${kind==='module'&&c.running?`<button class="btn sm" onclick="uninstallModule('${esc(id)}','${esc(label)}',${+c.uses||0})">Uninstall</button>`:''}</div>
    ${c.pinMissing?'<div><small>That version isn\'t available in this channel.</small></div>':''}
