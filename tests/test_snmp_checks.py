@@ -82,10 +82,10 @@ class Counters(unittest.TestCase):
         agent = F.Agent(community="fake-community"); self.addCleanup(agent.close)
         agent.mib = {f"{X}.1.1": "port1", f"{X}.1.2": "port2", f"{X}.1.3": "veth9", f"{X}.6.1": ("c64", 111), f"{X}.10.1": ("c64", 222), f"{X}.15.1": ("gauge", 1000),
                      f"{X}.6.2": ("c64", 333), f"{X}.10.2": ("c64", 444), f"{X}.6.3": ("c64", 1), f"{X}.10.3": ("c64", 2), f"{X}.18.1": "Port 1"}
-        self.assertEqual(C.counters(conn(agent, "cnt")), {"ports": {"port1": {"in": 111, "out": 222, "bits": 64, "speedMbps": 1000, "label": "Port 1"}, "port2": {"in": 333, "out": 444, "bits": 64}}})
+        self.assertEqual(C.counters(conn(agent, "cnt")), {"ports": {"port1": {"in": 111, "out": 222, "bits": 64, "speedMbps": 1000, "label": "Port 1"}, "port2": {"in": 333, "out": 444, "bits": 64}}, "sysName": ""})
         old = F.Agent(community="fake-community"); self.addCleanup(old.close)
         old.mib = {f"{X}.1.1": "eth0", "1.3.6.1.2.1.2.2.1.10.1": 7, "1.3.6.1.2.1.2.2.1.16.1": 8}
-        self.assertEqual(C.counters(conn(old, "cnt2")), {"ports": {"eth0": {"in": 7, "out": 8, "bits": 32}}})
+        self.assertEqual(C.counters(conn(old, "cnt2")), {"ports": {"eth0": {"in": 7, "out": 8, "bits": 32}}, "sysName": ""})
 
 
     def test_error_and_discard_counters_come_along_when_the_device_has_them(self):
@@ -123,6 +123,14 @@ class CountersQuick(unittest.TestCase):
         self.assertEqual(second["ports"]["port1"]["txErr"], 42, "each counter keeps its own value")
         self.assertEqual(second["ports"]["port1"]["label"], "Port 1")
         self.assertNotIn("veth9", second["ports"])
+
+    def test_the_devices_own_name_comes_with_the_counters_first_read_and_after(self):
+        a = self.agent(); c = conn(a, "quick10")
+        a.mib["1.3.6.1.2.1.1.5.0"] = "Switch2"
+        self.assertEqual(C.counters(c)["sysName"], "Switch2")
+        before = len(a.requests)
+        self.assertEqual(C.counters(c)["sysName"], "Switch2", "remembered with the layout: no extra request on the quick reads")
+        self.assertTrue(all(o != "1.3.6.1.2.1.1.5.0" for t, oids in a.requests[before:] if t == L.GET for o in oids))
 
     def test_only_the_asked_for_ports_are_read_after_the_first_reading(self):
         a = self.agent(); c = conn(a, "quick9")

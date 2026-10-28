@@ -362,6 +362,15 @@ class PortWatch:
         mine = {k[len(pre):] for k in self.shown if k.startswith(pre)}
         return sorted(mine) if mine else None
 
+    def drop_device(self, dev):
+        """Forgets every reading of one device id (it turned out to be read under another id)."""
+        pre = f"{dev}|"
+        with self.lock:
+            for k in [k for k in self.series if k.startswith(pre)]:
+                del self.series[k]
+                self.labels.pop(k, None)
+                self.links.pop(k, None)
+
     def set_flap_ports(self, keys):
         """The ports whose link drops are worth reporting. A port with a laptop or a TV on it drops every time that sleeps, so it is left out."""
         self.flap_ports = set(keys)

@@ -7,6 +7,11 @@ import threading, time
 
 from . import lanmap, followups
 
+def squash(name):
+    """A name without spaces, punctuation or capitals: \"Switch 2\" and \"Switch2\" are the same device."""
+    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
+
+
 EVERY = 10.0
 SERVER_EVERY = 3        # a server's network cards are read every third round (30 s): the port watch moves slowly
 WIFI = "wifi"           # the history's stand-in for a switch: every Wi-Fi client is a "port" under it
@@ -21,6 +26,7 @@ class LanSampler:
         self.thread = None
         self.status = {"at": 0.0, "switches": 0, "snmp": 0, "unifi": 0}
         self.rounds = 0
+        self.sys_of = {}        # SNMP connection id -> the device's own name (sysName), squashed: tells which UniFi device a connection is when the address does not
         self.wifi = {}          # port name in the history (under WIFI) -> {"name", "ap"}: the Wi-Fi clients read this round
 
     def tick(self):
@@ -49,15 +55,19 @@ class LanSampler:
         by_ip = {str(d.get("ip") or "").strip().lower(): i for d, i in zip(devices, ids) if d.get("ip")}
         by_name = {}
         for d, i in zip(devices, ids):
-            by_name.setdefault(str(d.get("name") or "").strip().lower(), []).append(i)
+            by_name.setdefault(squash(d.get("name")), []).append(i)
 
         def match(c):
-            """The UniFi device an SNMP connection is: by its address, else by its name when exactly one device has that name (the SNMP address is often not the one UniFi lists)."""
+            """The UniFi device an SNMP connection is: by its address, else by a name (the connection's, or the device's own sysName) that exactly one UniFi device has
+            (the SNMP address is often not the one UniFi lists)."""
             hit = by_ip.get(followups.host_of(c))
             if hit:
                 return hit
-            same = by_name.get(str(c.get("name") or "").strip().lower()) or []
-            return same[0] if len(same) == 1 else None
+            for nm in (squash(c.get("name")), self.sys_of.get(str(c.get("id")), "")):
+                same = by_name.get(nm) or [] if nm else []
+                if len(same) == 1:
+                    return same[0]
+            return None
         covered, snmp_bad, snmp_conf = set(), {}, set()      # snmp_bad: device id -> {port label: error and drop counters over SNMP}; snmp_conf: devices that have an SNMP connection at all
         for c in conns:
             if c.get("module") != "snmp":
@@ -71,6 +81,8 @@ class LanSampler:
                 r = self.call("snmp", "counters", {"connection": c, **({"only": only} if only else {})}, 20)
             except Exception:
                 continue
+            if isinstance(r, dict) and r.get("sysName"):
+                self.sys_of[str(c["id"])] = squash(r["sysName"])
             ports = {(v.get("label") or name): v for name, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict)}
             if ports:
                 self.series.feed_counters(dev, ports, now)
@@ -114,6 +126,12 @@ class LanSampler:
             except Exception:
                 held.add(sid)
                 continue
+            if isinstance(r, dict) and r.get("sysName") and self.sys_of.get(str(c["id"])) != squash(r["sysName"]):
+                self.sys_of[str(c["id"])] = squash(r["sysName"])
+                if match(c):                                         # its own name says it is a UniFi device: from the next round it is read as that device, not as a server
+                    if self.watch is not None:
+                        self.watch.drop_device(sid)
+                    continue
             ports = [{"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"], "up": v.get("up")}
                      for nm, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict) and all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))]
             if ports:

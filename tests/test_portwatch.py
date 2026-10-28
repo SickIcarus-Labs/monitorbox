@@ -319,6 +319,18 @@ class Servers(unittest.TestCase):
         self.assertEqual(sorted(self.w.series), ["..:00:00:00|Port 1"], "one reader for the switch: its UniFi port, with the SNMP counters; not a second set of interfaces")
         self.assertEqual(list(self.w.series["..:00:00:00|Port 1"])[-1][1:3], [30, 70], "the SNMP counters are the ones used")
 
+    def test_a_connection_whose_own_name_is_the_switchs_is_read_as_the_switch_from_the_next_round(self):
+        from monitorbox_app import lansampler
+        sm = self.device_sampler(["Core B"], conn_name="Primary link", conn_host="192.0.2.99")
+        inner = sm.call
+        sm.call = lambda mod, method, params, timeout: ({**inner(mod, method, params, timeout), "sysName": "CoreB"} if mod == "snmp" else inner(mod, method, params, timeout))
+        sm.tick()
+        self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), [], "its first read told the box who it is: nothing is kept as a server")
+        self.t[0] += 10; sm.tick()
+        self.assertEqual(sorted(self.w.series), ["..:00:00:00|Port 1"])
+        self.assertEqual(list(self.w.series["..:00:00:00|Port 1"])[-1][1:3], [30, 70], "from then on it is the switch, with its SNMP counters")
+        self.assertEqual(lansampler.squash("Switch 2"), lansampler.squash("Switch2"))
+
     def test_a_name_two_devices_share_does_not_match_so_nothing_is_merged_by_guess(self):
         self.device_sampler(["Core-B", "core-b"]).tick()
         self.assertIn("snmp:swc|Port 1", self.w.series, "read on its own, as a server")

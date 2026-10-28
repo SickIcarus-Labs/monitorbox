@@ -277,7 +277,7 @@ def counters(conn, only=None):
         try:
             out = _quick(s, lay, only)
             if out is not None:
-                return {"ports": out}
+                return {"ports": out, "sysName": lay.get("sys", "")}
         except L.SnmpError:
             pass                                                       # fall back to the full walk, which says what is wrong
         _layouts.pop(key, None)
@@ -285,7 +285,7 @@ def counters(conn, only=None):
     if lay["ifs"]:
         lay["at"] = time.time()
         _layouts[key] = lay
-    return {"ports": out}
+    return {"ports": out, "sysName": lay.get("sys", "")}
 
 
 def _row(a, b, wide, sp, lab, bad, oper=None):
@@ -354,7 +354,11 @@ def _full(s):
         lab = L.text(v["alias"] or b"")[:60]
         out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"])
         ifs[idx] = (nm, v["speed"] if isinstance(v["speed"], int) else None, lab)
-    return out, {"wide": wide, "ifs": ifs}
+    try:
+        sysname = L.text(s.get([SYS_NAME]).get(SYS_NAME) or b"")[:60]           # the device's own name: the App uses it to tell which UniFi device this connection is
+    except L.SnmpError:
+        sysname = ""
+    return out, {"wide": wide, "ifs": ifs, "sys": sysname}
 
 
 # ---------------------------------------------------------------- Re-detect ----
