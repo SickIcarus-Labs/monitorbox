@@ -33,7 +33,7 @@ What the Port errors item watches, how it decides, and what it never does. The c
 ## What it does with a problem
 
 - The Port errors item turns **Degraded** (yellow), never Failed. Alerts use the normal Degraded rules and hold-down times.
-- Each port has an **Alert on this port** tick (on by default, on the Port errors page and on the network map). Unticked ports are still read and shown, they just never raise the heads-up. Unticking one end of a link silences the other end too.
+- Each port has an **Alert on this port** tick (on by default, on the Port errors page and on the network map). Unticked ports are still read and shown, they just never raise the heads-up. Unticking one end of a link silences the other end too. The tick says whether a port may alert at all, not which problems count: on an ordinary client port (an Apple TV, a laptop) only **errors** are a problem, because dropped packets there are normal (a device in standby or asleep). On uplinks, links between switches and servers, errors, drops and link drops all count. Every port is still watched and its numbers shown either way.
 - A provider that cannot be read means **Unknown**, never Failed. Observed state is never rewritten; the tick only affects alerts.
 
 ## What it counts
