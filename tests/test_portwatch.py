@@ -452,3 +452,27 @@ class OnByDefault(unittest.TestCase):
         self.assertFalse(page["off"][0]["alert"])
         self.w.set_known([page["off"][0]["key"]], False)
         self.assertEqual(len(self.w.page()["rising"]), 1, "ticking it again brings it back")
+
+
+class Counted(unittest.TestCase):
+    """The count on the Port errors page is the ports in use that the map shows, not every port a switch reports."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name)
+        os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.w = portwatch.PortWatch(self.paths)
+        self.w.set_enabled(True)
+        self.w.feed([dev("Core switch", **{f"Port {i}": (0, 0, 0, 0, 0) for i in range(1, 9)})], ["sw1"], now=0)
+
+    def test_every_port_is_counted_until_the_map_says_which_are_in_use(self):
+        self.assertEqual(self.w.page()["ports"], 8)
+
+    def test_only_the_ports_in_use_are_counted_once_the_map_says_so(self):
+        self.w.set_shown({self.w.key("sw1", "Port 1"), self.w.key("sw1", "Port 2")})
+        self.assertEqual(self.w.page()["ports"], 2)
+        self.assertIn("(0 of 2 ports", self.w.check()[1])
+
+    def test_a_map_that_matches_nothing_does_not_hide_every_port(self):
+        self.w.set_shown({"other|Port 1"})
+        self.assertEqual(self.w.page()["ports"], 8)
