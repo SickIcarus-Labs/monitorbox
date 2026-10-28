@@ -115,6 +115,7 @@ class PortWatch:
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
+        self.used, self.link_ends = set(), set()
         self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
         self.links = {}           # key -> {"up": bool, "since": when it last changed, "expected": it has been up for an hour, so its going away is news}
@@ -157,7 +158,9 @@ class PortWatch:
         for k in stale:
             off.append({"key": k, "label": k.split("|", 1)[-1] if "|" in k else k, "alert": False, "kinds": []})
         down = [{"key": d["key"], "label": d["label"] + (f" ({d['other']})" if d["other"] else ""), "since": d["since"]} for d in self.downs()]
-        return {"on": self.enabled(), "ports": len(self._counted(snap)), "rising": rising, "off": off, "down": down}
+        counted = self._counted(snap)
+        inuse, links = self.split(counted)
+        return {"on": self.enabled(), "ports": len(counted), "inUse": inuse, "onLinks": links, "rising": rising, "off": off, "down": down}
 
     def known(self):
         """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""
@@ -290,8 +293,14 @@ class PortWatch:
             return {"label": label, "state": "learning", "split": {}}
         return {"label": label, "state": "figures", "split": j["split"]}
 
-    def set_shown(self, keys):
-        self.shown = set(keys)
+    def set_shown(self, keys, used=(), link_ends=()):
+        """keys: the ports the map shows. used: those listed under a device (in use). link_ends: the ends of links between devices that are not in that list."""
+        self.shown, self.used, self.link_ends = set(keys), set(used), set(link_ends)
+
+    def split(self, keys):
+        """(ports in use, link ports) among these keys, for saying what the count is made of."""
+        keys = set(keys)
+        return len(keys & self.used), len(keys & self.link_ends)
 
     def _counted(self, keys):
         keys = list(keys)

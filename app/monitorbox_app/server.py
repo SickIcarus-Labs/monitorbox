@@ -1138,18 +1138,23 @@ class App:
             return
         flap = set()          # link drops only count on uplinks, links between switches and servers
         shown = set()         # every port the map shows: the ports "in use", which is what the watch counts and lists
+        used, ends = set(), set()      # the ports listed under each device, and the two ends of each link between devices
         for n in m.get("nodes", []):
             link = n.get("link")
             if link and (link.get("keys") or {}).get("self"):
                 flap |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
                 shown |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
+                ends |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
             for p in n.get("ports", []):
                 shown |= {self.portwatch.key(*k) for k in p.get("keys") or []}
+                used |= {self.portwatch.key(*k) for k in p.get("keys") or []}
                 if p.get("server") or p.get("infra"):
                     flap |= {self.portwatch.key(*k) for k in p.get("keys") or []}
         self.portwatch.set_flap_ports(flap)
-        self.portwatch.set_shown(shown)
-        m["portwatch"]["ports"] = len(self.portwatch._counted(list(self.portwatch.series)))
+        self.portwatch.set_shown(shown, used, ends - used)
+        counted = self.portwatch._counted(list(self.portwatch.series))
+        m["portwatch"]["ports"] = len(counted)
+        m["portwatch"]["inUse"], m["portwatch"]["onLinks"] = self.portwatch.split(counted)
         peers = {}            # the two ends of every link between devices
         for n in m.get("nodes", []):
             link = n.get("link")
