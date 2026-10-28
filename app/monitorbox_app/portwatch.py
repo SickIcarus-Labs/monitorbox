@@ -550,8 +550,8 @@ class PortWatch:
         found, downs = self.findings(), self.downs()
         if not found and not downs:
             if ready < n:
-                return True, f"nothing rising so far ({ready} of {n} ports have half an hour of readings)", None, {}
-            return True, f"no port is getting worse ({n} ports watched)", None, {}
+                return True, f"learning what is normal ({ready} of {n} ports ready)", None, {}
+            return True, f"all {n} ports look normal", None, {}
         parts = []
         for f in found[:3]:
             per, was, split = f["perHour"], f["was"], f["split"]
