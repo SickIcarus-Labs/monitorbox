@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.6.39** (#314) Tidier Updates page. The buttons now sit together in one row at the top: "Check now", "Check all sites" (only when a site is linked; it checks this box and every linked site and names any that did not answer), "Update" (only when this box has an update waiting; it used to be "Update all (N)", and the updates listed below can still be installed one at a time) and "Update all sites" (only when a linked site has an update waiting). The line of text beside the old Update button is gone.
 - **1.6.38** (#314) "Update all sites" now reloads the page when this box updates itself. Before, the page said "This box is restarting" and stayed there until you refreshed by hand; now it shows "Restarting…" and comes back on its own, like any other app update.
 - **1.6.37** (#314) The "Update all sites" button now shows only when an update is waiting at this box or at a linked site. It used to show whenever a site was linked.
 - **1.6.36** (#311) History now names every port in a long Port errors stretch. A stretch used to keep only the ports named when it began, so a port that started rising later in the same stretch (like Guest Room, Port 8 at Broad Leaf) was never mentioned. Ports that join are now added to the reason, for example "...; also Guest Room, Port 8", up to the same length limit.

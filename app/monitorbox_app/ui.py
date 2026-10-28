@@ -1412,8 +1412,10 @@ async function renderSettings(){
  const img=v.image&&v.image.outdated?`<div class=box><b>The container image needs updating.</b> This box is running image ${esc(v.image.have)}; this release was built for ${esc(v.image.wants)}. Everything keeps working, but some updates may not install until the image is re-pulled. Pull the new image and restart the container; your settings and data are kept.</div>`:'';
  const last=v.last&&v.last.result!='ok'?`<div class=box>Last install: ${esc(v.last.version)} — ${esc(v.last.result)}</div>`:'';
  const nPending=((v.app&&v.app.needsApply&&v.app.target&&!v.app.failed.includes(v.app.target))?1:0)+Object.values(v.modules||{}).filter(c=>c.needsApply&&c.target&&!c.failed.includes(c.target)).length;
- const linked=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'),waiting=Object.values(hdrSites).some(d=>d&&d.pend)||nPending>0;
- const sitesBox=(SITE===''&&linked.length&&waiting)?`<div class=box><div class=row><button class="btn pri" id=upsites onclick="updateSites(this)">Update all sites</button></div><div id=upsitesout class=sub></div></div>`:'';
+ const linked=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'),remoteWaiting=linked.some(x=>hdrSites[x.id]&&hdrSites[x.id].pend);
+ const checkSites=(SITE===''&&linked.length)?`<button class=btn id=chkall onclick="checkAllSites(this)">Check all sites</button>`:'';
+ const updBtn=nPending>0?`<button class="btn pri" id=upall onclick="updateAll(this)">Update</button>`:'';        /* this box has something waiting */
+ const sitesBtn=(SITE===''&&linked.length&&remoteWaiting)?`<button class="btn pri" id=upsites onclick="updateSites(this)">Update all sites</button>`:'';        /* a linked site has something waiting */
  const sec=(location.hash.split('/')[2]||''),nServers=new Set((conn.connections||[]).map(hostOf).filter(Boolean)).size,nNodes=((mon.monitoring||{}).nodes||[]).length,
   upd=!!(v.app&&v.app.needsApply)||Object.values(v.modules||{}).some(c=>c.needsApply),lastBk=bk.backups&&bk.backups[0];
  const SECS=[['display','Display','How the main screen looks on this device',`${view==='detail'?'Detailed':'Summarized'} · history ${HWIN.find(x=>x[0]===getHWin())[1]}`],
@@ -1462,12 +1464,12 @@ async function renderSettings(){
    <div class=seg role=group aria-label="Panel graph window">${GPW.map(x=>`<button aria-pressed=${getGp()===x[0]} onclick="setGp(${x[0]});segOn(this)">${x[1]}</button>`).join('')}</div></div>
   `,backups:backupsHtml,updates:`<h3>Updates</h3>${img}<div class=box>
    <div class=row><select id=ch onchange="act('channel',{channel:this.value})">${['dev','beta','stable'].map(c=>`<option ${c==v.channel?'selected':''}>${c}</option>`).join('')}</select>
-   <button class=btn onclick="checkUpdates(this)">Check now</button><small id=chk>${v.checkedAt?'Checked '+esc(lt(v.checkedAt)):''}</small></div>
+   <button class=btn onclick="checkUpdates(this)">Check now</button>${checkSites}${updBtn}${sitesBtn}<small id=chk>${v.checkedAt?'Checked '+esc(lt(v.checkedAt)):''}</small></div><div id=upsitesout class=sub></div>
    <div class=sub style="margin-top:.4rem">Channel: <b>dev</b> is the newest and least tested, <b>beta</b> is in between, <b>stable</b> changes least.</div>
    <label class=row style="margin-top:.6rem"><input type=checkbox ${v.settings.autoCheck?'checked':''} onchange="setting({autoCheck:this.checked})"> Check for updates automatically</label>
    <label class=row><input type=checkbox ${v.settings.autoUpdate?'checked':''} onchange="setting({autoUpdate:this.checked})"> Install updates automatically (only for items set to Latest on the ${esc(v.channel)} channel below)</label></div>
   ${v.checkError?`<div class=box>${esc(v.checkError)}</div>`:''}
-  ${repoBox}${sitesBox}<h3>Installed software</h3>${last}${nPending>0?`<div class=box><div class=row><button class="btn pri" id=upall onclick="updateAll(this)">Update all (${nPending})</button><small>Installs every update listed below. MonitorBox itself goes last and restarts.</small></div></div>`:''}${row('MonitorBox','app','',v.app)}${swList}
+  ${repoBox}<h3>Installed software</h3>${last}${row('MonitorBox','app','',v.app)}${swList}
   `,box:`${about}<h3>Time zone</h3><div class=box><p class=sub style="margin-top:0">The time zone of <b>this site</b>. Times on the screens, and anything the box writes itself, follow it. Each site has its own. The first time you open this page it uses your device's time zone. You can change it here at any time.</p>
    <div class=row><select id=tz-sel aria-label="Time zone" style="max-width:100%"></select><button class=btn onclick="saveTz()">Save</button></div><p id=tz-msg class=sub></p></div>
   <h3>Restart and reset</h3><div class=box><p class=sub style="margin-top:0"><b>Restart MonitorBox</b> starts it again. This takes a few seconds and your settings stay.</p>
@@ -1767,6 +1769,11 @@ async function checkUpdates(b){b.disabled=true;$('#chk').textContent='Checking�
  try{const v=await api('check',{});hdrPoll();const n=(v.app&&v.app.needsApply?1:0)+Object.values(v.modules).filter(c=>c.needsApply).length;
   await renderSettings();$('#chk').textContent=v.checkError?v.checkError:(n?n+' update'+(n>1?'s':'')+' available':'Checked just now: everything is up to date')}
  catch(e){$('#chk').textContent=e.message;b.disabled=false}}
+async function checkAllSites(b){b.disabled=true;const ids=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked');$('#chk').textContent='Checking…';
+ const rs=await Promise.allSettled([api('check',{})].concat(ids.map(x=>api('site/'+x.id+'/check',{}))));hdrPoll();
+ try{await renderSettings()}catch(e){}
+ const bad=ids.filter((x,i)=>rs[i+1].status==='rejected').map(x=>x.name||'A site'),c=$('#chk');
+ if(c)c.textContent=rs[0].status==='rejected'?String(rs[0].reason&&rs[0].reason.message||'Could not check'):bad.length?'Checked just now. No answer from '+bad.join(', '):'Checked just now'}
 async function repoAdd(){const t=($('#repoin').value||'').trim();if(!t)return;
  if(!await askYes('Add '+t+'? Modules from a repository run on this box and can see the passwords and keys you give them. Only add repositories you trust.','Add'))return;
  const m=$('#repomsg');m.textContent='Adding…';try{await api('repos/add',{repo:t});renderSettings()}catch(e){m.textContent=e.message}}

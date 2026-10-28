@@ -85,15 +85,15 @@ class Header(T.SnmpE2E):
             pg.evaluate("""()=>{window._posted=[];window._waiting=false;let n=0;const f=window.fetch;
               window.fetch=(u,o)=>{u=String(u);
                 if(u.endsWith('/api/sites')&&!(o&&o.method))return f(u,o).then(async r=>{const j=await r.json();j.sites=[{id:'tb',name:'Cabin',address:'x',link:{state:'linked'}}];return new Response(JSON.stringify(j))});
-                if(u.endsWith('/api/versions'))return f(u,o).then(async r=>{const j=await r.json();if(j.app&&window._waiting){j.app.needsApply=true;j.app.target='9.9.9';j.app.failed=[]}return new Response(JSON.stringify(j))});
+                if(u.endsWith('/api/site/tb/versions'))return Promise.resolve(new Response(JSON.stringify(window._waiting?{version:'1.0.0',app:{needsApply:true,target:'9.9.9',failed:[]},modules:{}}:{version:'1.0.0',app:{needsApply:false,failed:[]},modules:{}})));
                 if(u.endsWith('/api/sites/update-all')){
                   if(o&&o.method==='POST'){window._posted.push(u);return Promise.resolve(new Response(JSON.stringify({running:true,sites:[],local:null})))}
                   n++;const st=n<2?'asking':'restarting';return Promise.resolve(new Response(JSON.stringify({running:n<2,sites:[{id:'tb',name:'Cabin',state:st,message:''}],local:{state:n<2?'waiting':'done',message:''}})))}
                 return f(u,o)};
               loadSiteCfg().then(()=>route())}""")
             pg.wait_for_selector("[data-sw=app]"); pg.wait_for_timeout(500)
-            self.assertEqual(pg.locator("#upsites").count(), 0, "a site is linked but no update is waiting anywhere: no button")
-            pg.evaluate("window._waiting=true;route()")
+            self.assertEqual(pg.locator("#upsites").count(), 0, "a site is linked but no update is waiting at any site: no button")
+            pg.evaluate("window._waiting=true;hdrPoll().then(()=>route())")
             pg.wait_for_selector("#upsites")
             self.assertEqual(pg.inner_text("#upsites"), "Update all sites")
             pg.click("#upsites")
@@ -123,18 +123,67 @@ class Header(T.SnmpE2E):
                   const f=window.fetch;window._waiting=true;
                   window.fetch=(u,o)=>{u=String(u);
                     if(u.endsWith('/api/sites')&&!(o&&o.method))return f(u,o).then(async r=>{const j=await r.json();j.sites=[{id:'tb',name:'Cabin',address:'x',link:{state:'linked'}}];return new Response(JSON.stringify(j))});
-                    if(u.endsWith('/api/versions'))return f(u,o).then(async r=>{const j=await r.json();if(j.app){j.app.needsApply=true;j.app.target='9.9.9';j.app.failed=[]}return new Response(JSON.stringify(j))});
+                    if(u.endsWith('/api/site/tb/versions'))return Promise.resolve(new Response(JSON.stringify(window._waiting?{version:'1.0.0',app:{needsApply:true,target:'9.9.9',failed:[]},modules:{}}:{version:'1.0.0',app:{needsApply:false,failed:[]},modules:{}})));
                     if(u.endsWith('/api/sites/update-all')){
                       if(o&&o.method==='POST')return Promise.resolve(new Response(JSON.stringify({running:true,sites:[],local:null})));
                       if(how==='stops-answering')return Promise.reject(new Error('network'));
                       return Promise.resolve(new Response(JSON.stringify({running:true,sites:[{id:'tb',name:'Cabin',state:'asking',message:''}],local:{state:'restarting',message:'Installing App 9.9.9…'}})))}
                     return f(u,o)};
-                  loadSiteCfg().then(()=>route())}""", how)
+                  loadSiteCfg().then(()=>hdrPoll()).then(()=>route())}""", how)
                 pg.wait_for_selector("#upsites")
                 pg.click("#upsites")
                 pg.wait_for_function("document.querySelector('#m').innerText.includes('Restarting')", timeout=15000)
                 pg.wait_for_function("window._booted>=1", timeout=15000)       # and it comes back by loading the page again
                 b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_check_all_sites_checks_this_box_and_every_linked_site_and_names_one_that_does_not_answer(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+            self.assertEqual(pg.locator("#chkall").count(), 0, "no linked site, no button")
+            pg.evaluate("""()=>{window._checks=[];const f=window.fetch;
+              window.fetch=(u,o)=>{u=String(u);
+                if(u.endsWith('/api/sites')&&!(o&&o.method))return f(u,o).then(async r=>{const j=await r.json();j.sites=[{id:'tb',name:'Cabin',address:'x',link:{state:'linked'}},{id:'bt',name:'Boat',address:'y',link:{state:'linked'}}];return new Response(JSON.stringify(j))});
+                if(u.endsWith('/api/site/bt/check')){window._checks.push('bt');return Promise.resolve(new Response(JSON.stringify({error:'down'}),{status:502}))}
+                if(u.endsWith('/api/site/tb/check')){window._checks.push('tb');return Promise.resolve(new Response(JSON.stringify({})))}
+                if(u.endsWith('/api/check')){window._checks.push('here')}
+                return f(u,o)};
+              loadSiteCfg().then(()=>route())}""")
+            pg.wait_for_selector("#chkall")
+            self.assertEqual(pg.inner_text("#chkall"), "Check all sites")
+            pg.click("#chkall")
+            pg.wait_for_function("document.querySelector('#chk').innerText.includes('No answer from Boat')", timeout=15000)
+            self.assertEqual(sorted(pg.evaluate("window._checks")), ["bt", "here", "tb"], "this box and each linked site, once each")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_the_four_update_buttons_share_one_row_and_each_shows_only_when_it_applies(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+            pg.evaluate("""()=>{window._linked=false;window._here=false;window._there=false;const f=window.fetch;
+              window.fetch=(u,o)=>{u=String(u);
+                if(u.endsWith('/api/sites')&&!(o&&o.method))return f(u,o).then(async r=>{const j=await r.json();j.sites=window._linked?[{id:'tb',name:'Cabin',address:'x',link:{state:'linked'}}]:[];return new Response(JSON.stringify(j))});
+                if(u.endsWith('/api/versions'))return f(u,o).then(async r=>{const j=await r.json();if(j.app&&window._here){j.app.needsApply=true;j.app.target='9.9.9';j.app.failed=[]}return new Response(JSON.stringify(j))});
+                if(u.endsWith('/api/site/tb/versions'))return Promise.resolve(new Response(JSON.stringify({version:'1.0.0',app:{needsApply:!!window._there,target:'9.9.9',failed:[]},modules:{}})));
+                return f(u,o)};
+              window.show=async(l,h,t)=>{window._linked=l;window._here=h;window._there=t;hdrSites={};await loadSiteCfg();await hdrPoll();route();await new Promise(r=>setTimeout(r,800));
+                return [...document.querySelector('#ch').closest('.row').querySelectorAll('select,button')].map(e=>e.id||(e.tagName==='BUTTON'?e.textContent.trim():'select'))}}""")
+            show = lambda l, h, t: pg.evaluate(f"show({str(l).lower()},{str(h).lower()},{str(t).lower()})")
+            self.assertEqual(show(False, False, False), ["ch", "Check now"], "the row always has the channel and Check now")
+            r = show(False, True, False);  self.assertEqual([x for x in r if x in ("chkall", "upall", "upsites")], ["upall"], "no linked site: Update only")
+            r = show(True, False, False);  self.assertEqual([x for x in r if x in ("chkall", "upall", "upsites")], ["chkall"], "a linked site, nothing to install: just the checks")
+            r = show(True, False, True);   self.assertEqual([x for x in r if x in ("chkall", "upall", "upsites")], ["chkall", "upsites"], "a site has an update, this box does not")
+            r = show(True, True, False);   self.assertEqual([x for x in r if x in ("chkall", "upall", "upsites")], ["chkall", "upall"], "this box has one, the sites do not")
+            r = show(True, True, True);    self.assertEqual([x for x in r if x in ("chkall", "upall", "upsites")], ["chkall", "upall", "upsites"], "all four, in that order")
+            b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_updates_page_offers_what_changed_for_the_app(self):
