@@ -164,6 +164,7 @@ async function perfRun(){const out=$('#perfout');if(!out)return;out.innerHTML='<
   h+=`<h4>Memory (MB, fair share)</h4><table class=perf>${P.processes.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.mb}</td></tr>`).join('')}</table>`+(P.about&&P.about.containerMb!=null?`<small class=sub>Container total ${P.about.containerMb} MB (file cache not counted) · ${P.cpus} CPUs</small>`:'');
   L.push('Requests handled (n / avg / p95 / max ms): '+P.requests.slice(0,12).map(x=>`${x.key} ${x.count}/${x.avgMs}/${x.p95Ms}/${x.maxMs}`).join(' · '));
   L.push('Module calls (n / avg / p95 / max ms): '+(P.modules.slice(0,12).map(x=>`${x.key} ${x.count}/${x.avgMs}/${x.p95Ms}/${x.maxMs}`).join(' · ')||'none yet'));
+  L.push('Slow module calls (over 3 s, newest first): '+((P.slow||[]).map(x=>`${x.what} ${(x.ms/1000).toFixed(1)} s, ${x.agoSec<120?x.agoSec+' s':Math.round(x.agoSec/60)+' min'} ago`).join(' · ')||'none'));
   L.push('Memory MB: '+P.processes.map(x=>x.name+' '+x.mb).join(' · ')+(P.about&&P.about.containerMb!=null?` · container ${P.about.containerMb}`:''))}
  else h+=`<p class=sub>The box did not give its own timings${err?' ('+esc(err)+')':''}. It may be running an older version.</p>`;
  PERFTXT=L.join('\n');out.innerHTML=h;$('#perfcopy').hidden=false}

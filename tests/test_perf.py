@@ -18,6 +18,17 @@ class Stats(unittest.TestCase):
         self.assertEqual((r["count"], r["avgMs"], r["p95Ms"], r["maxMs"]), (100, 50.5, 96.0, 100.0))
         self.assertEqual(perfstats.summary("module"), [])
 
+    def test_a_slow_module_call_is_remembered_with_the_connection_it_was_for(self):
+        perfstats.slow("snmp.counters for Goliath", 900)
+        self.assertEqual(perfstats.slow_calls(), [], "a quick call is not worth a line")
+        perfstats.slow("snmp.counters for Goliath", 16950)
+        perfstats.slow("snmp.discover for Switch 2", 9948)
+        got = perfstats.slow_calls()
+        self.assertEqual([(g["what"], g["ms"]) for g in got], [("snmp.discover for Switch 2", 9948), ("snmp.counters for Goliath", 16950)], "newest first")
+        for i in range(30):
+            perfstats.slow(f"x{i}", 5000)
+        self.assertEqual(len(perfstats.slow_calls()), 10, "only the last few are kept")
+
     def test_only_the_last_samples_are_kept(self):
         for i in range(perfstats.KEEP + 50):
             perfstats.record("module", "snmp.poll", i)

@@ -16,6 +16,25 @@ def record(kind, key, ms):
             del v[0:len(v) - KEEP]
 
 
+SLOW_MS = 3000
+_slow = []                      # the last few module calls that took longer than SLOW_MS: [time, what, ms]
+
+
+def slow(what, ms):
+    """Remembers a slow module call and which connection it was for, so the performance report can say which device is slow."""
+    if ms < SLOW_MS:
+        return
+    with _lock:
+        _slow.append([time.time(), str(what)[:80], float(ms)])
+        del _slow[:-10]
+
+
+def slow_calls():
+    now = time.time()
+    with _lock:
+        return [{"what": w, "ms": round(ms), "agoSec": int(now - t)} for t, w, ms in reversed(_slow)]
+
+
 def _pct(sorted_vals, p):
     return sorted_vals[min(len(sorted_vals) - 1, int(len(sorted_vals) * p))]
 
@@ -48,6 +67,7 @@ def skip(path):
 def reset():
     with _lock:
         _data.clear()
+        del _slow[:]
 
 
 def started():

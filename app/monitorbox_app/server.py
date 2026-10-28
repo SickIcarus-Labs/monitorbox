@@ -2171,7 +2171,7 @@ class App:
                 if self.path == "/api/perf":
                     if not app.auth.valid(self.token()):
                         return self.send(401, {"error": "sign in"})
-                    return self.send(200, {"version": version(), "requests": perfstats.summary("request"), "modules": perfstats.summary("module"),
+                    return self.send(200, {"version": version(), "requests": perfstats.summary("request"), "modules": perfstats.summary("module"), "slow": perfstats.slow_calls(),
                                            "processes": sysinfo.processes(app.modules.pids()), "about": sysinfo.about(), "since": int(perfstats.started()), "cpus": os.cpu_count()})
                 if self.path == "/api/portwatch":
                     if not app.auth.valid(self.token()):
