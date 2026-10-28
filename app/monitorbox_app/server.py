@@ -1218,6 +1218,8 @@ class App:
             mk = self.PORT_NODE
             monconfig.sync_nodes(self.paths, "port-errors", [mk] if on else [])
             self.reload_monitoring()
+        if isinstance(body.get("keys"), list) and "gone" in body:
+            self.portwatch.set_gone([str(k) for k in body["keys"] if k], bool(body["gone"]))
         if isinstance(body.get("keys"), list) and "known" in body:
             self.portwatch.set_known([str(k) for k in body["keys"] if k], bool(body["known"]))
         return {"on": self.portwatch.enabled(), "known": sorted(self.portwatch.known())}

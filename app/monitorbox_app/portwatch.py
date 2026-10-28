@@ -27,6 +27,8 @@ RISE = 5                  # the recent pace must be at least this many times the
 FLOOR = {"errors": 20, "drops": 1000, "flaps": 3}      # new in the window, at least, before it is worth a line
 WORDS = {"errors": "errors", "drops": "drops", "flaps": "link drops"}
 KINDS = ("errors", "drops", "flaps")
+EXPECT_AFTER = 3600       # seconds a link must have been up without a break before it is expected to stay up (learned, no setup)
+DOWN_AFTER = 60           # seconds an expected link must be down before it is worth a heads-up
 SAVE_EVERY = 300          # seconds between saves of the history; it is kept thinned to one reading per this long
 FIRST_READINGS = 180      # seconds after a start that the first counters are waited for before the check says it cannot read any
 
@@ -115,6 +117,7 @@ class PortWatch:
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
+        self.links = {}           # key -> {"up": bool, "since": when it last changed, "expected": it has been up for an hour, so its going away is news}
         self.restore()
 
     # ---- settings (in the box's config file) ----
@@ -149,7 +152,8 @@ class PortWatch:
         stale = sorted(k for k in known if k not in snap)
         for k in stale:
             off.append({"key": k, "label": k.split("|", 1)[-1] if "|" in k else k, "alert": False, "kinds": []})
-        return {"on": self.enabled(), "ports": len(self._counted(snap)), "rising": rising, "off": off}
+        down = [{"key": d["key"], "label": d["label"] + (f" ({d['other']})" if d["other"] else ""), "since": d["since"]} for d in self.downs()]
+        return {"on": self.enabled(), "ports": len(self._counted(snap)), "rising": rising, "off": off, "down": down}
 
     def known(self):
         """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""
@@ -197,6 +201,7 @@ class PortWatch:
                         continue                                  # that switch gave no counters for this port: nothing to watch, nothing invented
                     k = self.key(i, p["name"])
                     seen.add(k)
+                    self._link(k, p.get("up"), now)
                     self.labels[k] = f"{d.get('name') or 'A switch'}, {p['name']}"
                     row = [now, sum(e), sum(dr), fl or 0, e[0], e[1], dr[0], dr[1]]
                     q = self.series.setdefault(k, deque())
@@ -211,9 +216,53 @@ class PortWatch:
             for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold]:   # a port or device that is gone
                 del self.series[k]
                 self.labels.pop(k, None)
+                self.links.pop(k, None)
             if seen:
                 self.fed = True
         self.save(now)
+
+    def _link(self, k, up, now):
+        """Follows whether a port's link is up. A link that has stayed up for an hour becomes expected; one that never came up never does (a server's unplugged cards stay quiet).
+        A link that comes back after "not coming back" starts again from here."""
+        if not isinstance(up, bool):
+            return
+        L = self.links.get(k)
+        if L is None:
+            self.links[k] = {"up": up, "since": now, "expected": False}
+            return
+        if L["up"] != up:
+            L["up"], L["since"] = up, now
+            if up:
+                L["expected"] = False
+                if k in self._gone():
+                    self._save(gone=sorted(self._gone() - {k}))          # it lit again: the "not coming back" is over
+        if L["up"] and not L["expected"] and now - L["since"] >= EXPECT_AFTER:
+            L["expected"] = True
+
+    def _gone(self):
+        return set(str(k) for k in self._cfg().get("gone") or [])
+
+    def set_gone(self, keys, gone):
+        """"Not coming back": forget that these links are expected up, until they light again. gone=False takes it back."""
+        now = self._gone()
+        for k in keys:
+            (now.add if gone else now.discard)(str(k))
+        self._save(gone=sorted(now))
+
+    def downs(self):
+        """Expected links that are down now, once per cable: [{key, label, since, other}]. Only uplinks, links between devices and servers (never an ordinary client's port)."""
+        known, gone, now = self.known(), self._gone(), self.clock()
+        with self.lock:
+            cand = {k: dict(L) for k, L in self.links.items() if L["expected"] and not L["up"] and now - L["since"] >= DOWN_AFTER
+                    and (k in self.flap_ports or k.startswith("snmp:")) and k not in known and k not in gone}
+            labels = {k: self.labels.get(k, k) for k in cand}
+        out = []
+        for k, L in sorted(cand.items(), key=lambda x: labels[x[0]]):
+            peer = self.peers.get(k)
+            if peer and peer[0] in cand and peer[0] < k:
+                continue                                              # the other end of the same cable is already listed
+            out.append({"key": k, "label": labels[k], "since": L["since"], "other": peer[1] if peer and peer[0] in cand else None})
+        return out
 
     def set_peers(self, peers):
         """The port at the other end of each link between two devices, so a port can say what its far end is doing."""
@@ -282,7 +331,7 @@ class PortWatch:
             tmp = self.history_path + ".tmp"
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:
-                json.dump({"saved": now, "ports": thin}, f, separators=(",", ":"))
+                json.dump({"saved": now, "ports": thin, "links": {k: dict(v) for k, v in self.links.items()}}, f, separators=(",", ":"))
             os.replace(tmp, self.history_path)
         except OSError:
             pass                                            # only a slower start next time
@@ -311,6 +360,12 @@ class PortWatch:
                     self.series[str(k)] = deque(rows)
                     self.labels[str(k)] = str(v.get("label") or k)
                     n += 1
+        try:
+            for k, v in (data.get("links") or {}).items():
+                if isinstance(v, dict) and isinstance(v.get("up"), bool) and isinstance(v.get("since"), (int, float)):
+                    self.links[str(k)] = {"up": v["up"], "since": float(v["since"]), "expected": v.get("expected") is True}
+        except (AttributeError, TypeError, ValueError):
+            pass
         self.restored = n
         return n
 
@@ -358,8 +413,8 @@ class PortWatch:
             return None, "no switch port counters to read yet", None, {}
         if not n:
             return None, "no switch port counters to read yet", None, {}
-        found = self.findings()
-        if not found:
+        found, downs = self.findings(), self.downs()
+        if not found and not downs:
             if ready < n:
                 return True, f"nothing rising so far ({ready} of {n} ports have half an hour of readings)", None, {}
             return True, f"no port is getting worse ({n} ports watched)", None, {}
@@ -377,4 +432,9 @@ class PortWatch:
                                                           else "still learning" if other["state"] == "learning" else "no counters"))
             parts.append(f"{f['label']}: {what}" + (f", carrying about {bps_words(busy['avgBps'])} (peak {bps_words(busy['peakBps'])})" if busy else "") + far)
         more = f" (and {len(found) - 3} more)" if len(found) > 3 else ""
+        for d in downs[:3]:
+            mins = max(1, int((self.clock() - d["since"]) // 60))
+            parts.append(f"{d['label']}{' (' + d['other'] + ')' if d['other'] else ''}: link is down (was up, down for {mins} min)")
+        if len(downs) > 3:
+            more += f" (and {len(downs) - 3} more links down)"
         return True, "; ".join(parts) + more, None, {"warn": True}
