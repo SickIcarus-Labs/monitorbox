@@ -103,6 +103,40 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_update_all_sites_restarts_the_page_when_this_box_says_it_is_restarting(self):
+        """Regression: this box installed its own update, went away, and the page just said it was restarting and stayed there until reloaded by hand."""
+        self.restart_case("answers-restarting")
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_update_all_sites_restarts_the_page_when_this_box_stops_answering(self):
+        self.restart_case("stops-answering")
+
+    def restart_case(self, how):
+        if True:
+            c = self.start(); self.configure(c, [], [])
+            with sync_playwright() as p:
+                b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+                pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+                pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+                pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+                pg.evaluate("""how=>{window._booted=0;const ob=window.boot;window.boot=()=>{window._booted++};
+                  const f=window.fetch;window._waiting=true;
+                  window.fetch=(u,o)=>{u=String(u);
+                    if(u.endsWith('/api/sites')&&!(o&&o.method))return f(u,o).then(async r=>{const j=await r.json();j.sites=[{id:'tb',name:'Cabin',address:'x',link:{state:'linked'}}];return new Response(JSON.stringify(j))});
+                    if(u.endsWith('/api/versions'))return f(u,o).then(async r=>{const j=await r.json();if(j.app){j.app.needsApply=true;j.app.target='9.9.9';j.app.failed=[]}return new Response(JSON.stringify(j))});
+                    if(u.endsWith('/api/sites/update-all')){
+                      if(o&&o.method==='POST')return Promise.resolve(new Response(JSON.stringify({running:true,sites:[],local:null})));
+                      if(how==='stops-answering')return Promise.reject(new Error('network'));
+                      return Promise.resolve(new Response(JSON.stringify({running:true,sites:[{id:'tb',name:'Cabin',state:'asking',message:''}],local:{state:'restarting',message:'Installing App 9.9.9…'}})))}
+                    return f(u,o)};
+                  loadSiteCfg().then(()=>route())}""", how)
+                pg.wait_for_selector("#upsites")
+                pg.click("#upsites")
+                pg.wait_for_function("document.querySelector('#m').innerText.includes('Restarting')", timeout=15000)
+                pg.wait_for_function("window._booted>=1", timeout=15000)       # and it comes back by loading the page again
+                b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_updates_page_offers_what_changed_for_the_app(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:

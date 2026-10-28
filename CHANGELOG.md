@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.6.38** (#314) "Update all sites" now reloads the page when this box updates itself. Before, the page said "This box is restarting" and stayed there until you refreshed by hand; now it shows "Restarting…" and comes back on its own, like any other app update.
 - **1.6.37** (#314) The "Update all sites" button now shows only when an update is waiting at this box or at a linked site. It used to show whenever a site was linked.
 - **1.6.36** (#311) History now names every port in a long Port errors stretch. A stretch used to keep only the ports named when it began, so a port that started rising later in the same stretch (like Guest Room, Port 8 at Broad Leaf) was never mentioned. Ports that join are now added to the reason, for example "...; also Guest Room, Port 8", up to the same length limit.
 - **1.6.35** (#312) The Updates page now has a "What changed" link on the MonitorBox app: when an update is waiting it lists what changed in every version between yours and the one on offer (newest first, in plain words); when you are up to date it shows what your version brought. The notes travel inside the release itself, so MonitorBox does not need to reach any other site. Versions released before this one carry no notes. Modules have no changelog yet, so only the app has the link.
