@@ -483,6 +483,24 @@ class Servers(unittest.TestCase):
             self.assertEqual(m["counts"]["wired"], 29)
 
 
+class AccessPointUplinks(unittest.TestCase):
+    def test_the_switch_end_of_an_access_points_cable_counts_even_though_the_access_point_reports_no_port(self):
+        # regression (screenshots): Aggregation ports 7, 8 and 16 (Wi-Fi access points) were read but not counted: 50 on the map footer, 47 on the Port errors page
+        from types import SimpleNamespace
+        from monitorbox_app import server
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        paths = Paths(d.name); os.makedirs(os.path.dirname(paths.config), exist_ok=True)
+        w = portwatch.PortWatch(paths)
+        w.set_enabled(True)
+        me = SimpleNamespace(portwatch=w, last_sources=[])
+        m = {"nodes": [{"id": "agg", "name": "Agg", "link": None, "ports": []},
+                       {"id": "ap", "name": "Hallway", "kind": "ap", "link": {"to": "Agg", "speedMbps": 2500, "keys": {"self": None, "parent": ["agg", "Port 8"]}}, "ports": []}]}
+        server.App.annotate_ports(me, m)
+        self.assertIn("agg|Port 8", w.shown)
+        self.assertIn("agg|Port 8", w.flap_ports, "an uplink: link drops and packet drops count")
+        self.assertEqual(w.speeds["agg|Port 8"], 2500)
+
+
 class Busy(unittest.TestCase):
     def test_the_port_history_says_how_busy_a_port_was(self):
         from monitorbox_app import portpeers
