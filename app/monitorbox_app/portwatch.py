@@ -118,6 +118,7 @@ class PortWatch:
         self.used, self.link_ends = set(), set()
         self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
+        self.resets = {}          # key -> [times its counter went backwards (so its history started again), which counter, when]: shown on the page, to explain a port that never finishes learning
         self.links = {}           # key -> {"up": bool, "since": when it last changed, "expected": it has been up for an hour, so its going away is news}
         self.restore()
 
@@ -160,8 +161,15 @@ class PortWatch:
         down = [{"key": d["key"], "label": d["label"] + (f" ({d['other']})" if d["other"] else ""), "since": d["since"]} for d in self.downs()]
         counted = self._counted(snap)
         inuse, links = self.split(counted)
-        names = sorted({snap[k][0] for k in counted})
-        return {"on": self.enabled(), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": names, "rising": rising, "off": off, "down": down}
+        watched = []
+        for k in sorted(counted, key=lambda k: snap[k][0]):
+            q = snap[k][1]
+            r = self.resets.get(k)
+            watched.append({"label": snap[k][0], "minutes": int((q[-1][0] - q[0][0]) // 60) if len(q) > 1 else 0,
+                            **({"resets": r[0], "resetKind": WORDS.get(r[1], r[1]), "resetAgoMin": int((self.clock() - r[2]) // 60)} if r else {})})
+        others = sorted(snap[k][0] for k in snap if k not in set(counted))
+        return {"on": self.enabled(), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40]},
+                "rising": rising, "off": off, "down": down}
 
     def known(self):
         """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""
@@ -214,6 +222,9 @@ class PortWatch:
                     row = [now, sum(e), sum(dr), fl or 0, e[0], e[1], dr[0], dr[1]]
                     q = self.series.setdefault(k, deque())
                     if q and any(row[j] < q[-1][j] for j in (1, 2, 3)):
+                        kind = KINDS[next(j for j in (1, 2, 3) if row[j] < q[-1][j]) - 1]
+                        r = self.resets.setdefault(k, [0, kind, 0.0])
+                        r[0], r[1], r[2] = r[0] + 1, kind, now
                         q.clear()                                 # a counter went backwards: the device restarted, so start again from here
                     if not q or now - q[-1][0] >= EVERY:
                         q.append(row)

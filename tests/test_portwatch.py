@@ -631,4 +631,15 @@ class CountedSplit(unittest.TestCase):
         w.set_shown({k(1), k(2), k(3), k(4)}, used={k(1), k(2), k(3)}, link_ends={k(4)})
         page = w.page()
         self.assertEqual((page["ports"], page["inUse"], page["onLinks"]), (4, 3, 1), "ports 5 and 6 are empty: read, not counted")
-        self.assertEqual(page["watched"], ["Core, Port 1", "Core, Port 2", "Core, Port 3", "Core, Port 4"], "the page can list exactly what it counts")
+        self.assertEqual([x["label"] for x in page["watched"]], ["Core, Port 1", "Core, Port 2", "Core, Port 3", "Core, Port 4"], "the page can list exactly what it counts")
+        self.assertEqual(page["others"], {"count": 2, "names": ["Core, Port 5", "Core, Port 6"]}, "and what it reads but does not count")
+
+    def test_a_counter_going_backwards_is_counted_and_shown(self):
+        d = tempfile.TemporaryDirectory(); w = portwatch.PortWatch(Paths(d.name)); self.addCleanup(d.cleanup)
+        os.makedirs(os.path.dirname(w.paths.config), exist_ok=True)
+        w.set_enabled(True)
+        for t, v in ((0, 10), (60, 20), (120, 5), (180, 9)):            # the drop counter falls from 20 to 5
+            w.feed([dev("Core", **{"Port 1": (0, 0, v, 0, 0)})], ["sw1"], now=t)
+        row = w.page()["watched"][0]
+        self.assertEqual((row["resets"], row["resetKind"]), (1, "drops"))
+        self.assertEqual(row["minutes"], 1, "its history started again at the reset")
