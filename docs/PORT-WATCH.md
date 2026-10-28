@@ -5,7 +5,7 @@ What the Port errors item watches, how it decides, and what it never does. The c
 ## What it reads
 
 - **UniFi switches, gateways and other devices:** each port's error and drop counters, link-down count and up/down state, every 10 seconds.
-- **SNMP:** for a switch that is also an SNMP connection, errors and drops come from the interface itself (exact, and works for non-UniFi switches). A device never mixes the two sources. **SNMP servers** (a connection that is not a UniFi device) are read every 30 seconds: each network card's errors, drops and link state.
+- **SNMP:** for a switch that is also an SNMP connection, errors and drops come from the interface itself (exact, and works for non-UniFi switches). A device never mixes the two sources. An SNMP connection counts as a UniFi device when its address is the device's address, or else when its name is the name of exactly one UniFi device; otherwise it is read as a server. **SNMP servers** (a connection that is not a UniFi device) are read every 30 seconds: each network card's errors, drops and link state.
 - A server's card is matched to the switch port it is plugged into by hardware address, so each end of the cable can show what the other end sees.
 
 ## When it is on

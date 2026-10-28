@@ -300,6 +300,29 @@ class Servers(unittest.TestCase):
         conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "apollo", "module": "snmp", "host": "192.0.2.77"}]
         return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
 
+    def device_sampler(self, unifi_names, conn_name="Core-B", conn_host="192.0.2.99"):
+        from monitorbox_app import lansampler, portpeers
+        port = {"name": "Port 1", "rx_errors": 1, "tx_errors": 1, "rx_dropped": 1, "tx_dropped": 1, "link_down_count": 0}
+        devs = [{"name": n, "mac": f"..:00:00:0{i}", "type": "usw", "ip": f"192.0.2.{i + 2}", "ports": [dict(port)]} for i, n in enumerate(unifi_names)]
+        bad = {"rxErr": 10, "txErr": 20, "rxDrop": 30, "txDrop": 40, "in": 1, "out": 1, "bits": 64}
+
+        def call(mod, method, params, timeout):
+            if mod == "unifi-network":
+                return {"devices": devs}
+            self.calls.append(params["connection"]["id"])
+            return {"ports": {"Port 1": dict(bad), "Po1": dict(bad), "Po2": dict(bad)}}
+        conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "swc", "name": conn_name, "module": "snmp", "host": conn_host}]
+        return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
+
+    def test_an_snmp_connection_at_another_address_is_matched_to_the_switch_with_its_name(self):
+        self.device_sampler(["Core-B"]).tick()
+        self.assertEqual(sorted(self.w.series), ["..:00:00:00|Port 1"], "one reader for the switch: its UniFi port, with the SNMP counters; not a second set of interfaces")
+        self.assertEqual(list(self.w.series["..:00:00:00|Port 1"])[-1][1:3], [30, 70], "the SNMP counters are the ones used")
+
+    def test_a_name_two_devices_share_does_not_match_so_nothing_is_merged_by_guess(self):
+        self.device_sampler(["Core-B", "core-b"]).tick()
+        self.assertIn("snmp:swc|Port 1", self.w.series, "read on its own, as a server")
+
     def test_a_servers_cards_are_read_every_third_round_and_only_the_ones_with_counters(self):
         sm = self.sampler()
         for _ in range(4):
