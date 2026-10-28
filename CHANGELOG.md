@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.6.25** When a port's counter goes backwards (and its history starts again), the Port errors page now says from what to what, for example "from 24,282 down to 31". Found on a server card whose packet-drops counter kept stepping back.
 - **1.6.24** (#292) Port errors now work with SNMP switches alone, with no UniFi connection at all. An SNMP switch is read directly: errors, packet drops, link drops and speed per port, with the same learning period and rules. Ports with a neighbour or several addresses behind them count as links; the others are treated as clients' ports, where only errors count. Ports read over SNMP use the speed the device reports, so the minimums scale with the link. The map for SNMP-only networks comes next.
 - **1.6.23** (#292) The Port errors line now reads "all 51 ports look normal" (was "no port is getting worse") and, while a new box is still learning, "learning what is normal (X of Y ports ready)". Leftover virtual interfaces that are not a cable at all (dummy0, lxdbr0, sit0, virbr0, docker0, tunnel stubs) are no longer listed under "other interfaces".
 - **1.6.22** (#292) Wording: alerts, the map and the Port errors page now say "packet drops" (link drops stay "link drops"), so the two are not confused. The network map footer says packet drops are usually congestion, not a fault, and that errors are the better sign of a bad cable. The docs note that link drops are more common on Wi-Fi than on Ethernet.

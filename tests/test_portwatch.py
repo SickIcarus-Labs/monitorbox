@@ -893,6 +893,7 @@ class CountedSplit(unittest.TestCase):
             w.feed([dev("Core", **{"Port 1": (0, 0, v, 0, 0)})], ["sw1"], now=t)
         row = w.page()["watched"][0]
         self.assertEqual((row["resets"], row["resetKind"]), (1, "packet drops"))
+        self.assertEqual((row["resetFrom"], row["resetTo"]), (20, 5), "the page says how far the counter fell")
         self.assertEqual(row["minutes"], 1, "its history started again at the reset")
 
 

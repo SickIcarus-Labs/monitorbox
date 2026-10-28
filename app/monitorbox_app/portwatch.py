@@ -186,7 +186,8 @@ class PortWatch:
             q = snap[k][1]
             r = self.resets.get(k)
             watched.append({"label": snap[k][0], "minutes": int((q[-1][0] - q[0][0]) // 60) if len(q) > 1 else 0,
-                            **({"resets": r[0], "resetKind": WORDS.get(r[1], r[1]), "resetAgoMin": int((self.clock() - r[2]) // 60)} if r else {})})
+                            **({"resets": r[0], "resetKind": WORDS.get(r[1], r[1]), "resetAgoMin": int((self.clock() - r[2]) // 60),
+                                **({"resetFrom": r[3], "resetTo": r[4]} if len(r) > 4 and r[3] is not None else {})} if r else {})})
         rest = [k for k in snap if k not in set(counted)]
         others = sorted(snap[k][0] for k in rest)
         groups = {}
@@ -251,9 +252,10 @@ class PortWatch:
                     row = [now, sum(e), sum(dr), fl or 0, e[0], e[1], dr[0], dr[1]]
                     q = self.series.setdefault(k, deque())
                     if q and any(row[j] < q[-1][j] for j in (1, 2, 3)):
-                        kind = KINDS[next(j for j in (1, 2, 3) if row[j] < q[-1][j]) - 1]
-                        r = self.resets.setdefault(k, [0, kind, 0.0])
-                        r[0], r[1], r[2] = r[0] + 1, kind, now
+                        col = next(j for j in (1, 2, 3) if row[j] < q[-1][j])
+                        kind = KINDS[col - 1]
+                        r = self.resets.setdefault(k, [0, kind, 0.0, None, None])
+                        r[0], r[1], r[2], r[3], r[4] = r[0] + 1, kind, now, q[-1][col], row[col]      # what it read before and what it reads now: shown on the page
                         q.clear()                                 # a counter went backwards: the device restarted, so start again from here
                     if not q or now - q[-1][0] >= EVERY:
                         q.append(row)
