@@ -331,6 +331,18 @@ class Servers(unittest.TestCase):
         self.assertEqual(list(self.w.series["..:00:00:00|Port 1"])[-1][1:3], [30, 70], "from then on it is the switch, with its SNMP counters")
         self.assertEqual(lansampler.squash("Switch 2"), lansampler.squash("Switch2"))
 
+    def test_a_device_read_as_a_server_says_why_and_what_unifi_calls_its_devices(self):
+        sm = self.device_sampler(["Core B"], conn_name="Primary link", conn_host="192.0.2.99")
+        inner = sm.call
+        sm.call = lambda mod, method, params, timeout: ({**inner(mod, method, params, timeout), "sysName": "Chassis-7"} if mod == "snmp" else inner(mod, method, params, timeout))
+        sm.tick()
+        self.w.set_shown(set())
+        others = self.w.page()["others"]
+        self.assertEqual(others["unifiNames"], ["Core B"])
+        why = others["where"][0]["why"]
+        self.assertIn("name \"Primary link\" matches 0 UniFi devices", why)
+        self.assertIn("its own name \"Chassis-7\" matches 0", why)
+
     def test_a_name_two_devices_share_does_not_match_so_nothing_is_merged_by_guess(self):
         self.device_sampler(["Core-B", "core-b"]).tick()
         self.assertIn("snmp:swc|Port 1", self.w.series, "read on its own, as a server")

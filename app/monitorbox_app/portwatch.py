@@ -125,6 +125,8 @@ class PortWatch:
         self.lock = threading.Lock()
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
+        self.why = {}             # series prefix -> why that device is read as a server (shown beside the uncounted interfaces)
+        self.unifi_names = []     # what UniFi calls its devices, to compare with an SNMP device's own name
         self.attached = {}        # key -> the name of what is plugged into that port (the UniFi client's name): said in the alert so "Theater, Port 2" also says "Apple TV"
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.used, self.link_ends = set(), set()
@@ -188,8 +190,8 @@ class PortWatch:
             g["count"] += 1
             g["last"] = max(g["last"], snap[k][1][-1][0] if snap[k][1] else 0)
         now = self.clock()
-        where = [{"from": g["from"], "id": g["id"], "count": g["count"], "lastAgoMin": int((now - g["last"]) // 60)} for g in sorted(groups.values(), key=lambda g: -g["count"])]
-        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40], "where": where},
+        where = [{"from": g["from"], "id": g["id"], "count": g["count"], "lastAgoMin": int((now - g["last"]) // 60), "why": self.why.get(g["id"], "")} for g in sorted(groups.values(), key=lambda g: -g["count"])]
+        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40], "where": where, "unifiNames": self.unifi_names},
                 "rising": rising, "off": off, "down": down}
 
     def known(self):
@@ -361,6 +363,12 @@ class PortWatch:
         pre = f"{dev}|"
         mine = {k[len(pre):] for k in self.shown if k.startswith(pre)}
         return sorted(mine) if mine else None
+
+    def set_why(self, dev, text):
+        self.why[dev] = text
+
+    def set_unifi_names(self, names):
+        self.unifi_names = list(names)
 
     def drop_device(self, dev):
         """Forgets every reading of one device id (it turned out to be read under another id)."""
