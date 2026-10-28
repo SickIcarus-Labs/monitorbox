@@ -336,7 +336,7 @@ class Servers(unittest.TestCase):
         inner = sm.call
         sm.call = lambda mod, method, params, timeout: ({**inner(mod, method, params, timeout), "sysName": "Chassis-7"} if mod == "snmp" else inner(mod, method, params, timeout))
         sm.tick()
-        self.w.set_shown(set())
+        self.w.set_shown({"..:00:00:00|Port 1"})
         others = self.w.page()["others"]
         self.assertEqual(others["unifiNames"], ["Core B"])
         why = others["where"][0]["why"]
