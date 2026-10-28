@@ -14,7 +14,7 @@ MAP_JS = """
   const port = {port: '5', name: 'Goliath', server: true, speedMbps: 10000, down: 1000, up_bps: 2000, errors: 4, drops: 9, keys: [], watchKeys: ['sw1|Port 5']};
   if (watch) port.watch = watch;
   drawMap({nodes: [{id: 'sw1', name: 'Core switch', kind: 'switch', model: 'USW', state: 'healthy', stateWord: 'connected', parent: null, link: null, ports: [port]}],
-           counts: {devices: 1, wired: 1, wifi: 0}, notes: [], portwatch: {on}});
+           counts: {devices: 1, wired: 29, wifi: 100, ports: 47}, notes: [], portwatch: {on}});
   return document.querySelector('#mapout').innerHTML;
 }
 """
@@ -32,6 +32,7 @@ class PortWatchUi(unittest.TestCase):
             pg.wait_for_function("typeof drawMap === 'function'")
             off = pg.evaluate(MAP_JS, [False, None])
             self.assertIn("Watch for rising port errors", off)
+            self.assertIn("1 UniFi devices · 47 switch ports in use · 29 Ethernet clients · 100 Wi-Fi clients. Reminder: an uplink between switches counts as 2 ports and 0 clients.", off, "the map footer says what each number counts")
             self.assertNotIn('checked=""', off.split("Watch for rising port errors")[0].rsplit("<input", 1)[1], "off until ticked")
             self.assertNotIn("data-k=", off, "no per-port marks while the watch is off"); self.assertNotIn("rising (about", off); self.assertNotIn("learning what is normal</span>", off)
             rising = pg.evaluate(MAP_JS, [True, {"learning": False, "rising": ["errors"], "perHour": {"errors": 1600, "drops": 0, "flaps": 0}, "was": {"errors": 0}, "known": False}])
