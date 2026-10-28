@@ -108,3 +108,33 @@ class WhatChanged(unittest.TestCase):
     def test_bad_input_gives_nothing_rather_than_an_error(self):
         self.assertEqual(versions.whats_changed([{"version": "x"}], "1.0.0", "1.0.1"), [])
         self.assertEqual(versions.whats_changed([], None, None), [])
+
+
+class WhatChangedAcrossABigJump(unittest.TestCase):
+    """A simulated release log: someone on stable jumps many versions at once (1.4.2 to 1.8.3). Made-up notes."""
+
+    def log(self):
+        es = [{"version": "1.4.2", "channels": ["dev", "beta", "stable"]}]      # what they run: published before notes travelled with releases
+        for minor in range(5, 9):
+            for patch in range(0, 12 if minor < 8 else 4):
+                v = f"1.{minor}.{patch}"
+                es.append({"version": v, "channels": ["dev"], **({"changes": [f"{v} first thing.", f"{v} second thing."]} if (minor, patch) != (6, 3) else {})})
+        return es
+
+    def test_every_version_with_notes_is_listed_newest_first_in_numeric_order(self):
+        got = versions.whats_changed(self.log(), "1.4.2", "1.8.3")
+        wanted = [e["version"] for e in self.log() if e["version"] != "1.4.2" and e["version"] != "1.6.3"]
+        self.assertEqual([g["version"] for g in got], sorted(wanted, key=versions.vkey, reverse=True))
+        self.assertEqual(got[0]["version"], "1.8.3")
+        self.assertEqual(got[-1]["version"], "1.5.0")
+        self.assertNotIn("1.6.3", [g["version"] for g in got], "a version that shipped without notes is simply absent")
+        self.assertGreater(len(got), 30, "more than the old cap of 30: a long jump is not cut short")
+
+    def test_only_versions_up_to_the_target_are_listed(self):
+        got = versions.whats_changed(self.log(), "1.4.2", "1.6.5")
+        self.assertEqual(got[0]["version"], "1.6.5")
+        self.assertTrue(all(versions.vkey(g["version"]) <= versions.vkey("1.6.5") for g in got))
+
+    def test_the_numbers_are_numbers_so_1_6_10_is_after_1_6_9(self):
+        es = [{"version": "1.6.9", "channels": ["dev"], "changes": ["nine"]}, {"version": "1.6.10", "channels": ["dev"], "changes": ["ten"]}, {"version": "1.6.2", "channels": ["dev"]}]
+        self.assertEqual([g["version"] for g in versions.whats_changed(es, "1.6.2", "1.6.10")], ["1.6.10", "1.6.9"])
