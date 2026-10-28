@@ -293,19 +293,38 @@ def _row(a, b, wide, sp, lab, bad, oper=None):
             **{k: v for k, v in bad.items() if isinstance(v, int)}}
 
 
+def _get_many(s, oids):
+    """{oid: value} for any number of objects, GET_AT_ONCE per request. A device that refuses a whole request because one object is missing (SNMP v1) is asked one by one."""
+    got = {}
+    for i in range(0, len(oids), GET_AT_ONCE):
+        chunk = oids[i:i + GET_AT_ONCE]
+        try:
+            got.update(s.get(chunk))
+        except L.SnmpError:
+            for o in chunk:
+                try:
+                    got.update(s.get([o]))
+                except L.SnmpError:
+                    pass
+    return got
+
+
+def _read(s, idxs, wide, alias=False):
+    """{index: {"in", "out", "speed", "oper", "rxErr", "txErr", "rxDrop", "txDrop"[, "alias"]}} for just these interfaces."""
+    c_in, c_out = (IF_HC_IN, IF_HC_OUT) if wide else (IF_IN, IF_OUT)
+    cols = [("in", c_in), ("out", c_out), ("speed", IF_HIGHSPEED), ("oper", IF_OPER), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC)]
+    if alias:
+        cols.append(("alias", IF_ALIAS))
+    got = _get_many(s, [f"{oid}.{idx}" for idx in idxs for _, oid in cols])
+    return {idx: {name: clean(got.get(f"{oid}.{idx}")) for name, oid in cols} for idx in idxs}
+
+
 def _quick(s, lay):
     """The counters of the interfaces already known, by index. None when an interface no longer answers (the list changed: read it again)."""
-    wide = lay["wide"]
-    c_in, c_out = (IF_HC_IN, IF_HC_OUT) if wide else (IF_IN, IF_OUT)
-    cols = (("in", c_in), ("out", c_out), ("speed", IF_HIGHSPEED), ("oper", IF_OPER), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC))
-    asks = [(idx, name, f"{oid}.{idx}") for idx in lay["ifs"] for name, oid in cols]
-    got = {}
-    for i in range(0, len(asks), GET_AT_ONCE):
-        chunk = asks[i:i + GET_AT_ONCE]
-        got.update(s.get([oid for _, _, oid in chunk]))
-    out = {}
-    for idx, (nm, sp, lab) in lay["ifs"].items():
-        v = {name: clean(got.get(f"{oid}.{idx}")) for name, oid in cols}
+    wide, out = lay["wide"], {}
+    vals = _read(s, list(lay["ifs"]), wide)
+    for idx, (nm, _sp, lab) in lay["ifs"].items():
+        v = vals[idx]
         if not isinstance(v["in"], int) or not isinstance(v["out"], int):
             return None
         out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"])      # the speed is read each time: a link that negotiates down shows at once
@@ -313,22 +332,22 @@ def _quick(s, lay):
 
 
 def _full(s):
+    """The first reading: one walk of the interface names, then the counters of just the real interfaces by index (a server can have hundreds of container
+    interfaces; walking every column across all of them is what made this slow)."""
     names = s.column(IF_NAME) or s.column(IF_DESCR)
-    hi, ho = s.column(IF_HC_IN), s.column(IF_HC_OUT)
-    wide = bool(hi) and bool(ho)
-    li, lo = (hi, ho) if wide else (s.column(IF_IN), s.column(IF_OUT))
-    speed, alias = s.column(IF_HIGHSPEED), _safe(s, IF_ALIAS)
-    bad = {k: _safe(s, oid) for k, oid in (("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC))}      # not every device has them
-    oper = _safe(s, IF_OPER)
-    out, ifs = {}, {}
-    for idx, n in names.items():
-        nm = L.text(n)
-        a, b = clean(li.get(idx)), clean(lo.get(idx))
-        if not nm or nm.startswith(VIRTUAL_IF) or not isinstance(a, int) or not isinstance(b, int):
+    real = {idx: L.text(n) for idx, n in names.items() if L.text(n) and not L.text(n).startswith(VIRTUAL_IF)}
+    out, ifs, wide = {}, {}, True
+    for wide in (True, False):                                           # 64-bit counters first, then the 32-bit pair
+        vals = _read(s, list(real), wide, alias=True)
+        if any(isinstance(v["in"], int) and isinstance(v["out"], int) for v in vals.values()):
+            break
+    for idx, nm in real.items():
+        v = vals[idx]
+        if not isinstance(v["in"], int) or not isinstance(v["out"], int):
             continue
-        sp, lab = clean(speed.get(idx)), L.text(alias.get(idx) or b"")[:60]
-        out[nm] = _row(a, b, wide, sp, lab, {k: clean(col.get(idx)) for k, col in bad.items()}, clean(oper.get(idx)))
-        ifs[idx] = (nm, sp if isinstance(sp, int) else None, lab)
+        lab = L.text(v["alias"] or b"")[:60]
+        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"])
+        ifs[idx] = (nm, v["speed"] if isinstance(v["speed"], int) else None, lab)
     return out, {"wide": wide, "ifs": ifs}
 
 

@@ -124,6 +124,18 @@ class CountersQuick(unittest.TestCase):
         self.assertEqual(second["ports"]["port1"]["label"], "Port 1")
         self.assertNotIn("veth9", second["ports"])
 
+    def test_a_server_with_hundreds_of_container_interfaces_is_not_walked_column_by_column(self):
+        a = self.agent(); c = conn(a, "quick5")
+        for i in range(10, 410):
+            a.mib[f"{self.X}.1.{i}"] = f"veth{i:x}"
+            a.mib[f"{self.X}.6.{i}"] = ("c64", i); a.mib[f"{self.X}.10.{i}"] = ("c64", i)
+        got = C.counters(c)["ports"]
+        self.assertEqual(set(got), {"port1", "port2"})
+        asked = [oid for t, oids in a.requests for oid in oids if t == L.GET]
+        self.assertTrue(all(int(o.rsplit(".", 1)[1]) < 10 for o in asked), "only the real interfaces' counters were asked for")
+        bulks = [t for t, _ in a.requests if t != L.GET]
+        self.assertLessEqual(len(bulks), 40, "one walk of the names, not one per column")
+
     def test_the_link_state_comes_along_each_time(self):
         a = self.agent(); c = conn(a, "quick4")
         OPER = "1.3.6.1.2.1.2.2.1.8"

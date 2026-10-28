@@ -553,7 +553,7 @@ class Session:
                 o, v = self.getnext(cur)
                 vbs = [(o, v)]
             else:
-                vbs = self._request(GETBULK, [cur], 0, 20)
+                vbs = self._request(GETBULK, [cur], 0, BULK_ROWS)
             done = False
             for o, v in vbs:
                 if isinstance(v, NoSuch) or not under(o, base):
@@ -582,6 +582,9 @@ def _auth_span(raw):
         _t, _s, q = read_pos(raw, q)
     _t, lo, hi = read_pos(raw, q)
     return lo, hi
+
+
+BULK_ROWS = 40              # rows asked for per GETBULK request while walking a table: fewer round trips on a big table
 
 
 class _Stale(Exception):

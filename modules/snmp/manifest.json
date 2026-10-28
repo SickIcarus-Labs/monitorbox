@@ -1,1 +1,1 @@
-{"id": "snmp", "name": "SNMP", "version": "0.3.0", "entry": ["python3", "main.py"]}
+{"id": "snmp", "name": "SNMP", "version": "0.3.1", "entry": ["python3", "main.py"]}
