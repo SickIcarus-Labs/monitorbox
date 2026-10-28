@@ -61,6 +61,7 @@ class OnlyTheAutomaticPathSays(unittest.TestCase):
         me = SimpleNamespace(paths=paths, infos={"x": 1}, refresh=lambda: None, cfg=lambda: {"auto_check": True, "auto_update": True},
                              view=lambda: {"modules": {"widget-probe": comp}, "app": app_c},
                              apply=lambda *a: applied.append(a) or {"message": "ok"})
+        me.note_update = lambda *a: server.App.note_update(me, *a)
         return server, me
 
     def test_automatic_updates_leave_notes(self):
@@ -81,3 +82,11 @@ class OnlyTheAutomaticPathSays(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 server.App.auto_step(me)
             self.assertEqual([n["id"] for n in autonotes._load(paths)], ["module:widget-probe:0.4.2"])
+
+    def test_a_note_that_cannot_be_written_never_stops_an_update(self):
+        from types import SimpleNamespace
+        server, me = self.fake(SimpleNamespace(p=None), [])        # paths that cannot be used to write anything
+        applied = []
+        me.apply = lambda *a: applied.append(a) or {"message": "ok"}
+        server.App.auto_step(me)
+        self.assertEqual(applied, [("module", "widget-probe"), ("app",)])
