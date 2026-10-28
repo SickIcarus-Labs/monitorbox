@@ -60,6 +60,12 @@ class LanSampler:
                 name = str(c.get("name") or c.get("ip") or "").strip()
                 if name:
                     wifi[f"{name}|{c.get('mac') or ''}"] = {"name": name, "ap": c.get("ap"), "rx": c["rxBps"], "tx": c["txBps"]}
+        if not devices:
+            # UniFi gave no devices this round (slow or unreachable, e.g. just after a restart). Without its list nothing can be matched, so every SNMP switch would be read as a
+            # server and every port forgotten: an outage is Unknown, not a different picture. Leave everything as it was until the next round.
+            self.status.update(at=self.clock(), unifi=len(unifis), unifiEmpty=True)
+            return
+        self.status["unifiEmpty"] = False
         ids = lanmap.device_ids(devices)
         now = self.clock()
         by_ip = {str(d.get("ip") or "").strip().lower(): i for d, i in zip(devices, ids) if d.get("ip")}

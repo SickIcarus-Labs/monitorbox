@@ -338,6 +338,21 @@ class Servers(unittest.TestCase):
         self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), [], "not kept as a server")
         self.assertEqual(list(self.w.series["..:00:00:01|Port 1"])[-1][1:3], [30, 70], "Core B has the SNMP counters; Core A keeps UniFi's own")
 
+    def test_a_round_where_unifi_gave_no_devices_changes_nothing(self):
+        # regression (screenshots, 1.6.15): "matches 0 of 0 UniFi devices" - with no device list every SNMP switch was read as a server
+        sm = self.device_sampler(["Core B"], conn_name="Core-B", conn_host="192.0.2.99")
+        sm.tick()
+        before = sorted(self.w.series)
+        inner = sm.call
+        sm.call = lambda mod, method, params, timeout: ({"devices": []} if mod == "unifi-network" else inner(mod, method, params, timeout))
+        self.t[0] += 10; sm.tick()
+        self.assertEqual(sorted(self.w.series), before, "nothing read as a server, nothing forgotten")
+        self.assertTrue(sm.status["unifiEmpty"])
+        sm.call = inner
+        self.t[0] += 10; sm.tick()
+        self.assertEqual(sorted(self.w.series), before)
+        self.assertFalse(sm.status["unifiEmpty"])
+
     def test_bonds_teams_port_channels_and_vlan_sub_interfaces_are_not_ports_of_their_own(self):
         from monitorbox_app import lansampler
         for name in ("bond0", "Bond1", "team0", "vlan20", "Po12", "port-channel3", "eth0.100", "enp3s0.20", "ae0"):
@@ -346,7 +361,8 @@ class Servers(unittest.TestCase):
             self.assertFalse(lansampler.stacked(name), name)
         sm = self.device_sampler(["Core B"], conn_name="NAS", conn_host="192.0.2.99")
         real = {"in": 1, "out": 1, "bits": 64, "rxErr": 1, "txErr": 1, "rxDrop": 1, "txDrop": 1}
-        sm.call = lambda mod, method, params, timeout: ({"devices": []} if mod == "unifi-network" else {"ports": {n: dict(real) for n in ("eth0", "eth1", "bond0", "eth0.100")}})
+        other = {"name": "Other", "mac": "..:09:09:09", "type": "usw", "ip": "192.0.2.50", "ports": []}       # a UniFi device that is not the NAS (an empty list would now skip the round)
+        sm.call = lambda mod, method, params, timeout: ({"devices": [other]} if mod == "unifi-network" else {"ports": {n: dict(real) for n in ("eth0", "eth1", "bond0", "eth0.100")}})
         sm.tick()
         self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), ["snmp:swc|eth0", "snmp:swc|eth1"], "the two cards that make up the bond are watched; the bond and its VLAN are not")
 
