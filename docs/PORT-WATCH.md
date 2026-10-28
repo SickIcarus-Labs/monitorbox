@@ -16,7 +16,8 @@ What the Port errors item watches, how it decides, and what it never does. The c
 
 ## What counts as a problem: counters
 
-- The lifetime total is never judged, only the change. A port is **rising** when, in the last 15 minutes, it gained at least a minimum (errors 20, drops 1,000, link drops 3) **and** at least five times its own worst earlier 15-minute window.
+- The lifetime total is never judged, only the change. A port is **rising** when, in the last 15 minutes, it gained at least a minimum **and** at least five times its own worst earlier 15-minute window.
+- The minimums for **errors and drops scale with the link speed**, because a faster port carries more frames and the same count is a smaller share. On a 1 Gbit link: errors 20, drops 10,000. At 10 Gbit: errors 200, drops 100,000. Slower links use the lowest minimums (errors 20, drops 1,000). A port whose speed is unknown counts as 1 Gbit. Link drops need 3 on any port.
 - A port needs about half an hour of readings before it is judged ("learning what is normal"). Readings are kept for 24 hours and survive a restart (saved every 5 minutes, thinned to 5-minute points, readable only by the app).
 - A counter that goes backwards means the device restarted: that port's history starts again.
 - Errors and drops are watched on every port in use. **Link drops** only count on uplinks, links between devices and server ports, never on an ordinary client's port (a laptop that sleeps is not news).

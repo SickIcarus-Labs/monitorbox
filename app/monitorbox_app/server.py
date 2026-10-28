@@ -1139,19 +1139,27 @@ class App:
         flap = set()          # link drops only count on uplinks, links between switches and servers
         shown = set()         # every port the map shows: the ports "in use", which is what the watch counts and lists
         used, ends = set(), set()      # the ports listed under each device, and the two ends of each link between devices
+        speeds = {}                    # port key -> link speed in Mbit/s, for the speed-scaled minimums
         for n in m.get("nodes", []):
             link = n.get("link")
             if link and (link.get("keys") or {}).get("self"):
                 flap |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
                 shown |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
                 ends |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
+                for side in ("self", "parent"):
+                    if link["keys"].get(side) and isinstance(link.get("speedMbps"), (int, float)):
+                        speeds[self.portwatch.key(*link["keys"][side])] = link["speedMbps"]
             for p in n.get("ports", []):
                 shown |= {self.portwatch.key(*k) for k in p.get("keys") or []}
                 used |= {self.portwatch.key(*k) for k in p.get("keys") or []}
+                if isinstance(p.get("speedMbps"), (int, float)):
+                    for k in p.get("keys") or []:
+                        speeds[self.portwatch.key(*k)] = p["speedMbps"]
                 if p.get("server") or p.get("infra"):
                     flap |= {self.portwatch.key(*k) for k in p.get("keys") or []}
         self.portwatch.set_flap_ports(flap)
         self.portwatch.set_shown(shown, used, ends - used)
+        self.portwatch.set_speeds(speeds)
         counted = self.portwatch._counted(list(self.portwatch.series))
         m["portwatch"]["ports"] = len(counted)
         m["portwatch"]["inUse"], m["portwatch"]["onLinks"] = self.portwatch.split(counted)

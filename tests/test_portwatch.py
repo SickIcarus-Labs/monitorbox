@@ -67,8 +67,10 @@ class Judge(unittest.TestCase):
         self.assertEqual(j["rising"], [])
 
     def test_drops_and_link_drops_have_their_own_floors(self):
-        q = self.series(5, [(0, 0, 0)] * 10 + [(0, 400, 1), (0, 900, 2), (0, 1500, 4)])
+        q = self.series(5, [(0, 0, 0)] * 10 + [(0, 4000, 1), (0, 8000, 2), (0, 12000, 4)])      # the drops minimum was raised from 1,000 to 10,000 per 15 minutes (owner request, after an Apple TV port tripped it)
         self.assertEqual(portwatch.judge(q)["rising"], ["drops", "flaps"])
+        mid = self.series(5, [(0, 0, 0)] * 10 + [(0, 400, 0), (0, 900, 0), (0, 1500, 0)])
+        self.assertEqual(portwatch.judge(mid)["rising"], [], "1,500 in 15 minutes is a trickle on a gigabit link: not news any more")
         small = self.series(5, [(0, 0, 0)] * 10 + [(0, 100, 0), (0, 200, 1), (0, 300, 2)])
         self.assertEqual(portwatch.judge(small)["rising"], [])
 
@@ -643,3 +645,21 @@ class CountedSplit(unittest.TestCase):
         row = w.page()["watched"][0]
         self.assertEqual((row["resets"], row["resetKind"]), (1, "drops"))
         self.assertEqual(row["minutes"], 1, "its history started again at the reset")
+
+
+class BySpeed(unittest.TestCase):
+    """The minimum for errors and drops scales with the link speed: the same count is a smaller share of a faster link."""
+    def series(self, drops_last):
+        return [[i * 300, 0, 0, 0] for i in range(10)] + [[(10 + i) * 300, 0, drops_last * (i + 1) // 3, 0] for i in range(3)]
+
+    def test_the_floor_scales_with_speed_and_never_drops_below_the_minimum(self):
+        f = portwatch.floor_for
+        self.assertEqual((f("drops", 1000), f("drops", 10000), f("drops", 100), f("drops", None)), (10000, 100000, 1000, 10000))
+        self.assertEqual((f("errors", 1000), f("errors", 10000), f("errors", 100), f("errors", None)), (20, 200, 20, 20))
+        self.assertEqual(f("flaps", 10000), 3, "link drops are counted, not scaled")
+
+    def test_a_burst_that_is_news_on_a_100_meg_camera_port_is_not_on_a_10_gig_link(self):
+        q = self.series(20000)                                             # 20,000 drops in 15 minutes, from nothing
+        self.assertEqual(portwatch.judge(q, False, 100)["rising"], ["drops"])
+        self.assertEqual(portwatch.judge(q, False, 1000)["rising"], ["drops"])
+        self.assertEqual(portwatch.judge(q, False, 10000)["rising"], [], "20,000 is a fifth of what a 10 Gbit port needs")
