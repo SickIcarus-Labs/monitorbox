@@ -978,6 +978,18 @@ class SnmpOnly(unittest.TestCase):
         self.assertFalse([k for k in self.w.series if k.startswith("snmp:swa|")], "read as the UniFi device, not also as a separate one")
         self.assertTrue([k for k in self.w.series if k.endswith("|Gi1/0/1")])
 
+    def test_a_switch_read_on_its_own_while_unifi_has_devices_is_named_with_why_and_a_snmp_only_network_is_not(self):
+        unifi = [{"name": "Core", "mac": "..:00:00:02", "type": "usw", "ip": "192.0.2.2", "ports": [{"port_idx": 1, "name": "Port 1", "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0}]}]
+        conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "swa", "name": "Switch A", "module": "snmp", "host": "192.0.2.41"}]
+        self.run_for(self.sampler(conns, unifi), 2)
+        sus = self.w.page()["suspect"]
+        self.assertEqual([(s["id"], s["from"]) for s in sus], [("snmp:swa", "Switch A")])
+        self.assertIn("not a UniFi device address", sus[0]["why"])
+
+    def test_no_note_when_there_is_no_unifi_at_all(self):
+        self.run_for(self.sampler([{"id": "swa", "name": "Switch A", "module": "snmp", "host": "192.0.2.41"}]), 2)
+        self.assertEqual(self.w.page()["suspect"], [])
+
 
 class WrappingCounters(unittest.TestCase):
     """Regression (Arrrrr3, eno3): a card that reports a 16-bit drop counter (it starts again after 65,535) read as a reset every 10 to 15 minutes, so the port never finished learning.
