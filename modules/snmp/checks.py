@@ -259,28 +259,76 @@ def sample(conn, names):
     return out
 
 
+LAYOUT_FOR = 600            # seconds the list of real interfaces (names, speeds, descriptions) is trusted: it hardly ever changes
+GET_AT_ONCE = 30            # object ids per request on the quick path
+_layouts = {}               # connection settings -> {"at": time, "wide": bool, "ifs": {index: (name, speedMbps or None, label)}}
+
+
 def counters(conn):
-    """Raw octet counters for every real interface, in a handful of column reads (not one lookup per port). The App turns two readings
-    into rates and keeps the history. {"ports": {name: {"in", "out", "bits", "speedMbps"?, "label"?, "rxErr"?, "txErr"?, "rxDrop"?, "txDrop"?}}} (the last four are the interface's
-    error and discard counters, when the device has them); `label` is the port's description (on UniFi
-    switches the same name UniFi uses, "Port 10"). Virtual interfaces are left out."""
+    """Raw octet counters for every real interface. The App turns two readings into rates and keeps the history.
+    {"ports": {name: {"in", "out", "bits", "speedMbps"?, "label"?, "rxErr"?, "txErr"?, "rxDrop"?, "txDrop"?}}} (the last four are the interface's
+    error and discard counters, when the device has them); `label` is the port's description (on UniFi switches the same name UniFi uses, "Port 10").
+    Virtual interfaces are left out. The first reading (and one every ten minutes) walks the tables to learn which interfaces are real; the readings
+    in between ask only for those interfaces' counters, a few dozen objects per request, which is much faster on a server with hundreds of virtual ones."""
     s = session(conn)
+    key = json.dumps(conn, sort_keys=True)
+    lay = _layouts.get(key)
+    if lay and time.time() - lay["at"] < LAYOUT_FOR:
+        try:
+            out = _quick(s, lay)
+            if out is not None:
+                return {"ports": out}
+        except L.SnmpError:
+            pass                                                       # fall back to the full walk, which says what is wrong
+        _layouts.pop(key, None)
+    out, lay = _full(s)
+    if lay["ifs"]:
+        lay["at"] = time.time()
+        _layouts[key] = lay
+    return {"ports": out}
+
+
+def _row(a, b, wide, sp, lab, bad):
+    return {"in": a, "out": b, "bits": 64 if wide else 32, **({"speedMbps": int(sp)} if isinstance(sp, int) and sp > 0 else {}), **({"label": lab} if lab else {}),
+            **{k: v for k, v in bad.items() if isinstance(v, int)}}
+
+
+def _quick(s, lay):
+    """The counters of the interfaces already known, by index. None when an interface no longer answers (the list changed: read it again)."""
+    wide = lay["wide"]
+    c_in, c_out = (IF_HC_IN, IF_HC_OUT) if wide else (IF_IN, IF_OUT)
+    cols = (("in", c_in), ("out", c_out), ("speed", IF_HIGHSPEED), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC))
+    asks = [(idx, name, f"{oid}.{idx}") for idx in lay["ifs"] for name, oid in cols]
+    got = {}
+    for i in range(0, len(asks), GET_AT_ONCE):
+        chunk = asks[i:i + GET_AT_ONCE]
+        got.update(s.get([oid for _, _, oid in chunk]))
+    out = {}
+    for idx, (nm, sp, lab) in lay["ifs"].items():
+        v = {name: clean(got.get(f"{oid}.{idx}")) for name, oid in cols}
+        if not isinstance(v["in"], int) or not isinstance(v["out"], int):
+            return None
+        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")})      # the speed is read each time: a link that negotiates down shows at once
+    return out
+
+
+def _full(s):
     names = s.column(IF_NAME) or s.column(IF_DESCR)
     hi, ho = s.column(IF_HC_IN), s.column(IF_HC_OUT)
     wide = bool(hi) and bool(ho)
     li, lo = (hi, ho) if wide else (s.column(IF_IN), s.column(IF_OUT))
     speed, alias = s.column(IF_HIGHSPEED), _safe(s, IF_ALIAS)
     bad = {k: _safe(s, oid) for k, oid in (("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC))}      # not every device has them
-    out = {}
+    out, ifs = {}, {}
     for idx, n in names.items():
         nm = L.text(n)
         a, b = clean(li.get(idx)), clean(lo.get(idx))
         if not nm or nm.startswith(VIRTUAL_IF) or not isinstance(a, int) or not isinstance(b, int):
             continue
         sp, lab = clean(speed.get(idx)), L.text(alias.get(idx) or b"")[:60]
-        out[nm] = {"in": a, "out": b, "bits": 64 if wide else 32, **({"speedMbps": int(sp)} if isinstance(sp, int) and sp > 0 else {}), **({"label": lab} if lab else {}),
-                    **{k: v for k, col in bad.items() for v in [clean(col.get(idx))] if isinstance(v, int)}}
-    return {"ports": out}
+        out[nm] = _row(a, b, wide, sp, lab, {k: clean(col.get(idx)) for k, col in bad.items()})
+        ifs[idx] = (nm, sp if isinstance(sp, int) else None, lab)
+    return out, {"wide": wide, "ifs": ifs}
 
 
 # ---------------------------------------------------------------- Re-detect ----

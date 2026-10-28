@@ -98,6 +98,46 @@ class Counters(unittest.TestCase):
         self.assertEqual({k: got["port2"][k] for k in got["port2"] if k.endswith(("Err", "Drop"))}, {"rxErr": 7}, "only what the device answered")
 
 
+class CountersQuick(unittest.TestCase):
+    """#299: after the first reading the counters ask for the real interfaces by index instead of walking every table again."""
+    X, T = "1.3.6.1.2.1.31.1.1.1", "1.3.6.1.2.1.2.2.1"
+
+    def agent(self):
+        a = F.Agent(community="fake-community"); self.addCleanup(a.close)
+        X, T = self.X, self.T
+        a.mib = {f"{X}.1.1": "port1", f"{X}.1.2": "port2", f"{X}.1.3": "veth9", f"{X}.6.1": ("c64", 111), f"{X}.10.1": ("c64", 222), f"{X}.15.1": ("gauge", 1000),
+                 f"{X}.6.2": ("c64", 333), f"{X}.10.2": ("c64", 444), f"{X}.6.3": ("c64", 1), f"{X}.10.3": ("c64", 2), f"{X}.18.1": "Port 1",
+                 f"{T}.14.1": 31, f"{T}.20.1": 42, f"{T}.13.1": 53, f"{T}.19.1": 64}
+        return a
+
+    def test_the_second_reading_gives_the_same_shape_with_new_numbers_and_does_not_walk(self):
+        a = self.agent(); c = conn(a, "quick1")
+        first = C.counters(c)
+        walks = sum(1 for t, _ in a.requests if t != L.GET)
+        self.assertGreater(walks, 0)
+        a.mib[f"{self.X}.6.1"] = ("c64", 999); a.mib[f"{self.T}.14.1"] = 77
+        second = C.counters(c)
+        self.assertEqual(sum(1 for t, _ in a.requests if t != L.GET), walks, "no table walk the second time")
+        self.assertEqual(set(second["ports"]), set(first["ports"]))
+        self.assertEqual((second["ports"]["port1"]["in"], second["ports"]["port1"]["rxErr"]), (999, 77))
+        self.assertEqual(second["ports"]["port1"]["txErr"], 42, "each counter keeps its own value")
+        self.assertEqual(second["ports"]["port1"]["label"], "Port 1")
+        self.assertNotIn("veth9", second["ports"])
+
+    def test_a_link_that_negotiates_down_shows_at_once(self):
+        a = self.agent(); c = conn(a, "quick2")
+        self.assertEqual(C.counters(c)["ports"]["port1"]["speedMbps"], 1000)
+        a.mib[f"{self.X}.15.1"] = ("gauge", 100)
+        self.assertEqual(C.counters(c)["ports"]["port1"]["speedMbps"], 100)
+
+    def test_an_interface_that_disappears_makes_it_read_the_list_again(self):
+        a = self.agent(); c = conn(a, "quick3")
+        C.counters(c)
+        for k in [k for k in a.mib if k.endswith(".2") and k.startswith(self.X)]:
+            del a.mib[k]
+        self.assertEqual(set(C.counters(c)["ports"]), {"port1"})
+
+
 class ByName(unittest.TestCase):
     def setUp(self):
         self.agent = F.Agent(community="fake-community")
