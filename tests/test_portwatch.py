@@ -631,3 +631,4 @@ class CountedSplit(unittest.TestCase):
         w.set_shown({k(1), k(2), k(3), k(4)}, used={k(1), k(2), k(3)}, link_ends={k(4)})
         page = w.page()
         self.assertEqual((page["ports"], page["inUse"], page["onLinks"]), (4, 3, 1), "ports 5 and 6 are empty: read, not counted")
+        self.assertEqual(page["watched"], ["Core, Port 1", "Core, Port 2", "Core, Port 3", "Core, Port 4"], "the page can list exactly what it counts")

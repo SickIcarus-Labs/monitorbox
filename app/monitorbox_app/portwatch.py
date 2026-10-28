@@ -160,7 +160,8 @@ class PortWatch:
         down = [{"key": d["key"], "label": d["label"] + (f" ({d['other']})" if d["other"] else ""), "since": d["since"]} for d in self.downs()]
         counted = self._counted(snap)
         inuse, links = self.split(counted)
-        return {"on": self.enabled(), "ports": len(counted), "inUse": inuse, "onLinks": links, "rising": rising, "off": off, "down": down}
+        names = sorted({snap[k][0] for k in counted})
+        return {"on": self.enabled(), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": names, "rising": rising, "off": off, "down": down}
 
     def known(self):
         """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""
