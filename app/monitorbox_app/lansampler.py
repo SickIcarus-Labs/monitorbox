@@ -47,11 +47,22 @@ class LanSampler:
         ids = lanmap.device_ids(devices)
         now = self.clock()
         by_ip = {str(d.get("ip") or "").strip().lower(): i for d, i in zip(devices, ids) if d.get("ip")}
+        by_name = {}
+        for d, i in zip(devices, ids):
+            by_name.setdefault(str(d.get("name") or "").strip().lower(), []).append(i)
+
+        def match(c):
+            """The UniFi device an SNMP connection is: by its address, else by its name when exactly one device has that name (the SNMP address is often not the one UniFi lists)."""
+            hit = by_ip.get(followups.host_of(c))
+            if hit:
+                return hit
+            same = by_name.get(str(c.get("name") or "").strip().lower()) or []
+            return same[0] if len(same) == 1 else None
         covered, snmp_bad, snmp_conf = set(), {}, set()      # snmp_bad: device id -> {port label: error and drop counters over SNMP}; snmp_conf: devices that have an SNMP connection at all
         for c in conns:
             if c.get("module") != "snmp":
                 continue
-            dev = by_ip.get(followups.host_of(c))
+            dev = match(c)
             if not dev:
                 continue
             snmp_conf.add(dev)
@@ -74,7 +85,7 @@ class LanSampler:
         if self.watch is not None:
             if self.watch.enabled():
                 self.rounds += 1
-                servers, held = self._read_servers(conns, by_ip)
+                servers, held = self._read_servers(conns, match)
                 self._feed_watch(devices, ids, snmp_bad, snmp_conf, now, servers, held)
             elif self.watch.switched_off():
                 self.watch.forget()
@@ -87,12 +98,12 @@ class LanSampler:
         if self.after:
             self.after()
 
-    def _read_servers(self, conns, by_ip):
+    def _read_servers(self, conns, match):
         """The network cards of SNMP servers (SNMP connections that are not UniFi devices): errors and discards per interface, for the port watch only.
         -> ([(id, pseudo device)], ids that could not be read this round and are held). An id is "snmp:<connection id>"."""
         out, held = [], set()
         for c in conns:
-            if c.get("module") != "snmp" or by_ip.get(followups.host_of(c)):
+            if c.get("module") != "snmp" or match(c):
                 continue
             sid = "snmp:" + str(c["id"])
             if (self.rounds - 1) % SERVER_EVERY:
