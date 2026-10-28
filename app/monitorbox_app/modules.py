@@ -266,7 +266,11 @@ class Modules:
         try:
             return p.call(method, params, timeout=timeout)
         finally:
-            perfstats.record("module", f"{mid}.{method}", (time.monotonic() - t0) * 1000)
+            ms = (time.monotonic() - t0) * 1000
+            perfstats.record("module", f"{mid}.{method}", ms)
+            if ms >= perfstats.SLOW_MS:
+                c = (params or {}).get("connection") if isinstance(params, dict) else None
+                perfstats.slow(f"{mid}.{method}" + (f" for {c.get('name') or c.get('id')}" if isinstance(c, dict) else ""), ms)
 
     def listen(self, mid, session, cb):
         p = self.running.get(mid)
