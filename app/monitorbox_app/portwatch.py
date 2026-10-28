@@ -124,6 +124,7 @@ class PortWatch:
         self.lock = threading.Lock()
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
+        self.attached = {}        # key -> the name of what is plugged into that port (the UniFi client's name): said in the alert so "Theater, Port 2" also says "Apple TV"
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.used, self.link_ends = set(), set()
         self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
@@ -165,7 +166,7 @@ class PortWatch:
             if k in known:
                 off.append({**row, "kinds": j["rising"]})
             elif j["rising"]:
-                rising.append({**row, "kinds": j["rising"], "perHour": j["perHour"], "learning": False})
+                rising.append({**row, "label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "learning": False})
         stale = sorted(k for k in known if k not in snap)
         for k in stale:
             off.append({"key": k, "label": k.split("|", 1)[-1] if "|" in k else k, "alert": False, "kinds": []})
@@ -295,6 +296,13 @@ class PortWatch:
                 continue                                              # the other end of the same cable is already listed
             out.append({"key": k, "label": labels[k], "since": L["since"], "other": peer[1] if peer and peer[0] in cand else None})
         return out
+
+    def set_attached(self, names):
+        self.attached = {k: str(v) for k, v in names.items() if v}
+
+    def named(self, key, label):
+        who = self.attached.get(key)
+        return f"{label} ({who})" if who and key not in self.peers else label
 
     def set_peers(self, peers):
         """The port at the other end of each link between two devices, so a port can say what its far end is doing."""
@@ -452,7 +460,7 @@ class PortWatch:
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
             j = judge(q, k in self.flap_ports, self.speeds.get(k))
             if j["rising"] and k not in known:
-                out.append({"label": label, "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "other": self.other_end(k),
+                out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
         return out
 
