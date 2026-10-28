@@ -173,7 +173,11 @@ class Monitor:
             states = {i: n["state"] for i, n in snap["nodes"].items()}
             if self.clock() - self.started < STARTUP_QUIET:
                 states = {i: s for i, s in states.items() if s != "unknown"}       # a restart is not something that happened to the systems
-            self.history.record(states, {i: n.get("detail") for i, n in snap["nodes"].items()})        # with what each said, so History can say why
+            names = {}
+            for key, v in list(self.raw.items()):             # everything a check is naming (all the ports rising), so a stretch can name those that join it later
+                if v.get("names"):
+                    names.setdefault(key.rsplit("/", 1)[0], []).extend(v["names"])
+            self.history.record(states, {i: n.get("detail") for i, n in snap["nodes"].items()}, names)        # with what each said, so History can say why
         except Exception:
             pass                        # history must never stop the monitor
 
@@ -207,6 +211,7 @@ class Monitor:
             ok, detail, ms = r[:3]
             warn = bool(len(r) > 3 and r[3].get("warn"))
             notice = bool(len(r) > 3 and r[3].get("notice"))
+            names = [str(x) for x in (r[3].get("names") or [])][:200] if len(r) > 3 and isinstance(r[3].get("names"), list) else None
             if check["type"] == "ping" and ok is True and ms is not None:     # a slow link: three slow answers in a row, not one blip
                 with self.lock:
                     t = self.tasks.get(key)
@@ -215,7 +220,7 @@ class Monitor:
                         if t["slow"] >= 3:
                             notice, detail = True, f"{detail} · slow ({ms:.0f} ms)"
         except Exception as e:  # a probe must never kill the scheduler
-            ok, detail, ms, warn, notice = None, f"check crashed: {e}", None, False, False
+            ok, detail, ms, warn, notice, names = None, f"check crashed: {e}", None, False, False, None
         now = self.clock()
         with self.lock:
             task = self.tasks.get(key)
@@ -223,7 +228,7 @@ class Monitor:
                 return
             task["busy"] = False
             prev = self.results.get(key)
-            self._set_raw(key, ok, detail, ms, warn, notice, now)
+            self._set_raw(key, ok, detail, ms, warn, notice, now, names)
             interval = check.get("interval", DEFAULT_INTERVAL.get(check["type"], 30.0))
             if ok is False and not manual and (prev is None or prev["ok"] is True) and task["fails"] + 1 < CONFIRM_FAILURES:
                 task["fails"] += 1                      # not shown yet: look again soon
@@ -256,10 +261,10 @@ class Monitor:
             if changed or (prev and (prev["detail"] != detail or prev.get("stale"))):
                 self._bump()
 
-    def _set_raw(self, key, ok, detail, ms, warn, notice, now):
+    def _set_raw(self, key, ok, detail, ms, warn, notice, now, names=None):
         prev = self.raw.get(key)
         changed = prev is None or prev["ok"] != ok or bool(prev.get("warn")) != warn or bool(prev.get("notice")) != notice
-        self.raw[key] = {"ok": ok, "detail": detail, "ms": ms, "at": _iso(now), "since": _iso(now) if changed else prev["since"], "warn": warn, "notice": notice}
+        self.raw[key] = {"ok": ok, "detail": detail, "ms": ms, "at": _iso(now), "since": _iso(now) if changed else prev["since"], "warn": warn, "notice": notice, **({"names": names} if names else {})}
 
     def grace_seconds(self, node_id):
         """How long a failure or warning must last before the screen shows it: the system's own value, else the site's."""

@@ -36,6 +36,7 @@ class History:
         self.events = []      # (t, node, state) oldest first
         self.why = {}         # (t, node) -> the reason it was not healthy, as the check said it (kept only for stretches that were not healthy)
         self.last = {}        # node -> last recorded state
+        self.began = {}       # node -> when its current stretch began (the time of its last recorded change)
         self._hb = 0.0
         self._pruned = 0.0
         self._load()
@@ -49,6 +50,9 @@ class History:
                 for line in f:
                     try:
                         e = json.loads(line)
+                        if e.get("u"):              # a reason that grew while its stretch was going on: only the reason changes
+                            self.why[(int(e["t"]), str(e["n"]))] = str(e["w"])[:WHY_MAX]
+                            continue
                         self.events.append((int(e["t"]), str(e["n"]), str(e["s"])))
                         if e.get("w"):
                             self.why[(int(e["t"]), str(e["n"]))] = str(e["w"])[:WHY_MAX]
@@ -57,8 +61,9 @@ class History:
         except OSError:
             return
         self.events.sort(key=lambda e: e[0])
-        for _t, n, s in self.events:
+        for t, n, s in self.events:
             self.last[n] = s
+            self.began[n] = t
 
     def _append(self, rows, why=None):
         if not rows:
@@ -73,8 +78,30 @@ class History:
                     self.why[(t, n)] = w
                 f.write(json.dumps(rec, separators=(",", ":")) + "\n")
         self.events.extend(rows)
-        for _t, n, s in rows:
+        for t, n, s in rows:
             self.last[n] = s
+            self.began[n] = t
+
+    def _grow(self, ongoing, names):
+        """Add the names a stretch that is still going on has not mentioned yet to its reason (kept inside WHY_MAX, with the cut shown)."""
+        for n, s in ongoing.items():
+            t, cur = self.began.get(n), None
+            cur = self.why.get((t, n)) if t is not None else None
+            if not cur:
+                continue
+            missing = [x for x in dict.fromkeys(str(x) for x in (names or {}).get(n) or []) if x and x not in cur]
+            if not missing:
+                continue
+            new = _cut(cur + "; also " + ", ".join(missing))
+            if new == cur:
+                continue                    # already as long as it can be
+            self.why[(t, n)] = new
+            try:
+                os.makedirs(os.path.dirname(self.path), exist_ok=True)
+                with open(self.path, "a") as f:
+                    f.write(json.dumps({"t": t, "n": n, "s": s, "w": new, "u": 1}, separators=(",", ":")) + "\n")
+            except OSError:
+                pass
 
     def _close_gap(self):
         try:
@@ -100,13 +127,16 @@ class History:
             pass
 
     # -- writing ---------------------------------------------------------
-    def record(self, states, why=None):
+    def record(self, states, why=None, names=None):
         """states: node id -> state. Writes only what changed; 'pending' (no answer yet) is not a state.
-        why: node id -> what the check said, kept with a stretch that was not healthy so the History page can say what it was."""
+        why: node id -> what the check said, kept with a stretch that was not healthy so the History page can say what it was.
+        names: node id -> everything the check is naming right now (the ports rising, say). A stretch keeps the reason from when it began, so a name
+        that turns up later in the same stretch is added to it ("; also Den, Port 8") instead of going unmentioned."""
         now = int(self.clock())
         with self.lock:
             rows = [(now, n, s) for n, s in sorted(states.items()) if s in STATES and self.last.get(n) != s]
             self._append(rows, why)
+            self._grow({n: s for n, s in states.items() if s in STATES and s != "healthy" and n not in {r[1] for r in rows}}, names)
             self._beat(now)
             if now - self._pruned > PRUNE_EVERY:
                 self.prune()
@@ -118,7 +148,7 @@ class History:
     def clear(self):
         """Forget everything recorded. The next pass writes every node's current state as a fresh start."""
         with self.lock:
-            self.events, self.last, self.why = [], {}, {}
+            self.events, self.last, self.why, self.began = [], {}, {}, {}
             try:
                 open(self.path, "w").close()
             except OSError:

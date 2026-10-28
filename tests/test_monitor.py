@@ -296,6 +296,16 @@ class Truth(unittest.TestCase):
         why = [w for (_t, n), w in self.hist.why.items() if n == "fs"]
         self.assertEqual(why, ["running, but Docker's health check says unhealthy (Up 2 hours (unhealthy))"])
 
+    def test_a_check_that_names_more_ports_later_has_them_added_to_the_stretchs_reason(self):
+        ok = (True, "all 45 ports look normal", 1.0)
+        one = (True, "Bay A, Port 4: errors rising", 1.0, {"warn": True, "names": ["Bay A, Port 4"]})
+        two = (True, "Bay A, Port 4: errors rising", 1.0, {"warn": True, "names": ["Bay A, Port 4", "Den, Port 8"]})
+        self.build([ok, one, one, two, two, two], confirm={"failures": 0, "warnings": 0})
+        for _ in range(6):
+            self.step()
+        why = [w for (_t, n), w in self.hist.why.items() if n == "fs"]
+        self.assertEqual(why, ["Bay A, Port 4: errors rising; also Den, Port 8"])
+
     def test_a_degraded_warning_is_held_like_a_failure_and_shows_once_it_lasts(self):
         ok, warn = (True, "ok", 1.0), (True, "battery", 1.0, {"warn": True})
         self.build([ok] + [warn] * 14)
