@@ -43,6 +43,7 @@ class LanSampler:
         self.uptime = {}        # server id -> its uptime when last read: a drop in it is a restart, not a flap
         self.sys_of = {}        # SNMP connection id -> the device's own name (sysName), squashed: tells which UniFi device a connection is when the address does not
         self.roles = {}         # server id -> {"at", "switch", "links"}: which ports of an SNMP device that learns addresses or hears neighbours (a switch) are uplinks or links, read every ROLES_EVERY seconds
+        self.has_unifi = False  # UniFi gave devices this round
         self.matched = {}       # SNMP connection id -> the id of the UniFi device it is, as last worked out: the map leaves those out (they are drawn as the UniFi device)
         self.wifi = {}          # port name in the history (under WIFI) -> {"name", "ap"}: the Wi-Fi clients read this round
 
@@ -73,6 +74,7 @@ class LanSampler:
             self.status.update(at=self.clock(), unifi=len(unifis), unifiEmpty=True)
             return
         self.status["unifiEmpty"] = False
+        self.has_unifi = bool(devices)
         ids = lanmap.device_ids(devices)
         now = self.clock()
         by_ip = {str(d.get("ip") or "").strip().lower(): i for d, i in zip(devices, ids) if d.get("ip")}
@@ -185,6 +187,8 @@ class LanSampler:
             if self.watch is not None:
                 self.watch.set_why(sid, self.explain(c))
             role = self._role(c, sid)
+            if self.watch is not None:
+                self.watch.set_switch_like(sid, bool(role.get("switch")) and self.has_unifi)       # a switch read on its own while UniFi has devices: worth saying why it was not matched
             up_s = r.get("uptimeS") if isinstance(r, dict) else None
             rebooted = isinstance(up_s, int) and isinstance(self.uptime.get(sid), int) and up_s + 5 < self.uptime[sid]
             if isinstance(up_s, int):

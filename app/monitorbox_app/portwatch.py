@@ -137,6 +137,7 @@ class PortWatch:
         self.speeds = {}          # key -> link speed in Mbit/s, from the map, so the minimums scale with the port
         self.raw = {}             # key -> the last raw [rx errors, tx errors, rx drops, tx drops] read
         self.off = {}             # key -> what has been added to each of those so far to undo wraps: some drivers report a 16-bit counter, which starts again after 65,535
+        self.switch_like = set()  # SNMP device ids that look like a switch (they learn addresses or hear neighbours) but were not matched to a UniFi device while UniFi has devices: said on the page, with why
         self.card_speeds = {}     # the same for ports read over SNMP, from the device itself (the map does not show a switch that UniFi does not know)
         self.client_ports = set() # keys of ports on an SNMP-only switch that look like a client's (no neighbour, at most one address behind them): packet and link drops are not a problem there
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
@@ -200,7 +201,8 @@ class PortWatch:
         now = self.clock()
         where = [{"from": g["from"], "id": g["id"], "count": g["count"], "lastAgoMin": int((now - g["last"]) // 60), "why": self.why.get(g["id"], "")} for g in sorted(groups.values(), key=lambda g: -g["count"])]
         cardkeys = set().union(*self.cards.values()) if self.cards else set()
-        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "cards": len([k for k in counted if k in cardkeys]), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40], "where": where, "unifiNames": self.unifi_names},
+        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "cards": len([k for k in counted if k in cardkeys]), "inUse": inuse, "onLinks": links, "watched": watched, "suspect": [{"from": next((snap[k][0].rsplit(", ", 1)[0] for k in sorted(snap) if k.startswith(sid + "|")), sid), "id": sid, "why": self.why[sid]} for sid in sorted(self.switch_like) if self.why.get(sid)],
+                "others": {"count": len(others), "names": others[:40], "where": where, "unifiNames": self.unifi_names},
                 "rising": rising, "off": off, "down": down}
 
     def known(self):
@@ -418,6 +420,7 @@ class PortWatch:
         """Forgets every reading of one device id (it turned out to be read under another id)."""
         pre = f"{dev}|"
         with self.lock:
+            self.switch_like.discard(dev)
             for k in [k for k in self.series if k.startswith(pre)]:
                 del self.series[k]
                 self.labels.pop(k, None)
@@ -437,6 +440,10 @@ class PortWatch:
         with self.lock:
             q = self.series.get(key)
             return int(q[-1][3]) if q else 0
+
+    def set_switch_like(self, sid, on):
+        with self.lock:
+            (self.switch_like.add if on else self.switch_like.discard)(sid)
 
     def set_snmp_ports(self, sid, speeds, clients):
         """What one SNMP device's own report says about its ports (key -> speed in Mbit/s), and which of them look like a client's, for a device that is a switch."""

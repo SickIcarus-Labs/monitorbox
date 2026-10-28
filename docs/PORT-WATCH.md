@@ -27,6 +27,10 @@ What the Port errors item watches, how it decides, and what it never does. The c
 
 A counter that falls from just under 65,536 (a 16-bit counter) or just under 4,294,967,296 (a 32-bit one) has gone round: the box keeps adding on, so the port's history is not started again. A fall from anywhere else (a device restart) is a reset: the history starts again and the Port errors page says from what to what. Some network cards report a 16-bit drops counter, which goes round every 10 to 15 minutes at around a hundred drops a second.
 
+## What the Port errors page lists
+
+**Which ports** lists every counted port, how long it has been read, and, if its counter went backwards, from what to what. The last line there says how many other interfaces are read but not counted (unused cards, ports of a sleeping device, leftovers); they are not listed, since unused ports are not news. When a device that looks like a switch (it learns addresses or hears LLDP neighbours) is read on its own while UniFi has devices, the page says so and shows why it was not matched to a UniFi device, with the names UniFi uses, so a mismatch can be seen. Nothing is shown for an SNMP-only network.
+
 ## Packet drops are usually congestion, not a fault
 
 A **packet drop** (not to be confused with a **link drop**, where the link itself goes down and comes back) on a port means the switch's outgoing queue for that port overflowed. That happens where a faster network feeds a slower port (a 10 Gbit server or uplink sending a burst to a 1 Gbit device): the switch drops what does not fit and the traffic slows down and recovers. It is normal on a LAN with mixed speeds, and more likely with flow control off. Errors are the better sign of a bad cable or module.
