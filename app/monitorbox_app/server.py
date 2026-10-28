@@ -7,7 +7,7 @@ from http.cookies import SimpleCookie
 from .modules import current as modules_current
 from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
-from . import thisbox, followups, graphs, alerts, peer, perfstats, lanmap, portpeers, portwatch, lansampler, busiest, security, passkeys
+from . import thisbox, followups, graphs, alerts, peer, perfstats, lanmap, portpeers, portwatch, autonotes, lansampler, busiest, security, passkeys
 from .monitor import Monitor
 from .auth import Auth
 from .modules import Modules
@@ -630,6 +630,7 @@ class App:
             out["app"] = versions.component(
                 version(), cfg["app_pin"], (dinfo["pointer"].get("app") or {}).get("version"),
                 dinfo["catalog"].get("app", []), cfg["channel"], self.launcher_state().get("failed", []))
+        out["autoNotes"] = autonotes.current(self.paths, version(), time.time())
         out["imageVersion"] = self.launcher_state().get("launcher_version")
         out["image"] = versions.image(self.launcher_state().get("launcher_version"),
                                       ((dinfo or {}).get("pointer") or {}).get("launcher", {}).get("version") if isinstance(((dinfo or {}).get("pointer") or {}).get("launcher"), dict) else None)
@@ -733,6 +734,13 @@ class App:
                 pass
             time.sleep(self.check_seconds)
 
+    def note_update(self, kind, name, frm, to):
+        """Leave the bell a note about an automatic update. Best effort: a note that cannot be written never stops an update."""
+        try:
+            autonotes.add(self.paths, kind, name, frm, to, time.time())
+        except Exception:
+            pass
+
     def auto_step(self):
         """One round of automatic checking and installing. It works the same on every channel (dev, beta and stable): the channel only
         decides which releases are on offer, and only items set to Latest are updated."""
@@ -744,10 +752,17 @@ class App:
                 for mid, c in v["modules"].items():
                     # a module from another repository is never installed unasked; once the owner has installed it, it follows its updates
                     if c["pin"] == "latest" and c["needsApply"] and c["target"] not in c["failed"] and (c.get("running") or (c.get("fromDefault") and not c.get("declined"))):
+                        before = c.get("running")
                         self.apply("module", mid)
+                        self.note_update("module", mid, before, c["target"])        # only here, the automatic path: an update started by hand does not say so
                 a = v["app"]
                 if a and a["pin"] == "latest" and a["needsApply"] and a["target"] not in a["failed"]:
-                    self.apply("app")
+                    self.note_update("app", "MonitorBox", version(), a["target"])   # the App restarts to install, so this is written first and shown only once the new version runs
+                    try:
+                        self.apply("app")
+                    except Exception:
+                        autonotes.dismiss(self.paths, [f"app:MonitorBox:{a['target']}"])
+                        raise
 
     # -- backups ---------------------------------------------------------
     def backup_list(self):
@@ -2738,6 +2753,9 @@ class App:
                         return self.send(200, app.view())
                     if path == "/api/apply":
                         return self.send(200, app.apply(body.get("kind"), body.get("id")))
+                    if path == "/api/updates/seen":
+                        autonotes.dismiss(app.paths, body.get("ids") if isinstance(body.get("ids"), list) else [])
+                        return self.send(200, {"ok": True})
                     if path == "/api/apply-all":
                         return self.send(200, app.apply_all())
                     if path == "/api/settings":

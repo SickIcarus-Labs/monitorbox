@@ -58,6 +58,21 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_bell_says_an_automatic_update_happened_and_tapping_it_clears_it(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.evaluate("hdrSites['']={ver:'',fu:[],pend:null,auto:[{id:'module:widget-probe:0.4.2',text:'widget-probe updated itself from 0.4.1 to 0.4.2.'}]};hdrSig='';renderHeader()")
+            self.assertEqual(pg.inner_text("#hdr .badge").strip(), "1")
+            pg.click("#bellbtn"); self.assertIn("widget-probe updated itself from 0.4.1 to 0.4.2.", pg.inner_text("#bell"))
+            pg.click("#bell .nitem")
+            pg.wait_for_function("location.hash==='#/settings/updates'")
+            self.assertEqual(pg.locator("#hdr .badge").count(), 0, "tapping the note clears it from the bell")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_bell_says_when_the_container_image_needs_re_pulling_and_the_updates_page_explains(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:
