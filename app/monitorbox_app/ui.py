@@ -907,7 +907,7 @@ async function pwAlert(el){try{await api('portwatch',{keys:[el.dataset.k],known:
 const pwKinds={errors:'errors',drops:'drops',flaps:'link drops'};
 function pwRow(r){return `<label class=row style="min-height:44px"><input type=checkbox ${r.alert?'checked':''} data-k="${esc(r.key)}" onchange="pwAlert(this)"> <span>${esc(r.label)}${r.kinds&&r.kinds.length?' · '+r.kinds.map(k=>pwKinds[k]+' rising'+(r.perHour&&r.perHour[k]?' (about '+r.perHour[k].toLocaleString()+' an hour)':'')).join(', '):''} · <span class=sub>Alert on this port</span></span></label>`}
 function pwSection(){pwFetch();const d=pwPage;if(!d)return '<p class=sub>Loading the ports…</p>';
- return `<p class=sub style="margin-top:8px">${d.on?`Watching ${d.ports} port${d.ports==1?'':'s'} in use. `:'Not watching. '}<a href="#/map">Open the network map</a></p>`+
+ return `<p class=sub style="margin-top:8px">${d.on?`Watching ${d.ports} port${d.ports==1?'':'s'}: the ports in use on the network map plus both ends of every link between devices. `:'Not watching. '}<a href="#/map">Open the network map</a></p>`+
   ((d.down||[]).length?`<div class=sub style="margin-top:6px"><b>Links down</b></div>${d.down.map(r=>`<div class=row style="min-height:44px"><span>${esc(r.label)} · link is down (was up)</span><button class="btn sm" data-k="${esc(r.key)}" onclick="pwGone(this)">Not coming back</button></div>`).join('')}`:'')+
   (d.rising.length?`<div class=sub style="margin-top:6px"><b>Rising now</b></div>${d.rising.map(pwRow).join('')}`:(d.on?'<p class=sub>No port is rising.</p>':''))+
   (d.off.length?`<div class=sub style="margin-top:6px"><b>Not alerting</b></div>${d.off.map(pwRow).join('')}`:'')}
