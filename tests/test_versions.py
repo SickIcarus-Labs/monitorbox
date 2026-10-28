@@ -85,3 +85,26 @@ class MemoryShare(unittest.TestCase):
         self.assertIsNotNone(pss); self.assertGreater(pss, 0); self.assertLessEqual(pss, rss + 0.1)
         self.assertEqual(sysinfo._rss_mb(me), pss, "the reported figure is the fair share")
         self.assertIsNone(sysinfo._pss_mb(2 ** 22 + 12345), "a process that is not there gives nothing, and the caller falls back to RSS")
+
+
+class WhatChanged(unittest.TestCase):
+    def ent(self, v, *notes):
+        return {"version": v, "channels": ["dev"], **({"changes": list(notes)} if notes else {})}
+
+    def test_an_update_lists_every_version_after_the_running_one_up_to_the_target_newest_first(self):
+        es = [self.ent("1.0.0", "old"), self.ent("1.0.1", "a"), self.ent("1.0.2", "b", "c"), self.ent("1.0.10", "d"), self.ent("1.0.11", "too new")]
+        got = versions.whats_changed(es, "1.0.0", "1.0.10")
+        self.assertEqual([(g["version"], g["changes"]) for g in got], [("1.0.10", ["d"]), ("1.0.2", ["b", "c"]), ("1.0.1", ["a"])], "numeric order, not text order")
+
+    def test_versions_without_notes_are_left_out(self):
+        es = [self.ent("1.0.0"), self.ent("1.0.1"), self.ent("1.0.2", "b")]
+        self.assertEqual([g["version"] for g in versions.whats_changed(es, "1.0.0", "1.0.2")], ["1.0.2"])
+
+    def test_when_up_to_date_it_shows_the_running_versions_own_notes(self):
+        es = [self.ent("1.0.0", "x"), self.ent("1.0.1", "y")]
+        self.assertEqual([g["version"] for g in versions.whats_changed(es, "1.0.1", "1.0.1")], ["1.0.1"])
+        self.assertEqual(versions.whats_changed(es, "1.0.1", None), versions.whats_changed(es, "1.0.1", "1.0.1"))
+
+    def test_bad_input_gives_nothing_rather_than_an_error(self):
+        self.assertEqual(versions.whats_changed([{"version": "x"}], "1.0.0", "1.0.1"), [])
+        self.assertEqual(versions.whats_changed([], None, None), [])

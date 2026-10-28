@@ -73,14 +73,19 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+<<<<<<< HEAD
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_update_all_sites_button_starts_the_sites_and_shows_each_ones_progress(self):
+=======
+    def test_updates_page_offers_what_changed_for_the_app(self):
+>>>>>>> ad7908e (Show What changed for the app on the Updates page (1.6.34))
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:
             b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
             pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
             pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
             pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+<<<<<<< HEAD
             self.assertEqual(pg.locator("#upsites").count(), 0, "no linked site, no button")
             pg.evaluate("""()=>{window._posted=[];let n=0;const f=window.fetch;
               window.fetch=(u,o)=>{u=String(u);
@@ -97,6 +102,16 @@ class Header(T.SnmpE2E):
             pg.wait_for_function("document.querySelector('#upsitesout').innerText.includes('Cabin: installing, restarting')", timeout=15000)
             self.assertEqual(len(pg.evaluate("window._posted")), 1, "pressed once, asked once")
             self.assertIn("This box: done", pg.inner_text("#upsitesout"))
+=======
+            self.assertEqual(pg.locator("[data-sw=app] details").count(), 0, "no notes, no link")
+            pg.evaluate("""()=>{const f=window.fetch;window.fetch=(u,o)=>String(u).endsWith('/api/versions')?f(u,o).then(async r=>{const j=await r.json();j.app.changed=[{version:'9.2.0',changes:['The thing now works <b>better</b>.']},{version:'9.1.5',changes:['An earlier fix.']}];return new Response(JSON.stringify(j))}):f(u,o);route()}""")
+            pg.wait_for_selector("[data-sw=app] details summary")
+            self.assertEqual(pg.inner_text("[data-sw=app] details summary"), "What changed")
+            pg.click("[data-sw=app] details summary")
+            t = pg.inner_text("[data-sw=app] details")
+            self.assertLess(t.index("9.2.0"), t.index("9.1.5"), "newest first")
+            self.assertIn("The thing now works <b>better</b>.", t, "shown as text, never as markup")
+>>>>>>> ad7908e (Show What changed for the app on the Updates page (1.6.34))
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")

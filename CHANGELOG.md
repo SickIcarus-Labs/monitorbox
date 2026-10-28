@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.6.35** (#312) The Updates page now has a "What changed" link on the MonitorBox app: when an update is waiting it lists what changed in every version between yours and the one on offer (newest first, in plain words); when you are up to date it shows what your version brought. The notes travel inside the release itself, so MonitorBox does not need to reach any other site. Versions released before this one carry no notes. Modules have no changelog yet, so only the app has the link.
 - **1.6.34** (#314) New "Update all sites" button on the Updates page of the main box (shown when at least one site is linked). It asks every linked site to install what is waiting, without waiting for them to finish, then installs here last, and lists each site as asked, installing, done, or did not update (with the reason). It does what pressing "Update all" on each site would do: items pinned to a version stay put, and nothing happens unless you press it. A site that is not linked is skipped.
 - **1.6.33** (#313) The "Update all" button on the Updates page now shows whenever at least one update is waiting (the app or a module), not only when there are two or more.
 - **1.6.32** (#310) When MonitorBox updates itself (automatic updates on), the bell now says so: "MonitorBox updated itself from 1.6.31 to 1.6.32." for the app, and the same for each module. Tap the note to clear it; notes also go after a week. An update you start yourself does not add a note.

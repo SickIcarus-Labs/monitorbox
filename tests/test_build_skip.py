@@ -5,7 +5,7 @@ BUILD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Skip(unittest.TestCase):
-    def build(self, *extra):
+    def build(self, *extra, changelog=None):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         root = os.path.join(tmp.name, "src")
         os.makedirs(os.path.join(root, "app", "monitorbox_app"))
@@ -20,6 +20,9 @@ class Skip(unittest.TestCase):
                 json.dump({"id": mid, "version": "0.1.0", "entry": ["python3", "main.py"]}, f)
             with open(os.path.join(root, "modules", mid, "main.py"), "w") as f:
                 f.write("pass\n")
+        if changelog is not None:
+            with open(os.path.join(root, "CHANGELOG.md"), "w") as f:
+                f.write(changelog)
         ptr, cat = os.path.join(tmp.name, "dev.json"), os.path.join(tmp.name, "catalog.json")
         with open(ptr, "w") as f:
             json.dump({"schema": 1, "channel": "dev", "app": None, "modules": {}}, f)
@@ -43,6 +46,19 @@ class Skip(unittest.TestCase):
     def test_the_pointer_carries_the_launcher_version_this_release_was_built_for(self):
         ptr, cat, out = self.build()
         self.assertEqual(ptr["launcher"], {"version": "3.4.5"})
+
+    def test_the_catalog_entry_carries_that_versions_changelog_lines_without_the_ticket_number(self):
+        log = ("# Changelog\n\n## Not on stable yet\n\n- **1.0.1** (#12) A later thing.\n- **1.0.0** (#7, #8) First thing, in plain words.\n"
+               "- **1.0.0** Second thing with no ticket.\n- **1.0.10** Not this one.\n")
+        ptr, cat, out = self.build(changelog=log)
+        self.assertEqual(cat["app"][0]["changes"], ["First thing, in plain words.", "Second thing with no ticket."])
+        self.assertNotIn("changes", cat["modules"]["kept"][0], "modules have no changelog")
+
+    def test_no_changelog_lines_means_no_changes_field(self):
+        ptr, cat, out = self.build(changelog="# Changelog\n")
+        self.assertNotIn("changes", cat["app"][0])
+        ptr, cat, out = self.build()
+        self.assertNotIn("changes", cat["app"][0])
 
 
 if __name__ == "__main__":

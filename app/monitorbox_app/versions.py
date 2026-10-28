@@ -44,3 +44,17 @@ def image(have, wants):
         return {"have": have, "wants": wants, "outdated": vkey(have) < vkey(wants)}
     except ValueError:
         return None
+
+
+def whats_changed(entries, running, target):
+    """The plain-words notes the catalog carries for an update: every version after the running one up to the target (newest first), or, when nothing
+    is waiting, the running version's own. Versions published before notes travelled with releases have none and are left out."""
+    try:
+        if running and target and vkey(target) > vkey(running):
+            keep = [e for e in entries if vkey(running) < vkey(e["version"]) <= vkey(target)]
+        else:
+            keep = [e for e in entries if e["version"] == running]
+    except (ValueError, KeyError, TypeError):
+        return []
+    keep = sorted(keep, key=lambda e: vkey(e["version"]), reverse=True)
+    return [{"version": e["version"], "changes": [str(c) for c in e["changes"]][:20]} for e in keep if isinstance(e.get("changes"), list) and e["changes"]][:30]

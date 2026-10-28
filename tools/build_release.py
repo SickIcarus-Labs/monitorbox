@@ -10,10 +10,26 @@ A new version is added to the catalog as "dev" and becomes the dev pointer.
 A version is immutable: re-publishing the same version with different content is refused.
 Writes only what changed; prints the list of files to upload as release assets.
 """
-import argparse, contextlib, gzip, hashlib, io, json, os, shutil, subprocess, sys, tarfile, tempfile, time
+import argparse, contextlib, gzip, hashlib, io, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP = {"__pycache__"}
+
+
+def changes_for(root, version):
+    """The plain-words lines CHANGELOG.md has for one app version ("- **1.6.33** (#313) Text ..."), without the version and the ticket number.
+    They go into the catalog entry, so the box can show "What changed" for an update it has not installed yet."""
+    try:
+        with open(os.path.join(root, "CHANGELOG.md")) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in lines:
+        m = re.match(r"^- \*\*" + re.escape(version) + r"\*\*\s*(?:\(#\d+(?:,\s*#\d+)*\)\s*)?(.*\S)\s*$", ln)
+        if m:
+            out.append(m.group(1))
+    return out
 
 
 def make_tgz(src_dir, arc_prefix=""):
@@ -76,7 +92,7 @@ def main(argv=None):
     assets, changed = [], False
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    def publish(entries, slot_set, name, version, data):
+    def publish(entries, slot_set, name, version, data, changes=None):
         nonlocal changed
         fname = f"{name}-{version}.tar.gz"
         sha = hashlib.sha256(data).hexdigest()
@@ -91,7 +107,7 @@ def main(argv=None):
         entry = {"version": version,
                  "url": a.url_template.format(tag=fname[:-7], file=fname),
                  "sha256": sha, "signature": None}
-        entries.insert(0, {**entry, "published": now, "channels": ["dev"]})
+        entries.insert(0, {**entry, "published": now, "channels": ["dev"], **({"changes": changes} if changes else {})})
         slot_set(entry)
         changed = True
 
@@ -100,7 +116,7 @@ def main(argv=None):
     with open(os.path.join(appdir, "VERSION")) as f:
         ver = f.read().strip()
     publish(cat.setdefault("app", []), lambda v: ptr.__setitem__("app", v), "app", ver,
-            make_tgz(appdir, "monitorbox_app"))
+            make_tgz(appdir, "monitorbox_app"), changes_for(a.root, ver))
 
     # Modules: archive holds manifest.json and code at its top level
     moddir = os.path.join(a.root, "modules")
