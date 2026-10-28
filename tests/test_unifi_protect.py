@@ -19,6 +19,7 @@ class ProtectChecks(unittest.TestCase):
         self.addCleanup(self.c.close)
         self.conn = self.c.conn()
         M.CLIENTS.clear()
+        C.SECTORS_SEEN.clear()
         P.CACHE_SECONDS = 0
         P.LOGIN_BACKOFF = 60
 
@@ -91,7 +92,7 @@ class ProtectChecks(unittest.TestCase):
         self.assertEqual(self.run_check("drive", slot=1)["state"], "healthy")        # the other drive is its own item
 
     def test_each_kind_of_drive_trouble_is_degraded_and_named(self):
-        for field, value, word in (("bad_sector", 3, "3 bad sectors"), ("healthy", "warning", "drive health: warning"),
+        for field, value, word in (("healthy", "warning", "drive health: warning"),
                                    ("state", "degraded", "drive state: degraded"), ("reason", ["fake-smart-fault"], "fake-smart-fault")):
             with self.subTest(field):
                 self.c.nvr["systemInfo"]["ustorage"]["disks"][0][field] = value
@@ -99,6 +100,17 @@ class ProtectChecks(unittest.TestCase):
                 self.assertEqual(r["state"], "degraded", r)
                 self.assertIn(word, r["detail"])
                 self.drive(1).update(bad_sector=0, healthy="good", state="normal", reason=[])
+
+    def test_bad_sectors_warn_only_when_the_count_grows(self):
+        self.drive(1)["bad_sector"] = 4
+        self.assertEqual(self.run_check("drive", slot=1)["state"], "healthy")          # first look: already there, not news
+        self.assertEqual(self.run_check("drive", slot=1)["state"], "healthy")          # and not news the next time either
+        self.drive(1)["bad_sector"] = 7
+        r = self.run_check("drive", slot=1)
+        self.assertEqual((r["state"], r["detail"]), ("degraded", "45 °C · bad sectors up from 4 to 7"))
+        self.assertEqual(self.run_check("drive", slot=2)["state"], "healthy")          # the other drive is its own item
+        self.drive(1)["bad_sector"] = 0                                                 # a swapped-in drive starts again
+        self.assertEqual(self.run_check("drive", slot=1)["state"], "healthy")
 
     def test_a_drive_model_ubiquiti_does_not_list_is_not_a_problem(self):
         self.c.nvr["hardDriveState"] = "hddNotCompatible"

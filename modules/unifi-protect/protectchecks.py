@@ -160,6 +160,9 @@ def number(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+SECTORS_SEEN = {}         # (model, serial, slot) -> the bad-sector count first seen while this module has been running
+
+
 def check_drive(params, boot, now=None):
     """One recording drive: its temperature and the drive's own verdict. 'hddNotCompatible' (a model Ubiquiti does not list) is not read at all:
     Protect's own screen shows such a drive green."""
@@ -178,8 +181,13 @@ def check_drive(params, boot, now=None):
         if temp >= limit:
             problem.append(f"hot, limit {limit:g} °C")
     sectors = number(d.get("bad_sector"))
-    if sectors:
-        problem.append(f"{sectors:g} bad sector{'s' if sectors != 1 else ''}")
+    if sectors is not None:       # only growth is news: a drive that has always had a few is not warned about every time
+        key = (d.get("model"), d.get("serial"), d.get("slot"))
+        first = SECTORS_SEEN.get(key)
+        if first is None or sectors < first:        # first look, or a counter that went down (a drive swapped in)
+            first = SECTORS_SEEN[key] = sectors
+        if sectors > first:
+            problem.append(f"bad sectors up from {first:g} to {sectors:g}")
     if d.get("healthy") not in (None, "good", True):
         problem.append(f"drive health: {d.get('healthy')}")
     if d.get("state") not in (None, "normal"):
