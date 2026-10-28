@@ -103,6 +103,22 @@ class Client:
             self.cache["bootstrap"] = (time.time(), doc)
             return doc
 
+    def nvr(self):
+        """The recorder on its own ({...}). It carries systemInfo.ustorage, the drives' temperature and health. A GET, like everything here."""
+        with self.lock:
+            hit = self.cache.get("nvr")
+            if hit and time.time() - hit[0] < CACHE_SECONDS:
+                return hit[1]
+            raw, _ = self._get("/nvr")
+            try:
+                doc = json.loads(raw)
+                if not isinstance(doc, dict):
+                    raise ValueError
+            except ValueError:
+                raise ProtectError("UniFi Protect sent an answer this module cannot read")
+            self.cache["nvr"] = (time.time(), doc)
+            return doc
+
     def snapshot(self, camera_id):
         """(content type, JPEG bytes) of one camera's current still."""
         if not CAMERA_ID.match(str(camera_id or "")):

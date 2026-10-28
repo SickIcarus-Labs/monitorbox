@@ -4,6 +4,7 @@
            {"check": "cameras", "params": {"names": [...]}}          every camera (or just those named)
            {"check": "nvr",     "params": {}}                        the recorder itself
            {"check": "storage", "params": {}}                        recording space and disk health
+           {"check": "drive",   "params": {"slot": 1, "max_c": 55}}  one recording drive: temperature and health
            connection: {host or base_url, username, password, verify_tls (default false)}
   cameras  {"connection": {...}} -> the source-neutral camera list (id, name, model, state, detail, recording, lastSeen, motion, source, snapshot)
   snapshot {"connection": {...}, "id": "<camera id>"} -> {"mime": "image/jpeg", "data": "<base64>"}
@@ -21,7 +22,7 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "manifest.jso
     VERSION = json.load(f)["version"]
 OUT = threading.Lock()
 CLIENTS, CLIENTS_LOCK = {}, threading.Lock()
-CHECKS = {"camera": C.check_camera, "cameras": C.check_cameras, "nvr": C.check_nvr, "storage": C.check_storage}
+CHECKS = {"camera": C.check_camera, "cameras": C.check_cameras, "nvr": C.check_nvr, "storage": C.check_storage, "drive": C.check_drive}
 
 
 def client(conn):
@@ -38,7 +39,8 @@ def run_check(kind, params, conn):
     if not fn:
         return {"state": "unknown", "detail": f"unknown UniFi Protect check '{kind}' (known: {', '.join(CHECKS)})"}
     try:
-        return fn(params, client(conn).bootstrap())
+        c = client(conn)
+        return fn(params, {"nvr": c.nvr()} if kind == "drive" else c.bootstrap())
     except P.ProtectError as e:
         return {"state": "unknown", "detail": str(e)}          # the console could not be asked: Unknown, never Failed
 
@@ -57,7 +59,12 @@ def handle(req):
         ctype, raw = client(a.get("connection") or {}).snapshot(a.get("id"))
         return {"mime": ctype, "data": base64.b64encode(raw).decode()}
     if m == "discover":
-        return C.discover(client(a.get("connection") or {}).bootstrap())
+        c = client(a.get("connection") or {})
+        try:
+            nvr = c.nvr()
+        except P.ProtectError:
+            nvr = None                      # drives are only offered when the console shows them; cameras are found regardless
+        return C.discover(c.bootstrap(), nvr=nvr)
     raise ValueError(f"unknown method {m}")
 
 

@@ -23,7 +23,9 @@ class Console:
         self.nvr = {"name": "Fake NVR", "version": "5.3.1", "uptime": 5 * 86400000,
                     "storageStats": {"utilization": 91.5, "capacity": 8_000_000_000_000,
                                      "recordingSpace": {"total": 8_000_000_000_000, "used": 7_320_000_000_000, "available": 680_000_000_000}},
-                    "systemInfo": {"storage": {"devices": [{"model": "FAKE-DISK-A", "healthy": True}, {"model": "FAKE-DISK-B", "healthy": True}]}}}
+                    "systemInfo": {"ustorage": {"disks": [{"slot": 1, "model": "FAKE-IRONWOLF-1", "temperature": 45, "healthy": "good", "state": "normal", "bad_sector": 0, "reason": []},
+                                                          {"slot": 2, "model": "FAKE-IRONWOLF-2", "temperature": 41, "healthy": "good", "state": "normal", "bad_sector": 0, "reason": []}]},
+                                   "storage": {"devices": [{"model": "FAKE-DISK-A", "healthy": True}, {"model": "FAKE-DISK-B", "healthy": True}]}}}
         self.requests, self.logins, self.expire_next, self.sessions = [], 0, False, set()
         self.snapshot_type, self.snapshot_body, self.protect_missing = "image/jpeg", JPEG, False
         me = self
@@ -64,6 +66,8 @@ class Console:
                     return self.send(404)
                 if self.path == "/proxy/protect/api/bootstrap":
                     return self.send(200, json.dumps({"nvr": me.nvr, "cameras": me.cameras}).encode())
+                if self.path == "/proxy/protect/api/nvr":
+                    return self.send(200, json.dumps(me.nvr).encode())
                 if self.path.startswith("/proxy/protect/api/cameras/") and "/snapshot" in self.path:
                     return self.send(200, me.snapshot_body, me.snapshot_type)
                 self.send(404)

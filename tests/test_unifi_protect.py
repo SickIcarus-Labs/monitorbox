@@ -76,6 +76,46 @@ class ProtectChecks(unittest.TestCase):
         self.c.nvr = {}
         self.assertEqual(self.run_check("storage")["state"], "unknown")
 
+    def drive(self, slot):
+        return next(d for d in self.c.nvr["systemInfo"]["ustorage"]["disks"] if d["slot"] == slot)
+
+    def test_a_cool_drive_is_healthy_and_shows_its_temperature(self):
+        r = self.run_check("drive", slot=1)
+        self.assertEqual((r["state"], r["detail"]), ("healthy", "45 °C"))
+
+    def test_a_hot_drive_is_degraded_with_the_number_and_the_limit_is_editable(self):
+        self.drive(2)["temperature"] = 62
+        r = self.run_check("drive", slot=2)
+        self.assertEqual((r["state"], r["detail"]), ("degraded", "62 °C · hot, limit 55 °C"))
+        self.assertEqual(self.run_check("drive", slot=2, max_c=65)["state"], "healthy")
+        self.assertEqual(self.run_check("drive", slot=1)["state"], "healthy")        # the other drive is its own item
+
+    def test_each_kind_of_drive_trouble_is_degraded_and_named(self):
+        for field, value, word in (("bad_sector", 3, "3 bad sectors"), ("healthy", "warning", "drive health: warning"),
+                                   ("state", "degraded", "drive state: degraded"), ("reason", ["fake-smart-fault"], "fake-smart-fault")):
+            with self.subTest(field):
+                self.c.nvr["systemInfo"]["ustorage"]["disks"][0][field] = value
+                r = self.run_check("drive", slot=1)
+                self.assertEqual(r["state"], "degraded", r)
+                self.assertIn(word, r["detail"])
+                self.drive(1).update(bad_sector=0, healthy="good", state="normal", reason=[])
+
+    def test_a_drive_model_ubiquiti_does_not_list_is_not_a_problem(self):
+        self.c.nvr["hardDriveState"] = "hddNotCompatible"
+        self.assertEqual(self.run_check("drive", slot=1)["state"], "healthy")
+
+    def test_a_missing_drive_or_a_console_that_does_not_answer_is_unknown_never_failed(self):
+        self.assertEqual(self.run_check("drive", slot=9)["state"], "unknown")
+        self.assertEqual(self.run_check("drive")["state"], "unknown")
+        self.c.protect_missing = True
+        M.CLIENTS.clear()
+        self.assertEqual(self.run_check("drive", slot=1)["state"], "unknown")
+
+    def test_a_console_that_reports_no_drives_offers_none(self):
+        self.c.nvr["systemInfo"].pop("ustorage")
+        d = M.handle({"method": "discover", "params": {"connection": self.conn}})
+        self.assertFalse([s for s in d["suggest"] if s["check"] == "drive"])
+
     def test_the_neutral_camera_list_and_discovery(self):
         got = M.handle({"method": "cameras", "params": {"connection": self.conn}})["cameras"]
         self.assertEqual([c["name"] for c in got], ["Backyard", "Driveway", "Front Door"])
@@ -86,10 +126,12 @@ class ProtectChecks(unittest.TestCase):
         self.assertFalse({c["name"]: c for c in M.handle({"method": "cameras", "params": {"connection": self.conn}})["cameras"]}["Driveway"]["snapshot"])
         d = M.handle({"method": "discover", "params": {"connection": self.conn}})
         self.assertEqual([s["label"] for s in d["suggest"]],
-                         ["Protect recorder", "Protect storage", "Camera Backyard", "Camera Driveway", "Camera Front Door"])
+                         ["Protect recorder", "Protect storage", "Camera Backyard", "Camera Driveway", "Camera Front Door",
+                          "Protect drive FAKE-IRONWOLF-1 (slot 1)", "Protect drive FAKE-IRONWOLF-2 (slot 2)"])     # drives added in #317
         # every camera is its own item (one that is off shows as Down by name); the recorder and its storage share one, with the recorder first ("is it there")
         self.assertTrue(all(s["group"] == "Cameras" and s["rule"] == "primary" for s in d["suggest"]))
-        self.assertEqual([s["node"] for s in d["suggest"]], ["UniFi Protect", "UniFi Protect", "Camera Backyard", "Camera Driveway", "Camera Front Door"])
+        self.assertEqual([s["node"] for s in d["suggest"]], ["UniFi Protect", "UniFi Protect", "Camera Backyard", "Camera Driveway", "Camera Front Door",
+                          "Protect drive FAKE-IRONWOLF-1 (slot 1)", "Protect drive FAKE-IRONWOLF-2 (slot 2)"])        # each drive is its own item (#317)
 
     def test_a_snapshot_comes_back_as_a_picture_and_only_a_picture(self):
         r = M.handle({"method": "snapshot", "params": {"connection": self.conn, "id": "cam0001abc"}})
@@ -108,7 +150,7 @@ class ProtectChecks(unittest.TestCase):
         posts = [r for r in self.c.requests if r[0] == "POST"]
         self.assertEqual(posts, [("POST", "/api/auth/login")])
         gets = {r[1].split("?")[0] for r in self.c.requests if r[0] == "GET"}
-        self.assertEqual(gets, {"/proxy/protect/api/bootstrap", "/proxy/protect/api/cameras/cam0002abc/snapshot"})
+        self.assertEqual(gets, {"/proxy/protect/api/bootstrap", "/proxy/protect/api/nvr", "/proxy/protect/api/cameras/cam0002abc/snapshot"})
         self.assertEqual({r[0] for r in self.c.requests}, {"GET", "POST"})                          # never PUT, PATCH or DELETE
 
     def test_unreachable_wrong_password_and_no_protect_are_unknown_never_failed(self):
