@@ -413,3 +413,53 @@ class UnifiChecks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnifiTemperature(unittest.TestCase):
+    """#317: a hot device reads Degraded (with the number); a device with no sensor is never offered; a silent controller is Unknown."""
+
+    def dev(self, **kw):
+        d = {"name": "Aggregation", "mac": "aa:bb:cc:00:00:01", "state": 1, "adopted": True}
+        d.update(kw)
+        return d
+
+    def test_cool_switch_is_healthy_and_shows_degrees_and_fan(self):
+        r = C.check_temperature({"name": "Aggregation"}, [self.dev(general_temperature=54, fan_level=31)])
+        self.assertEqual((r["state"], r["detail"]), ("healthy", "54 °C · fan 31%"))
+
+    def test_hottest_sensor_decides_and_over_the_limit_is_degraded(self):
+        d = self.dev(temperatures=[{"name": "CPU", "value": 62}, {"name": "Board", "value": 83}])
+        r = C.check_temperature({"name": "Aggregation"}, [d])
+        self.assertEqual(r["state"], "degraded")
+        self.assertEqual(r["detail"], "83 °C (Board) · hot, limit 80 °C")
+
+    def test_the_limit_is_editable(self):
+        d = self.dev(general_temperature=70)
+        self.assertEqual(C.check_temperature({"name": "Aggregation", "max_c": 65}, [d])["state"], "degraded")
+        self.assertEqual(C.check_temperature({"name": "Aggregation", "max_c": 75}, [d])["state"], "healthy")
+
+    def test_the_device_saying_it_is_overheating_is_degraded_even_at_a_low_number(self):
+        r = C.check_temperature({"name": "Aggregation"}, [self.dev(general_temperature=40, overheating=True)])
+        self.assertEqual(r["state"], "degraded")
+        self.assertIn("overheating", r["detail"])
+
+    def test_no_reading_or_disconnected_or_missing_device_is_unknown_never_failed(self):
+        self.assertEqual(C.check_temperature({"name": "Aggregation"}, [self.dev()])["state"], "unknown")
+        self.assertEqual(C.check_temperature({"name": "Aggregation"}, [self.dev(state=0, general_temperature=99)])["state"], "unknown")
+        self.assertEqual(C.check_temperature({"name": "Nope"}, [self.dev(general_temperature=99)])["state"], "unknown")
+        self.assertEqual(C.check_temperature({}, [])["state"], "unknown")
+
+    def test_only_devices_that_report_a_temperature_are_offered(self):
+        devs = [self.dev(general_temperature=50), self.dev(name="Garage", mac="aa:bb:cc:00:00:02")]
+        sug = [s for s in C.discover(devs, [])["suggest"] if s["check"] == "temperature"]
+        self.assertEqual([s["params"] for s in sug], [{"name": "Aggregation"}])
+        self.assertEqual((sug[0]["batch"], sug[0]["label"]), ("Temperatures", "UniFi Aggregation temperature"))
+        self.assertEqual(sug[0]["node"], sug[0]["label"])
+
+    def test_run_check_routes_temperature(self):
+        c = Controller()
+        self.addCleanup(c.close)
+        M.CLIENTS.clear()
+        U.CACHE_SECONDS = 0
+        r = M.run_check("temperature", {"name": "Garage"}, c.conn())
+        self.assertEqual(r["state"], "unknown", r)

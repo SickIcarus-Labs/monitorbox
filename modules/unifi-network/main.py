@@ -4,6 +4,7 @@
            {"check": "devices", "params": {"names": [...]}}        every adopted device (or just those named)
            {"check": "health",  "params": {"subsystem": "wan"}}    wan | lan | wlan | www | vpn
            {"check": "tunnel",  "params": {"name": "PIA Cali"}}    one VPN client or site-to-site tunnel
+           {"check": "temperature", "params": {"name": "Aggregation", "max_c": 80}}   one device's temperature and fan
            connection: {host or base_url, username, password, site (default "default"), verify_tls (default false)}
   wan_ports {"connection": {...}} -> {"ports": [{"ifname","label","up","ip","gateway"}]}  which interfaces are the gateway's WAN
   lan_report {"connection": {...}, "clients": false?} -> every device's links, ports, rates and what it has learned (read-only, fields chosen, MACs shortened)
@@ -40,13 +41,15 @@ def run_check(kind, params, conn):
     c = client(conn)
     if kind == "device":
         return C.check_device(params, c.get("stat/device"))
+    if kind == "temperature":
+        return C.check_temperature(params, c.get("stat/device"))
     if kind == "devices":
         return C.check_devices(params, c.get("stat/device"))
     if kind == "health":
         return C.check_health(params, c.get("stat/health"), c.get("stat/device") if str(params.get("subsystem")).lower() == "www" else None)
     if kind == "tunnel":
         return C.check_tunnel(params, c.get("rest/networkconf"), tunnel_status(c))
-    return {"state": "unknown", "detail": f"unknown UniFi check '{kind}' (known: device, devices, health, tunnel)"}
+    return {"state": "unknown", "detail": f"unknown UniFi check '{kind}' (known: device, devices, temperature, health, tunnel)"}
 
 
 def tunnel_status(c):
