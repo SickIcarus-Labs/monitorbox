@@ -55,3 +55,14 @@ class PortWatchUi(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReadingsAge(unittest.TestCase):
+    """"1046 min of readings" reads as hours and days: the page's own formatter, run with node (skipped where node is not installed)."""
+    @unittest.skipIf(__import__("shutil").which("node") is None, "node not installed")
+    def test_minutes_hours_and_days(self):
+        import re, subprocess
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "monitorbox_app", "ui.py"), encoding="utf-8").read()
+        fn = re.search(r"function pwSpan\(m\)\{.*?\}\n", src, re.S).group(0)
+        out = subprocess.run(["node", "-e", fn + "console.log(JSON.stringify([0,7,59,60,61,1046,1440,1500,4320].map(pwSpan)))"], capture_output=True, text=True, check=True).stdout
+        self.assertEqual(__import__("json").loads(out), ["0 min", "7 min", "59 min", "1 h", "1 h 1 min", "17 h 26 min", "1 day", "1 day 1 h", "3 days"])
