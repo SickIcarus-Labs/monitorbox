@@ -57,4 +57,4 @@ def whats_changed(entries, running, target):
     except (ValueError, KeyError, TypeError):
         return []
     keep = sorted(keep, key=lambda e: vkey(e["version"]), reverse=True)
-    return [{"version": e["version"], "changes": [str(c) for c in e["changes"]][:20]} for e in keep if isinstance(e.get("changes"), list) and e["changes"]][:30]
+    return [{"version": e["version"], "changes": [str(c) for c in e["changes"]][:20]} for e in keep if isinstance(e.get("changes"), list) and e["changes"]][:200]
