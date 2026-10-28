@@ -155,7 +155,7 @@ def build(sources, matched=None):
         devices += extra
         clients += extra_clients
     if not devices:
-        return {"iotIps": sorted({c["ip"] for c in clients if c.get("ip") and is_iot(c)}), "makers": {}, "nodes": [], "counts": {"devices": 0, "wired": 0, "wifi": 0}, "notes": notes + ["No UniFi devices to map yet. The map is built from a UniFi connection."]}
+        return {"iotIps": sorted({c["ip"] for c in clients if c.get("ip") and is_iot(c)}), "makers": {}, "nodes": [], "counts": {"devices": 0, "wired": 0, "wifi": 0}, "notes": notes + ["No switches to map yet. The map is built from a UniFi connection or SNMP switches."]}
     # Two devices can share a name (a switch and an access point both called "Living Room"), so everything is tied together by id:
     # the device's own (shortened) address when the controller gave one, else its name.
     ids = device_ids(devices)

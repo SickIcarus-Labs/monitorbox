@@ -98,6 +98,7 @@ class LanMap(unittest.TestCase):
     def test_with_nothing_to_map_it_says_so_and_a_login_that_cannot_read_clients_is_noted(self):
         self.assertEqual(lanmap.build([])["nodes"], [])
         self.assertIn("UniFi", lanmap.build([])["notes"][0])
+        self.assertIn("SNMP switches", lanmap.build([])["notes"][0])      # wording changed (owner approved): the map can be built from SNMP switches alone
         src = report(); src[0]["report"].pop("clients"); src[0]["report"]["clientsNote"] = "refused"
         out = lanmap.build(src)
         self.assertTrue(any("client list" in n for n in out["notes"]))
