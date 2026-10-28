@@ -913,10 +913,10 @@ class UI(T.SnmpE2E):
             self.assertEqual(pg.locator("#upall").count(), 0, "nothing is waiting, so no button")
             self.publish(hello="0.3.1"); c.post("/api/check")                                    # one module update, nothing else
             pg.goto(f"http://127.0.0.1:{self.port}/#/settings/servers"); pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("#upall")
-            self.assertEqual(pg.inner_text("#upall"), "Update all (1)", "a single update gets the button too")
+            self.assertEqual(pg.inner_text("#upall"), "Update", "a single update gets the button too")      # label changed on purpose (owner): "Update all (N)" is now just "Update"
             self.publish(app="0.13.0", hello="0.3.1"); c.post("/api/check")                      # an App update and a module update
             pg.goto(f"http://127.0.0.1:{self.port}/#/settings/servers"); pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("#upall")
-            self.assertEqual(pg.inner_text("#upall"), "Update all (2)")
+            self.assertEqual(pg.inner_text("#upall"), "Update")
             self.assertTrue(pg.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"))
             self.assertEqual(errs, [])
             b.close()
