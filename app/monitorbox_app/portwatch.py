@@ -95,8 +95,8 @@ def judge(q, flaps=True, speed=None):
     span_before = cut[0] - first
     out["learning"] = now - first < MIN_HISTORY
     for i, kind in enumerate(KINDS, start=1):
-        if kind == "flaps" and not flaps:
-            continue                                              # a client port drops whenever a laptop sleeps: only uplinks and servers are worth it
+        if kind in ("flaps", "drops") and not flaps:
+            continue                                              # a client port drops whenever a laptop sleeps, and a TV in standby backs up its port: only uplinks, links between switches and servers are worth a line
         new = q[-1][i] - cut[i]
         out["perHour"][kind] = round(new * 3600 / RECENT)
         if kind in SPLIT and len(q[-1]) >= 8 and len(cut) >= 8:     # receive and transmit apart: a bad link shows as receive errors, a backed-up port as transmit drops

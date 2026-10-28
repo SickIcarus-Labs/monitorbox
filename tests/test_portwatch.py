@@ -66,6 +66,14 @@ class Judge(unittest.TestCase):
         self.assertTrue(j["learning"])
         self.assertEqual(j["rising"], [])
 
+    def test_a_client_port_never_alerts_on_drops_but_still_does_on_errors(self):
+        # regression: both sites alerted at night on Apple TV client ports (transmit drops). Owner agreed: drops only matter on uplinks, links between switches and servers.
+        drops = self.series(5, [(0, 0, 0)] * 10 + [(0, 40000, 0), (0, 80000, 0), (0, 120000, 0)])
+        self.assertEqual(portwatch.judge(drops, False)["rising"], [])
+        self.assertEqual(portwatch.judge(drops, True)["rising"], ["drops"])
+        errors = self.series(5, [(0, 0, 0)] * 10 + [(40, 0, 0), (80, 0, 0), (120, 0, 0)])
+        self.assertEqual(portwatch.judge(errors, False)["rising"], ["errors"])
+
     def test_drops_and_link_drops_have_their_own_floors(self):
         q = self.series(5, [(0, 0, 0)] * 10 + [(0, 4000, 1), (0, 8000, 2), (0, 12000, 4)])      # the drops minimum was raised from 1,000 to 10,000 per 15 minutes (owner request, after an Apple TV port tripped it)
         self.assertEqual(portwatch.judge(q)["rising"], ["drops", "flaps"])
@@ -165,6 +173,7 @@ class Watch(unittest.TestCase):
         w = portwatch.PortWatch(self.paths)
         w.set_enabled(True)
         tv, up = w.key("sw", "Port 2"), w.key("sw", "Port 9")
+        w.set_flap_ports([tv])                                              # drops only alert on uplinks, links between switches and servers: pretend this one is a server
         w.set_attached({tv: "Apple TV", up: "Core"})
         w.set_peers({up: (w.key("agg", "Port 1"), "Aggregation, Port 1")})
         for m in range(0, 61):
@@ -338,10 +347,10 @@ class Servers(unittest.TestCase):
         sm.tick()
         self.w.set_shown({"..:00:00:00|Port 1"})
         others = self.w.page()["others"]
-        self.assertEqual(others["unifiNames"], ["Core B"])
+        self.assertEqual(others["unifiNames"], ['Core B (as "coreb")'])
         why = others["where"][0]["why"]
-        self.assertIn("name \"Primary link\" matches 0 UniFi devices", why)
-        self.assertIn("its own name \"Chassis-7\" matches 0", why)
+        self.assertIn("name \"Primary link\" (compared as \"primarylink\") matches 0 of 1 UniFi devices", why)
+        self.assertIn("its own name \"Chassis-7\" (compared as \"chassis7\") matches 0", why)
 
     def test_a_name_two_devices_share_does_not_match_so_nothing_is_merged_by_guess(self):
         self.device_sampler(["Core-B", "core-b"]).tick()
@@ -767,6 +776,6 @@ class BySpeed(unittest.TestCase):
 
     def test_a_burst_that_is_news_on_a_100_meg_camera_port_is_not_on_a_10_gig_link(self):
         q = self.series(20000)                                             # 20,000 drops in 15 minutes, from nothing
-        self.assertEqual(portwatch.judge(q, False, 100)["rising"], ["drops"])
-        self.assertEqual(portwatch.judge(q, False, 1000)["rising"], ["drops"])
-        self.assertEqual(portwatch.judge(q, False, 10000)["rising"], [], "20,000 is a fifth of what a 10 Gbit port needs")
+        self.assertEqual(portwatch.judge(q, True, 100)["rising"], ["drops"])
+        self.assertEqual(portwatch.judge(q, True, 1000)["rising"], ["drops"])
+        self.assertEqual(portwatch.judge(q, True, 10000)["rising"], [], "20,000 is a fifth of what a 10 Gbit port needs")
