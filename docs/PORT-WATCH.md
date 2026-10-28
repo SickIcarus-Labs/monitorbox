@@ -36,6 +36,8 @@ That is why packet drops only alert on uplinks, links between switches and serve
 - A link that has never been up is never expected, so the unplugged cards of a four-card server stay quiet.
 - **Not coming back** (button on the Port errors page) forgets the expectation. When the link lights again it starts over and is expected again after another hour up.
 
+**A device that sleeps keeps its history.** A Mac or laptop that sleeps takes its link down and the map stops showing the port. A port the map showed in the last 24 hours keeps what it has learned, so waking it does not start another half hour of learning. Interfaces the map never showed (leftover readings) are forgotten after 30 minutes without a new reading.
+
 ## What it does with a problem
 
 - The Port errors item turns **Degraded** (yellow), never Failed. Alerts use the normal Degraded rules and hold-down times.

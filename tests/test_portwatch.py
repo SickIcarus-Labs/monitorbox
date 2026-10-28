@@ -201,6 +201,25 @@ class Watch(unittest.TestCase):
         w.feed([dev("Agg", **{"Port 1": (0, 0, 0, 0, 0)}), dev("Other", **{"Port 1": (0, 0, 0, 0, 0)})], ["agg", "oth"], now=t)
         self.assertEqual(sorted(w.series), ["agg|Port 1", "oth|Port 1"])
 
+    def test_a_port_whose_device_sleeps_keeps_what_it_learned(self):
+        # regression (#316, Office Port 2, a Mac that wakes for backups): the port leaves the map while its link is down, and its history was cleared 30 minutes later
+        clock = [0.0]
+        w = portwatch.PortWatch(self.paths, clock=lambda: clock[0])
+        w.set_enabled(True)
+        for m in range(0, 61):
+            clock[0] = m * 60
+            w.feed([dev("Office", **{"Port 2": (0, 0, 0, 0, 0), "Port 9": (0, 0, 0, 0, 0)})], ["off"], now=m * 60)
+        w.set_shown({"off|Port 2", "off|Port 9"})
+        asleep = lambda t: (clock.__setitem__(0, t), w.set_shown({"off|Port 9"}), w.feed([dev("Office", **{"Port 9": (0, 0, 0, 0, 0)})], ["off"], now=t))
+        asleep(3600 + 40 * 60)                                             # 40 minutes later: the Mac is asleep, the map no longer shows its port
+        self.assertIn("off|Port 2", w.series, "kept: it was in use a moment ago")
+        self.assertGreaterEqual(len(w.series["off|Port 2"]), 60)
+        w.save(clock[0], force=True)
+        again = portwatch.PortWatch(self.paths, clock=lambda: clock[0])      # a restart in between keeps the rule
+        self.assertIn("off|Port 2", again.used_at)
+        asleep(3600 + 25 * 3600)                                           # a day and more with no sign of it: now it is forgotten
+        self.assertNotIn("off|Port 2", w.series)
+
     def test_a_known_port_keeps_its_numbers_but_never_raises_anything(self):
         self.w.set_enabled(True)
         key = self.w.key("sw1", "Port 5")

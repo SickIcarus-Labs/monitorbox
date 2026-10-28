@@ -131,6 +131,7 @@ class PortWatch:
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.used, self.link_ends = set(), set()
         self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
+        self.used_at = {}         # key -> when the map last showed this port: a port that was in use in the last day keeps its history while its device sleeps (link down), the rest of the clean-up is for interfaces that never were ports
         self.speeds = {}          # key -> link speed in Mbit/s, from the map, so the minimums scale with the port
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
         self.resets = {}          # key -> [times its counter went backwards (so its history started again), which counter, when]: shown on the page, to explain a port that never finishes learning
@@ -256,13 +257,13 @@ class PortWatch:
                     while q and q[0][0] < now - KEEP:
                         q.popleft()
             here = {i for _, i in zip(devices, ids)}                    # the devices that answered this round
-            for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold
+            for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold and not self._was_in_use(k, now)
                       and (k.rsplit("|", 1)[0] in here or not self.series[k] or self.series[k][-1][0] < now - KEEP)]:   # a port gone from a device that answered, or one not seen for a day
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
             if self.shown:                                              # readings of interfaces the map does not show and nothing has fed for a while: forgotten
-                for k in [k for k in self.series if k not in self.shown and k not in seen and k.rsplit("|", 1)[0] not in hold
+                for k in [k for k in self.series if k not in self.shown and k not in seen and k.rsplit("|", 1)[0] not in hold and not self._was_in_use(k, now)
                           and (not self.series[k] or self.series[k][-1][0] < now - STALE_OTHERS)]:
                     del self.series[k]
                     self.labels.pop(k, None)
@@ -270,6 +271,11 @@ class PortWatch:
             if seen:
                 self.fed = True
         self.save(now)
+
+    def _was_in_use(self, k, now):
+        """The map showed this port within the last day: its device may just be asleep (a Mac that wakes for a backup), so what it learned is kept."""
+        t = self.used_at.get(k)
+        return t is not None and t >= now - KEEP
 
     def _link(self, k, up, now):
         """Follows whether a port's link is up. A link that has stayed up for an hour becomes expected; one that never came up never does (a server's unplugged cards stay quiet).
@@ -347,6 +353,11 @@ class PortWatch:
     def set_shown(self, keys, used=(), link_ends=()):
         """keys: the ports the map shows. used: those listed under a device (in use). link_ends: the ends of links between devices that are not in that list."""
         self.shown, self.used, self.link_ends = set(keys), set(used), set(link_ends)
+        now = self.clock()
+        for k in self.shown:
+            self.used_at[k] = now
+        for k in [k for k, t in self.used_at.items() if t < now - KEEP]:
+            del self.used_at[k]
 
     def split(self, keys):
         """(ports in use, link ports) among these keys, for saying what the count is made of."""
@@ -419,7 +430,7 @@ class PortWatch:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump({"saved": now, "ports": thin, "links": {k: dict(v) for k, v in self.links.items()},
-                           "shown": {"all": sorted(self.shown), "used": sorted(self.used), "ends": sorted(self.link_ends), "speeds": self.speeds}}, f, separators=(",", ":"))
+                           "shown": {"all": sorted(self.shown), "used": sorted(self.used), "ends": sorted(self.link_ends), "speeds": self.speeds, "usedAt": self.used_at}}, f, separators=(",", ":"))
             os.replace(tmp, self.history_path)
         except OSError:
             pass                                            # only a slower start next time
@@ -461,6 +472,7 @@ class PortWatch:
                 self.used = {str(k) for k in sh.get("used") or []}
                 self.link_ends = {str(k) for k in sh.get("ends") or []}
                 self.speeds = {str(k): v for k, v in (sh.get("speeds") or {}).items() if isinstance(v, (int, float))}
+                self.used_at = {str(k): v for k, v in (sh.get("usedAt") or {}).items() if isinstance(v, (int, float))}
         except (AttributeError, TypeError, ValueError):
             pass
         self.restored = n
