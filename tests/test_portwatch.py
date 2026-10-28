@@ -619,3 +619,16 @@ class Outage(unittest.TestCase):
         self.assertTrue(self.w.switched_off())
         os.remove(self.paths.config)
         self.assertFalse(self.w.switched_off(), "no config is not 'switched off by hand'")
+
+
+class CountedSplit(unittest.TestCase):
+    def test_the_count_says_what_it_is_made_of(self):
+        d = tempfile.TemporaryDirectory(); w = portwatch.PortWatch(Paths(d.name)); self.addCleanup(d.cleanup)
+        os.makedirs(os.path.dirname(w.paths.config), exist_ok=True)
+        w.set_enabled(True)
+        w.feed([dev("Core", **{f"Port {i}": (0, 0, 0, 0, 0) for i in range(1, 7)})], ["sw1"], now=0)
+        k = lambda n: w.key("sw1", f"Port {n}")
+        w.set_shown({k(1), k(2), k(3), k(4)}, used={k(1), k(2), k(3)}, link_ends={k(4)})
+        page = w.page()
+        self.assertEqual((page["ports"], page["inUse"], page["onLinks"]), (4, 3, 1), "ports 5 and 6 are empty: read, not counted")
+        self.assertEqual(page["watched"], ["Core, Port 1", "Core, Port 2", "Core, Port 3", "Core, Port 4"], "the page can list exactly what it counts")

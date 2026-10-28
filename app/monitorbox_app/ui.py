@@ -141,6 +141,12 @@ const apiPath=p=>SITE&&!LOCAL_API.test(p)?'site/'+SITE+'/'+p:p, U=p=>'/api/'+api
 async function api(path,body){if(body!==undefined)SXC=null;const r=await fetch(U(path),body===undefined?{}:{method:'POST',
  headers:{'Content-Type':'application/json','X-MB':'1'},body:JSON.stringify(body)});
  let j={};try{j=await r.json()}catch(e){} if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}
+/* a read that must not hang: Settings asks for nine things at once and waits for all of them, so one request stuck on a dead connection (after the box restarted, or behind a proxy)
+   held the page for as long as the browser cared to wait. It gives up after APIQ_MS and asks once more, on a fresh connection. Only for plain reads, never for a change. */
+let APIQ_MS=window.APIQ_MS||12000;
+async function apiq(path){const once=async()=>{const ac=new AbortController(),t=setTimeout(()=>ac.abort(),window.APIQ_MS||APIQ_MS);
+  try{const r=await fetch(U(path),{signal:ac.signal});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}finally{clearTimeout(t)}};
+ try{return await once()}catch(e){if(e&&e.status)throw e;return await once()}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const SDOT={green:'#34d399',yellow:'#fbbf24',red:'#f87171',blue:'#60a5fa',unknown:'#7a8699'};
 function siteTabs(){const c=siCfg;if(!c||!c.sites.length)return[];
@@ -556,7 +562,7 @@ async function mapPeers(node,port,win){if(!win&&mapPeer&&mapPeer.node===node&&ma
  mapPeer={node,port,win:win||(mapPeer&&mapPeer.win)||900,data:null};if(mapLast)drawMap(mapLast);await loadPeers()}
 async function loadPeers(){const p=mapPeer;if(!p)return;let d;try{d=await api('lan/peers?node='+encodeURIComponent(p.node)+'&port='+encodeURIComponent(p.port)+'&win='+p.win)}catch(e){d={error:'Could not work it out ('+e.message+')'}}
  if(mapPeer===p){p.data=d;if(mapLast)drawMap(mapLast)}}
-const pwBox=m=>m.nodes.length?`<div class=box><label class=row style="min-height:44px"><input type=checkbox ${m.portwatch&&m.portwatch.on?'checked':''} onchange="pwOn(this.checked)"> <span>Watch for rising port errors</span></label><p class=sub style="margin:.2rem 0 0">On by default when a switch can be read. MonitorBox learns what is normal for each switch port and shows a yellow heads-up (never red) when a port's errors, drops or link drops climb well above that. It needs about half an hour of readings first. Untick "alert" on a port to keep watching it but never be told about it.${m.portwatch&&m.portwatch.on&&m.portwatch.ports?` Watching ${m.portwatch.ports} ports: the ports in use listed above plus both ends of every link between devices.`:''}</p></div>`:'';
+const pwBox=m=>m.nodes.length?`<div class=box><label class=row style="min-height:44px"><input type=checkbox ${m.portwatch&&m.portwatch.on?'checked':''} onchange="pwOn(this.checked)"> <span>Watch for rising port errors</span></label><p class=sub style="margin:.2rem 0 0">On by default when a switch can be read. MonitorBox learns what is normal for each switch port and shows a yellow heads-up (never red) when a port's errors, drops or link drops climb well above that. It needs about half an hour of readings first. Untick "alert" on a port to keep watching it but never be told about it.${m.portwatch&&m.portwatch.on&&m.portwatch.ports?` Watching ${m.portwatch.ports} ports (the full list is on the Port errors page).`:''}</p></div>`:'';
 async function pwOn(on){try{await api('portwatch',{on})}catch(e){alert(e.message)}await mapLoad()}
 async function pwKnown(a,known){try{await api('portwatch',{keys:a.dataset.k.split('\t'),known})}catch(e){alert(e.message)}await mapLoad()}
 function mapTog(d){const k=d.dataset.n;if(d.open)mapOpen.add(k);else mapOpen.delete(k)}
@@ -901,7 +907,8 @@ async function pwAlert(el){try{await api('portwatch',{keys:[el.dataset.k],known:
 const pwKinds={errors:'errors',drops:'drops',flaps:'link drops'};
 function pwRow(r){return `<label class=row style="min-height:44px"><input type=checkbox ${r.alert?'checked':''} data-k="${esc(r.key)}" onchange="pwAlert(this)"> <span>${esc(r.label)}${r.kinds&&r.kinds.length?' · '+r.kinds.map(k=>pwKinds[k]+' rising'+(r.perHour&&r.perHour[k]?' (about '+r.perHour[k].toLocaleString()+' an hour)':'')).join(', '):''} · <span class=sub>Alert on this port</span></span></label>`}
 function pwSection(){pwFetch();const d=pwPage;if(!d)return '<p class=sub>Loading the ports…</p>';
- return `<p class=sub style="margin-top:8px">${d.on?`Watching ${d.ports} port${d.ports==1?'':'s'} in use. `:'Not watching. '}<a href="#/map">Open the network map</a></p>`+
+ return `<p class=sub style="margin-top:8px">${d.on?`Watching ${d.ports} port${d.ports==1?'':'s'}. `:'Not watching. '}<a href="#/map">Open the network map</a></p>`+
+  ((d.watched||[]).length?`<details style="margin-top:4px"><summary class=sub>Which ports</summary><div class=sub style="margin-top:4px">${d.watched.map(esc).join('<br>')}</div></details>`:'')+
   ((d.down||[]).length?`<div class=sub style="margin-top:6px"><b>Links down</b></div>${d.down.map(r=>`<div class=row style="min-height:44px"><span>${esc(r.label)} · link is down (was up)</span><button class="btn sm" data-k="${esc(r.key)}" onclick="pwGone(this)">Not coming back</button></div>`).join('')}`:'')+
   (d.rising.length?`<div class=sub style="margin-top:6px"><b>Rising now</b></div>${d.rising.map(pwRow).join('')}`:(d.on?'<p class=sub>No port is rising.</p>':''))+
   (d.off.length?`<div class=sub style="margin-top:6px"><b>Not alerting</b></div>${d.off.map(pwRow).join('')}`:'')}
@@ -1338,9 +1345,9 @@ async function takeFollowup(i,b){const x=window._fu[i],m=$('#fumsg');
 async function settingsData(fresh){const k=SITE;
  if(!fresh&&SXC&&SXC.k===k&&Date.now()-SXC.at<20000)return SXC.d;
  let bad=null;const need=p=>p.catch(e=>{bad=bad||e;return null});     // signed out: every request says so; the page then goes to sign-in, as before
- const [s,v,mon,conn,ab,bk,al,si,tz]=await Promise.all([api('state').catch(()=>null),need(api('versions')),
-  need(api('config/monitoring')),need(api('config/connections')),api('about').catch(()=>null),api('backups').catch(e=>({error:e.message,backups:[]})),
-  api('alerts').catch(()=>null),api('sites').catch(()=>null),api('timezone').catch(()=>null)]);
+ const [s,v,mon,conn,ab,bk,al,si,tz]=await Promise.all([apiq('state').catch(()=>null),need(apiq('versions')),
+  need(apiq('config/monitoring')),need(apiq('config/connections')),apiq('about').catch(()=>null),apiq('backups').catch(e=>({error:e.message,backups:[]})),
+  apiq('alerts').catch(()=>null),apiq('sites').catch(()=>null),apiq('timezone').catch(()=>null)]);
  if(!s)return {s:null};if(bad)throw bad;
  if(tz)BOXTZ=tz.timezone||'';
  const d={s,v,mon,conn,ab,bk,al,si};if(s)SXC={k,at:Date.now(),d};return d}
