@@ -339,6 +339,19 @@ class Servers(unittest.TestCase):
         self.assertEqual(self.w.peers[self.w.key("snmp:apollo", "eth0")], (self.w.key("sw1", "Port 5"), "Core-B, Port 5"))
         self.assertNotIn(self.w.key("sw1", "Port 6"), self.w.peers, "a port with something else on it has no server card at the other end")
 
+    def test_the_map_counts_its_switch_ports_whether_or_not_the_watch_is_on(self):
+        from types import SimpleNamespace
+        from monitorbox_app import server
+        me = SimpleNamespace(portwatch=self.w, last_sources=[])
+        m = {"counts": {"devices": 2, "wired": 29, "wifi": 100},
+             "nodes": [{"id": "agg", "name": "Agg", "link": None, "ports": [{"port": "1", "keys": [["agg", "Port 1"]]}, {"port": "2+3", "keys": [["agg", "Port 2"], ["agg", "Port 3"]]}]},
+                       {"id": "sw", "name": "Sw", "link": {"to": "Agg", "keys": {"self": ["sw", "SFP 1"], "parent": ["agg", "Port 1"]}}, "ports": [{"port": "5", "keys": [["sw", "Port 5"]]}]}]}
+        for on in (True, False):
+            self.w.set_enabled(on)
+            server.App.annotate_ports(me, m)
+            self.assertEqual(m["counts"]["ports"], 5, "Port 1 on Agg is both a used port and a link end: counted once; a bonded pair is two ports, not one client")
+            self.assertEqual(m["counts"]["wired"], 29)
+
 
 class Busy(unittest.TestCase):
     def test_the_port_history_says_how_busy_a_port_was(self):
