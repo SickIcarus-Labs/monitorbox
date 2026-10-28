@@ -1149,6 +1149,7 @@ class App:
                     flap |= {self.portwatch.key(*k) for k in p.get("keys") or []}
         self.portwatch.set_flap_ports(flap)
         self.portwatch.set_shown(shown)
+        m["portwatch"]["ports"] = len(self.portwatch._counted(list(self.portwatch.series)))
         peers = {}            # the two ends of every link between devices
         for n in m.get("nodes", []):
             link = n.get("link")
