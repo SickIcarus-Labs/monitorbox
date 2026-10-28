@@ -131,6 +131,8 @@ class PortWatch:
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.used, self.link_ends = set(), set()
         self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
+        self.cards = {}           # server id ("snmp:<connection>") -> keys of its network cards that have a link: those count as ports in use, like a switch port with something on it
+        self.members = {}         # key -> the bond or team a network card belongs to ("bond0"): said in the alert
         self.used_at = {}         # key -> when the map last showed this port: a port that was in use in the last day keeps its history while its device sleeps (link down), the rest of the clean-up is for interfaces that never were ports
         self.speeds = {}          # key -> link speed in Mbit/s, from the map, so the minimums scale with the port
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
@@ -192,7 +194,8 @@ class PortWatch:
             g["last"] = max(g["last"], snap[k][1][-1][0] if snap[k][1] else 0)
         now = self.clock()
         where = [{"from": g["from"], "id": g["id"], "count": g["count"], "lastAgoMin": int((now - g["last"]) // 60), "why": self.why.get(g["id"], "")} for g in sorted(groups.values(), key=lambda g: -g["count"])]
-        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40], "where": where, "unifiNames": self.unifi_names},
+        cardkeys = set().union(*self.cards.values()) if self.cards else set()
+        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "cards": len([k for k in counted if k in cardkeys]), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40], "where": where, "unifiNames": self.unifi_names},
                 "rising": rising, "off": off, "down": down}
 
     def known(self):
@@ -329,7 +332,8 @@ class PortWatch:
 
     def named(self, key, label):
         who = self.attached.get(key)
-        return f"{label} ({who})" if who and key not in self.peers else label
+        label = f"{label} ({who})" if who and key not in self.peers else label
+        return f"{label} (in {self.members[key]})" if self.members.get(key) else label
 
     def set_peers(self, peers):
         """The port at the other end of each link between two devices, so a port can say what its far end is doing."""
@@ -370,7 +374,8 @@ class PortWatch:
 
     def _counted(self, keys):
         keys = list(keys)
-        mine = [k for k in keys if k in self.shown]
+        cards = set().union(*self.cards.values()) if self.cards else set()
+        mine = [k for k in keys if k in self.shown or k in cards]
         return mine or keys           # nothing matched the map (or no map yet): count what is read rather than say there is nothing
 
     def only_for(self, dev):
@@ -393,6 +398,21 @@ class PortWatch:
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
+
+    def set_cards(self, sid, up_keys, members=None):
+        """The network cards of one SNMP server that have a link (they count as ports in use), and which bond or team each belongs to."""
+        with self.lock:
+            self.cards[sid] = set(up_keys)
+            pre = f"{sid}|"
+            for k in [k for k in self.members if k.startswith(pre)]:
+                del self.members[k]
+            self.members.update({k: v for k, v in (members or {}).items() if v})
+
+    def last_flaps(self, key):
+        """The last link-drop count kept for a port (0 if none): a restarted box carries on from it instead of counting from zero, which would look like a device restart."""
+        with self.lock:
+            q = self.series.get(key)
+            return int(q[-1][3]) if q else 0
 
     def set_flap_ports(self, keys):
         """The ports whose link drops are worth reporting. A port with a laptop or a TV on it drops every time that sleeps, so it is left out."""
@@ -434,7 +454,7 @@ class PortWatch:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump({"saved": now, "ports": thin, "links": {k: dict(v) for k, v in self.links.items()},
-                           "shown": {"all": sorted(self.shown), "used": sorted(self.used), "ends": sorted(self.link_ends), "speeds": self.speeds, "usedAt": self.used_at}}, f, separators=(",", ":"))
+                           "shown": {"all": sorted(self.shown), "used": sorted(self.used), "ends": sorted(self.link_ends), "speeds": self.speeds, "usedAt": self.used_at, "cards": {k: sorted(v) for k, v in self.cards.items()}}}, f, separators=(",", ":"))
             os.replace(tmp, self.history_path)
         except OSError:
             pass                                            # only a slower start next time
@@ -477,6 +497,7 @@ class PortWatch:
                 self.link_ends = {str(k) for k in sh.get("ends") or []}
                 self.speeds = {str(k): v for k, v in (sh.get("speeds") or {}).items() if isinstance(v, (int, float))}
                 self.used_at = {str(k): v for k, v in (sh.get("usedAt") or {}).items() if isinstance(v, (int, float))}
+                self.cards = {str(k): {str(x) for x in v} for k, v in (sh.get("cards") or {}).items() if isinstance(v, list)}
         except (AttributeError, TypeError, ValueError):
             pass
         self.restored = n
