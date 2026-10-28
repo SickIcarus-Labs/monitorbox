@@ -141,6 +141,12 @@ const apiPath=p=>SITE&&!LOCAL_API.test(p)?'site/'+SITE+'/'+p:p, U=p=>'/api/'+api
 async function api(path,body){if(body!==undefined)SXC=null;const r=await fetch(U(path),body===undefined?{}:{method:'POST',
  headers:{'Content-Type':'application/json','X-MB':'1'},body:JSON.stringify(body)});
  let j={};try{j=await r.json()}catch(e){} if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}
+/* a read that must not hang: Settings asks for nine things at once and waits for all of them, so one request stuck on a dead connection (after the box restarted, or behind a proxy)
+   held the page for as long as the browser cared to wait. It gives up after APIQ_MS and asks once more, on a fresh connection. Only for plain reads, never for a change. */
+let APIQ_MS=window.APIQ_MS||12000;
+async function apiq(path){const once=async()=>{const ac=new AbortController(),t=setTimeout(()=>ac.abort(),window.APIQ_MS||APIQ_MS);
+  try{const r=await fetch(U(path),{signal:ac.signal});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}finally{clearTimeout(t)}};
+ try{return await once()}catch(e){if(e&&e.status)throw e;return await once()}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const SDOT={green:'#34d399',yellow:'#fbbf24',red:'#f87171',blue:'#60a5fa',unknown:'#7a8699'};
 function siteTabs(){const c=siCfg;if(!c||!c.sites.length)return[];
@@ -1338,9 +1344,9 @@ async function takeFollowup(i,b){const x=window._fu[i],m=$('#fumsg');
 async function settingsData(fresh){const k=SITE;
  if(!fresh&&SXC&&SXC.k===k&&Date.now()-SXC.at<20000)return SXC.d;
  let bad=null;const need=p=>p.catch(e=>{bad=bad||e;return null});     // signed out: every request says so; the page then goes to sign-in, as before
- const [s,v,mon,conn,ab,bk,al,si,tz]=await Promise.all([api('state').catch(()=>null),need(api('versions')),
-  need(api('config/monitoring')),need(api('config/connections')),api('about').catch(()=>null),api('backups').catch(e=>({error:e.message,backups:[]})),
-  api('alerts').catch(()=>null),api('sites').catch(()=>null),api('timezone').catch(()=>null)]);
+ const [s,v,mon,conn,ab,bk,al,si,tz]=await Promise.all([apiq('state').catch(()=>null),need(apiq('versions')),
+  need(apiq('config/monitoring')),need(apiq('config/connections')),apiq('about').catch(()=>null),apiq('backups').catch(e=>({error:e.message,backups:[]})),
+  apiq('alerts').catch(()=>null),apiq('sites').catch(()=>null),apiq('timezone').catch(()=>null)]);
  if(!s)return {s:null};if(bad)throw bad;
  if(tz)BOXTZ=tz.timezone||'';
  const d={s,v,mon,conn,ab,bk,al,si};if(s)SXC={k,at:Date.now(),d};return d}
