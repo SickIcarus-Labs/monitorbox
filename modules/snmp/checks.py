@@ -264,18 +264,18 @@ GET_AT_ONCE = 30            # object ids per request on the quick path
 _layouts = {}               # connection settings -> {"at": time, "wide": bool, "ifs": {index: (name, speedMbps or None, label)}}
 
 
-def counters(conn):
+def counters(conn, only=None):
     """Raw octet counters for every real interface. The App turns two readings into rates and keeps the history.
     {"ports": {name: {"in", "out", "bits", "speedMbps"?, "label"?, "rxErr"?, "txErr"?, "rxDrop"?, "txDrop"?}}} (the last four are the interface's
     error and discard counters, when the device has them); `label` is the port's description (on UniFi switches the same name UniFi uses, "Port 10").
     Virtual interfaces are left out. The first reading (and one every ten minutes) walks the tables to learn which interfaces are real; the readings
-    in between ask only for those interfaces' counters, a few dozen objects per request, which is much faster on a server with hundreds of virtual ones."""
+    in between ask only for those interfaces' counters (and, when `only` lists port names, only for those: a switch can have hundreds of port-channel and VLAN interfaces nobody watches), a few dozen objects per request, which is much faster on a server with hundreds of virtual ones."""
     s = session(conn)
     key = json.dumps(conn, sort_keys=True)
     lay = _layouts.get(key)
     if lay and time.time() - lay["at"] < LAYOUT_FOR:
         try:
-            out = _quick(s, lay)
+            out = _quick(s, lay, only)
             if out is not None:
                 return {"ports": out}
         except L.SnmpError:
@@ -321,11 +321,13 @@ def _read(s, idxs, wide, alias=False, counters_only=False):
     return {idx: {name: clean(got.get(f"{oid}.{idx}")) for name, oid in cols} for idx in idxs}
 
 
-def _quick(s, lay):
+def _quick(s, lay, only=None):
     """The counters of the interfaces already known, by index. None when an interface no longer answers (the list changed: read it again)."""
     wide, out = lay["wide"], {}
-    vals = _read(s, list(lay["ifs"]), wide)
-    for idx, (nm, _sp, lab) in lay["ifs"].items():
+    want = set(only) if only else None
+    ifs = {i: t for i, t in lay["ifs"].items() if want is None or t[0] in want or t[2] in want} or lay["ifs"]       # nothing matched: read them all rather than nothing
+    vals = _read(s, list(ifs), wide)
+    for idx, (nm, _sp, lab) in ifs.items():
         v = vals[idx]
         if not isinstance(v["in"], int) or not isinstance(v["out"], int):
             return None

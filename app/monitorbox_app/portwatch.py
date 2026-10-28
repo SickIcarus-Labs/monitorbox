@@ -179,7 +179,7 @@ class PortWatch:
             watched.append({"label": snap[k][0], "minutes": int((q[-1][0] - q[0][0]) // 60) if len(q) > 1 else 0,
                             **({"resets": r[0], "resetKind": WORDS.get(r[1], r[1]), "resetAgoMin": int((self.clock() - r[2]) // 60)} if r else {})})
         others = sorted(snap[k][0] for k in snap if k not in set(counted))
-        return {"on": self.enabled(), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40]},
+        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40]},
                 "rising": rising, "off": off, "down": down}
 
     def known(self):
@@ -333,6 +333,12 @@ class PortWatch:
         mine = [k for k in keys if k in self.shown]
         return mine or keys           # nothing matched the map (or no map yet): count what is read rather than say there is nothing
 
+    def only_for(self, dev):
+        """The names of this device's ports that are worth reading (the ones the map shows), or None while that is not known: then everything is read."""
+        pre = f"{dev}|"
+        mine = {k[len(pre):] for k in self.shown if k.startswith(pre)}
+        return sorted(mine) if mine else None
+
     def set_flap_ports(self, keys):
         """The ports whose link drops are worth reporting. A port with a laptop or a TV on it drops every time that sleeps, so it is left out."""
         self.flap_ports = set(keys)
@@ -372,7 +378,8 @@ class PortWatch:
             tmp = self.history_path + ".tmp"
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:
-                json.dump({"saved": now, "ports": thin, "links": {k: dict(v) for k, v in self.links.items()}}, f, separators=(",", ":"))
+                json.dump({"saved": now, "ports": thin, "links": {k: dict(v) for k, v in self.links.items()},
+                           "shown": {"all": sorted(self.shown), "used": sorted(self.used), "ends": sorted(self.link_ends), "speeds": self.speeds}}, f, separators=(",", ":"))
             os.replace(tmp, self.history_path)
         except OSError:
             pass                                            # only a slower start next time
@@ -405,6 +412,15 @@ class PortWatch:
             for k, v in (data.get("links") or {}).items():
                 if isinstance(v, dict) and isinstance(v.get("up"), bool) and isinstance(v.get("since"), (int, float)):
                     self.links[str(k)] = {"up": v["up"], "since": float(v["since"]), "expected": v.get("expected") is True}
+        except (AttributeError, TypeError, ValueError):
+            pass
+        try:
+            sh = data.get("shown") or {}
+            if not self.shown and isinstance(sh.get("all"), list):      # which ports the map showed last time: the count is right from the first second, before the map is rebuilt
+                self.shown = {str(k) for k in sh["all"]}
+                self.used = {str(k) for k in sh.get("used") or []}
+                self.link_ends = {str(k) for k in sh.get("ends") or []}
+                self.speeds = {str(k): v for k, v in (sh.get("speeds") or {}).items() if isinstance(v, (int, float))}
         except (AttributeError, TypeError, ValueError):
             pass
         self.restored = n

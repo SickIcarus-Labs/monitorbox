@@ -124,6 +124,17 @@ class CountersQuick(unittest.TestCase):
         self.assertEqual(second["ports"]["port1"]["label"], "Port 1")
         self.assertNotIn("veth9", second["ports"])
 
+    def test_only_the_asked_for_ports_are_read_after_the_first_reading(self):
+        a = self.agent(); c = conn(a, "quick9")
+        full = C.counters(c)["ports"]
+        self.assertEqual(set(full), {"port1", "port2"})
+        before = len(a.requests)
+        got = C.counters(c, only=["Port 1"])["ports"]                    # by the label, as the App knows the port
+        self.assertEqual(set(got), {"port1"})
+        asked = [o for t, oids in a.requests[before:] if t == L.GET for o in oids]
+        self.assertTrue(asked and all(o.rsplit(".", 1)[1] == "1" for o in asked), "port2 was not asked for")
+        self.assertEqual(set(C.counters(c, only=["no such port"])["ports"]), {"port1", "port2"}, "nothing matched: read them all")
+
     def test_a_server_with_hundreds_of_container_interfaces_is_not_walked_column_by_column(self):
         a = self.agent(); c = conn(a, "quick5")
         for i in range(10, 410):

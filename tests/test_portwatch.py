@@ -375,6 +375,21 @@ class Restart(unittest.TestCase):
         self.assertFalse(extra.get("starting"))
         self.assertEqual(detail, "no switch port counters to read yet")
 
+    def test_which_ports_the_map_showed_survives_a_restart_so_the_count_is_right_at_once(self):
+        self.feed(self.w, 40)
+        self.w.feed([dev("Core switch", **{"Port 5": (0, 0, 0, 0, 0), "Port 6": (0, 0, 0, 0, 0)})], ["sw1"], now=self.now)
+        self.assertEqual(len(self.w.series), 2)
+        self.w.set_shown({"sw1|Port 5"}, {"sw1|Port 5"}, set())
+        self.w.set_speeds({"sw1|Port 5": 10000})
+        self.w.save(self.now, force=True)
+        again = self.second()
+        self.assertTrue(again.page()["ready"])
+        self.assertEqual((again.page()["ports"], again.page()["inUse"]), (1, 1), "only the shown port, not the other one that is read")
+        self.assertEqual(again.speeds, {"sw1|Port 5": 10000})
+        self.assertEqual(again.only_for("sw1"), ["Port 5"])
+        self.assertIsNone(again.only_for("nothing"))
+        self.assertFalse(self.second().__class__(Paths(tempfile.mkdtemp()), clock=lambda: self.now).page()["ready"], "no map known yet says so")
+
     def test_the_learned_history_survives_a_restart(self):
         self.feed(self.w, 40)
         self.w.save(self.now, force=True)

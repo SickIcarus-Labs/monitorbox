@@ -56,7 +56,8 @@ class LanSampler:
                 continue
             snmp_conf.add(dev)
             try:
-                r = self.call("snmp", "counters", {"connection": c}, 20)
+                only = self.watch.only_for(dev) if self.watch is not None else None
+                r = self.call("snmp", "counters", {"connection": c, **({"only": only} if only else {})}, 20)
             except Exception:
                 continue
             ports = {(v.get("label") or name): v for name, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict)}
