@@ -75,7 +75,7 @@ class LanSampler:
                 self.rounds += 1
                 servers, held = self._read_servers(conns, by_ip)
                 self._feed_watch(devices, ids, snmp_bad, snmp_conf, now, servers, held)
-            else:
+            elif self.watch.switched_off():
                 self.watch.forget()
         if wifi:
             self.series.feed_rates(WIFI, {k: {"in_bps": v["rx"], "out_bps": v["tx"]} for k, v in wifi.items()}, now)

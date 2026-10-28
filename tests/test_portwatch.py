@@ -580,3 +580,42 @@ class Links(unittest.TestCase):
         self.w.save(self.t, force=True)
         again = portwatch.PortWatch(self.paths, clock=lambda: self.t)
         self.assertTrue(again.links[again.key("sw1", "Port 1")]["expected"])
+
+
+class Outage(unittest.TestCase):
+    """A switch controller that answers with only some of its devices (a restart, a failed read) must not wipe what was learned about the others."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name)
+        os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.w = portwatch.PortWatch(self.paths)
+        self.w.set_enabled(True)
+
+    def test_a_partial_answer_keeps_the_history_of_devices_that_did_not_answer(self):
+        two = [dev("Core switch", **{"Port 1": (0, 0, 0, 0, 0)}), dev("Garage switch", **{"Port 1": (0, 0, 0, 0, 0)})]
+        for m in range(40):
+            self.w.feed(two, ["sw1", "sw2"], now=m * 60)
+        self.w.feed(two[:1], ["sw1"], now=41 * 60)                      # only one device answered this time
+        self.assertGreaterEqual(len(self.w.series[self.w.key("sw2", "Port 1")]), 2, "the device that did not answer keeps its history")
+        self.w.feed(two, ["sw1", "sw2"], now=42 * 60)
+        j = portwatch.judge(list(self.w.series[self.w.key("sw2", "Port 1")]))
+        self.assertFalse(j["learning"], "and it is still not learning from scratch")
+
+    def test_a_port_that_is_gone_from_a_device_that_answered_is_forgotten(self):
+        for m in range(5):
+            self.w.feed([dev("Core switch", **{"Port 1": (0, 0, 0, 0, 0), "Port 2": (0, 0, 0, 0, 0)})], ["sw1"], now=m * 60)
+        self.w.feed([dev("Core switch", **{"Port 1": (0, 0, 0, 0, 0)})], ["sw1"], now=6 * 60)
+        self.assertNotIn(self.w.key("sw1", "Port 2"), self.w.series)
+
+    def test_a_device_not_seen_for_a_day_is_forgotten(self):
+        self.w.feed([dev("Old switch", **{"Port 1": (0, 0, 0, 0, 0)})], ["old"], now=0)
+        self.w.feed([dev("Core switch", **{"Port 1": (0, 0, 0, 0, 0)})], ["sw1"], now=portwatch.KEEP + 100)
+        self.assertNotIn(self.w.key("old", "Port 1"), self.w.series)
+
+    def test_an_unreadable_config_for_a_moment_does_not_count_as_switched_off(self):
+        self.assertFalse(self.w.switched_off())
+        self.w.set_enabled(False)
+        self.assertTrue(self.w.switched_off())
+        os.remove(self.paths.config)
+        self.assertFalse(self.w.switched_off(), "no config is not 'switched off by hand'")

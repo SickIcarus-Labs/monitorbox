@@ -132,6 +132,10 @@ class PortWatch:
             return bool(self.available and self.available())
         return on is True
 
+    def switched_off(self):
+        """True only when it was switched off by hand. A config file that cannot be read for a moment is not that, and must never wipe the history."""
+        return self._cfg().get("on") is False
+
     def chosen(self):
         """True once someone switched it on or off by hand."""
         return "on" in self._cfg()
@@ -213,7 +217,9 @@ class PortWatch:
                         q[-1] = row                               # same slot, newer figures
                     while q and q[0][0] < now - KEEP:
                         q.popleft()
-            for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold]:   # a port or device that is gone
+            here = {i for _, i in zip(devices, ids)}                    # the devices that answered this round
+            for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold
+                      and (k.rsplit("|", 1)[0] in here or not self.series[k] or self.series[k][-1][0] < now - KEEP)]:   # a port gone from a device that answered, or one not seen for a day
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
