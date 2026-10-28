@@ -899,7 +899,8 @@ function camSection(){
   <figcaption><b>${esc(c.name)}</b> ${chip(c.state,CAMWORD[c.state]||c.state)}<div class=sub>${esc(c.detail)}</div>${st&&st.status==='failed'?`<div class=sub>Live video unavailable: ${esc(st.msg)}</div>`:''}${c.liveVia&&c.snapshot&&(camMode==='pics'||(st&&st.status==='failed'))?`<button class="btn sm gl" onclick="camGoLive(decodeURIComponent('${encodeURIComponent(k)}'),event)">${on||camLive.has(k)&&!(st&&st.status==='failed')?'Stop live':st&&st.status==='failed'?'Try live again':'Go live'}</button>`:''}</figcaption></figure>`}).join('')}</div>`}
 /* everything under a node's name: history, causes, checks, buttons. The side panel and the services list share it. */
 /* the Port errors item page (#295): switch it on or off, see which ports are rising, and choose per port whether it alerts */
-let pwPage=null,pwAt=0;
+let pwPage=null,pwAt=0,pwOpen=new Set();
+function pwTog(d){if(d.open)pwOpen.add(d.dataset.o);else pwOpen.delete(d.dataset.o)}
 function pwFetch(now){if(!now&&Date.now()-pwAt<5000)return;pwAt=Date.now();api('portwatch').then(d=>{pwPage=d}).catch(()=>{})}
 async function pwSwitch(on){try{await api('portwatch',{on})}catch(e){alert(e.message)}pwFetch(true)}
 async function pwGone(el){try{await api('portwatch',{keys:[el.dataset.k],gone:true})}catch(e){alert(e.message)}pwFetch(true)}
@@ -907,9 +908,9 @@ async function pwAlert(el){try{await api('portwatch',{keys:[el.dataset.k],known:
 const pwKinds={errors:'errors',drops:'drops',flaps:'link drops'};
 function pwRow(r){return `<label class=row style="min-height:44px"><input type=checkbox ${r.alert?'checked':''} data-k="${esc(r.key)}" onchange="pwAlert(this)"> <span>${esc(r.label)}${r.kinds&&r.kinds.length?' · '+r.kinds.map(k=>pwKinds[k]+' rising'+(r.perHour&&r.perHour[k]?' (about '+r.perHour[k].toLocaleString()+' an hour)':'')).join(', '):''} · <span class=sub>Alert on this port</span></span></label>`}
 function pwSection(){pwFetch();const d=pwPage;if(!d)return '<p class=sub>Loading the ports…</p>';
- return `<p class=sub style="margin-top:8px">${d.on?`Watching ${d.ports} port${d.ports==1?'':'s'}. `:'Not watching. '}<a href="#/map">Open the network map</a></p>`+
-  ((d.watched||[]).length?`<details style="margin-top:4px"><summary class=sub>Which ports</summary><div class=sub style="margin-top:4px">${d.watched.map(w=>esc(w.label)+' · '+w.minutes+' min of readings'+(w.resets?` · its counter went backwards ${w.resets} time${w.resets==1?'':'s'} (${esc(w.resetKind)}, last ${w.resetAgoMin} min ago)`:'')).join('<br>')}</div></details>`:'')+
-  ((d.others&&d.others.count)?`<details style="margin-top:4px"><summary class=sub>${d.others.count} other interfaces are read but not counted</summary><div class=sub style="margin-top:4px">${d.others.names.map(esc).join('<br>')}${d.others.count>d.others.names.length?'<br>…':''}</div></details>`:'')+
+ return `<p class=sub style="margin-top:8px">${d.on?(d.ready?`Watching ${d.ports} port${d.ports==1?'':'s'}. `:'Working out which ports the map shows. '):'Not watching. '}<a href="#/map">Open the network map</a></p>`+
+  ((d.watched||[]).length?`<details data-o="ports" ontoggle="pwTog(this)"${pwOpen.has('ports')?' open':''} style="margin-top:4px"><summary class=sub>Which ports</summary><div class=sub style="margin-top:4px">${d.watched.map(w=>esc(w.label)+' · '+w.minutes+' min of readings'+(w.resets?` · its counter went backwards ${w.resets} time${w.resets==1?'':'s'} (${esc(w.resetKind)}, last ${w.resetAgoMin} min ago)`:'')).join('<br>')}</div></details>`:'')+
+  ((d.others&&d.others.count)?`<details data-o="others" ontoggle="pwTog(this)"${pwOpen.has('others')?' open':''} style="margin-top:4px"><summary class=sub>${d.others.count} other interfaces are read but not counted</summary><div class=sub style="margin-top:4px">${d.others.names.map(esc).join('<br>')}${d.others.count>d.others.names.length?'<br>…':''}</div></details>`:'')+
   ((d.down||[]).length?`<div class=sub style="margin-top:6px"><b>Links down</b></div>${d.down.map(r=>`<div class=row style="min-height:44px"><span>${esc(r.label)} · link is down (was up)</span><button class="btn sm" data-k="${esc(r.key)}" onclick="pwGone(this)">Not coming back</button></div>`).join('')}`:'')+
   (d.rising.length?`<div class=sub style="margin-top:6px"><b>Rising now</b></div>${d.rising.map(pwRow).join('')}`:(d.on?'<p class=sub>No port is rising.</p>':''))+
   (d.off.length?`<div class=sub style="margin-top:6px"><b>Not alerting</b></div>${d.off.map(pwRow).join('')}`:'')}

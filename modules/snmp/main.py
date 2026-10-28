@@ -40,7 +40,7 @@ def handle(req):
     if m == "lan_report":
         return lan_report(a.get("connection") or {}, wait=float(a.get("wait", 1.0)))
     if m == "counters":
-        return counters(a.get("connection") or {})
+        return counters(a.get("connection") or {}, a.get("only") if isinstance(a.get("only"), list) else None)
     if m == "probe":
         return probe(a.get("connection") or {})
     if m == "discover":
