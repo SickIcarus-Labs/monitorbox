@@ -7,6 +7,7 @@ from http.cookies import SimpleCookie
 from .modules import current as modules_current
 from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
+from . import sitesupdate
 from . import thisbox, followups, graphs, alerts, peer, perfstats, lanmap, portpeers, portwatch, autonotes, lansampler, busiest, security, passkeys
 from .monitor import Monitor
 from .auth import Auth
@@ -97,6 +98,7 @@ class App:
         self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), lambda: self.monitor.snapshot(fresh=True),
                                    hostname=lambda: self.peer.name())     # alerts say the site's own name (Settings, Sites), the computer name only when none is set
         self.peer = peer.Peer(self.paths.p("config", "sites.json"), self.port, self.internal_session, version)
+        self.sites_update = sitesupdate.SitesUpdate(self.peer, self.apply_all)
         self.peer.relay_lookup = self.live_relay
         self.peer.on_change = self.sync_site_nodes
         self.relays = liverelay.Registry()            # live views of managed sites whose media passes through this box
@@ -1893,6 +1895,8 @@ class App:
 
     def sites_post(self, path, body):
         p = self.peer
+        if path == "/api/sites/update-all":
+            return self.sites_update.start()          # only ever from a person pressing the button
         if path == "/api/sites/name":
             p.set_name(body.get("name")); return p.get()
         if path == "/api/sites/listen":
@@ -2199,6 +2203,8 @@ class App:
                     return self.site_pass("GET", 0)
                 if self.path == "/api/sites":
                     return self.send(200, app.peer.get())
+                if self.path == "/api/sites/update-all":
+                    return self.send(200, app.sites_update.status())
                 if self.path == "/api/state":
                     return self.send(200, {"version": version(), "channel": app.cfg()["channel"],
                                            "modules": app.modules.describe()})

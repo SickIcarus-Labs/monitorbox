@@ -1412,6 +1412,8 @@ async function renderSettings(){
  const img=v.image&&v.image.outdated?`<div class=box><b>The container image needs updating.</b> This box is running image ${esc(v.image.have)}; this release was built for ${esc(v.image.wants)}. Everything keeps working, but some updates may not install until the image is re-pulled. Pull the new image and restart the container; your settings and data are kept.</div>`:'';
  const last=v.last&&v.last.result!='ok'?`<div class=box>Last install: ${esc(v.last.version)} — ${esc(v.last.result)}</div>`:'';
  const nPending=((v.app&&v.app.needsApply&&v.app.target&&!v.app.failed.includes(v.app.target))?1:0)+Object.values(v.modules||{}).filter(c=>c.needsApply&&c.target&&!c.failed.includes(c.target)).length;
+ const linked=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'),waiting=Object.values(hdrSites).some(d=>d&&d.pend)||nPending>0;
+ const sitesBox=(SITE===''&&linked.length)?`<div class=box><div class=row><button class="btn pri" id=upsites onclick="updateSites(this)" ${waiting?'':'disabled'}>Update all sites</button></div><div id=upsitesout class=sub></div></div>`:'';
  const sec=(location.hash.split('/')[2]||''),nServers=new Set((conn.connections||[]).map(hostOf).filter(Boolean)).size,nNodes=((mon.monitoring||{}).nodes||[]).length,
   upd=!!(v.app&&v.app.needsApply)||Object.values(v.modules||{}).some(c=>c.needsApply),lastBk=bk.backups&&bk.backups[0];
  const SECS=[['display','Display','How the main screen looks on this device',`${view==='detail'?'Detailed':'Summarized'} · history ${HWIN.find(x=>x[0]===getHWin())[1]}`],
@@ -1465,7 +1467,7 @@ async function renderSettings(){
    <label class=row style="margin-top:.6rem"><input type=checkbox ${v.settings.autoCheck?'checked':''} onchange="setting({autoCheck:this.checked})"> Check for updates automatically</label>
    <label class=row><input type=checkbox ${v.settings.autoUpdate?'checked':''} onchange="setting({autoUpdate:this.checked})"> Install updates automatically (only for items set to Latest on the ${esc(v.channel)} channel below)</label></div>
   ${v.checkError?`<div class=box>${esc(v.checkError)}</div>`:''}
-  ${repoBox}<h3>Installed software</h3>${last}${nPending>0?`<div class=box><div class=row><button class="btn pri" id=upall onclick="updateAll(this)">Update all (${nPending})</button><small>Installs every update listed below. MonitorBox itself goes last and restarts.</small></div></div>`:''}${row('MonitorBox','app','',v.app)}${swList}
+  ${repoBox}${sitesBox}<h3>Installed software</h3>${last}${nPending>0?`<div class=box><div class=row><button class="btn pri" id=upall onclick="updateAll(this)">Update all (${nPending})</button><small>Installs every update listed below. MonitorBox itself goes last and restarts.</small></div></div>`:''}${row('MonitorBox','app','',v.app)}${swList}
   `,box:`${about}<h3>Time zone</h3><div class=box><p class=sub style="margin-top:0">The time zone of <b>this site</b>. Times on the screens, and anything the box writes itself, follow it. Each site has its own. The first time you open this page it uses your device's time zone. You can change it here at any time.</p>
    <div class=row><select id=tz-sel aria-label="Time zone" style="max-width:100%"></select><button class=btn onclick="saveTz()">Save</button></div><p id=tz-msg class=sub></p></div>
   <h3>Restart and reset</h3><div class=box><p class=sub style="margin-top:0"><b>Restart MonitorBox</b> starts it again. This takes a few seconds and your settings stay.</p>
@@ -1781,6 +1783,13 @@ async function uninstallModule(id,title,n){
  if(b===null)return;try{const x=await api('modules/uninstall',{id,backup:b});await renderSettings();$('#msg').textContent=x.message}catch(e){$('#msg').textContent=e.message}}
 async function pick(kind,id,pin){try{await api('select',{kind,id,pin});renderSettings()}catch(e){$('#msg').textContent=e.message}}
 async function setting(b){try{await api('settings',b)}catch(e){$('#msg').textContent=e.message}}
+function sitesLines(d){const w={asking:'asked…',restarting:'installing, restarting',done:'done',failed:'did not update',waiting:'next',working:'installing here'};
+ return (d.sites||[]).map(r=>`<div><b>${esc(r.name)}</b>: ${esc(w[r.state]||r.state)}${r.message?' · '+esc(r.message):''}</div>`).join('')+(d.local?`<div><b>This box</b>: ${esc(w[d.local.state]||d.local.state)}${d.local.message?' · '+esc(d.local.message):''}</div>`:'')}
+async function updateSites(btn){btn.disabled=true;const out=$('#upsitesout');
+ try{await api('sites/update-all',{})}catch(e){if(out)out.textContent=e.message||'Could not start.';btn.disabled=false;return}
+ for(let i=0;i<150;i++){let d;try{d=await api('sites/update-all')}catch(e){if(out)out.textContent='This box is restarting. The sites carry on without it.';return}
+  const o=$('#upsitesout');if(!o)return;o.innerHTML=sitesLines(d);if(!d.running)break;await new Promise(r=>setTimeout(r,2000))}
+ const b=$('#upsites');if(b)b.disabled=false}
 async function updateAll(btn){btn.disabled=true;btn.textContent='Updating…';await act('apply-all',{});btn.disabled=false}
 async function restartApp(){if(!await askYes('Restart MonitorBox now?'))return;await act('app/restart',{})}
 async function factoryReset(){const t=await askText('Reset MonitorBox','This deletes your settings, password, history and installed modules. Your backups are kept, and the modules are downloaded again. Type RESET to continue.','');if(t===null)return;try{sessionStorage.removeItem('mb-sx')}catch(e){}await act('factory-reset',{confirm:t})}
