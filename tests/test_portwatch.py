@@ -161,6 +161,22 @@ class Watch(unittest.TestCase):
         self.assertEqual(w2.state([a])["other"]["state"], "none")
         self.assertIn("other end (Aggregation, Port 3): no counters", w2.check()[1])
 
+    def test_the_alert_names_what_is_plugged_into_the_port(self):
+        w = portwatch.PortWatch(self.paths)
+        w.set_enabled(True)
+        tv, up = w.key("sw", "Port 2"), w.key("sw", "Port 9")
+        w.set_attached({tv: "Apple TV", up: "Core"})
+        w.set_peers({up: (w.key("agg", "Port 1"), "Aggregation, Port 1")})
+        for m in range(0, 61):
+            n = 0 if m < 45 else (m - 45) * 20000
+            w.feed([dev("Theater", **{"Port 2": (0, 0, 0, n, 0)})], ["sw"], now=m * 60)
+        detail = w.check()[1]
+        self.assertIn("Theater, Port 2 (Apple TV): drops rising", detail)
+        self.assertEqual(w.page()["rising"][0]["label"], "Theater, Port 2 (Apple TV)")
+        self.assertEqual(w.named(up, "Theater, Port 9"), "Theater, Port 9", "a link between devices already says what is at the far end")
+        w.set_attached({})
+        self.assertIn("Theater, Port 2: drops rising", w.check()[1])
+
     def test_a_known_port_keeps_its_numbers_but_never_raises_anything(self):
         self.w.set_enabled(True)
         key = self.w.key("sw1", "Port 5")

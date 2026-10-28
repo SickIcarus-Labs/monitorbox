@@ -1190,6 +1190,8 @@ class App:
                     peers[sw] = (card[0], card[1])
                     peers[card[0]] = (sw, f"{n.get('name')}, {p['keys'][0][1]}")
         self.portwatch.set_peers(peers)
+        self.portwatch.set_attached({self.portwatch.key(*p["keys"][0]): p.get("name") for n in m.get("nodes", []) for p in n.get("ports", [])
+                                     if len(p.get("keys") or []) == 1 and p.get("name") and not p.get("server") and not p.get("infra")})
         for n in m.get("nodes", []):
             link = n.get("link")
             if link and (link.get("keys") or {}).get("self"):
