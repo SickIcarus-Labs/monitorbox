@@ -328,6 +328,23 @@ class Servers(unittest.TestCase):
         self.assertEqual(sorted(self.w.series), ["..:00:00:00|Port 1"], "one reader for the switch: its UniFi port, with the SNMP counters; not a second set of interfaces")
         self.assertEqual(list(self.w.series["..:00:00:00|Port 1"])[-1][1:3], [30, 70], "the SNMP counters are the ones used")
 
+    def test_a_connection_is_the_switch_whose_address_one_of_its_interfaces_has_whatever_it_is_called(self):
+        sm = self.device_sampler(["Core A", "Core B"], conn_name="Unrelated", conn_host="192.0.2.99")      # UniFi addresses: ..:00:00:00 (Core A) and ..:00:00:01 (Core B)
+        inner = sm.call
+        sm.call = lambda mod, method, params, timeout: ({**inner(mod, method, params, timeout), "sysName": "Nothing-alike", "macs": ["..:aa:bb:cc", "..:00:00:01"]} if mod == "snmp" else inner(mod, method, params, timeout))
+        sm.tick()
+        self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), [], "its first read told the box which switch it is")
+        self.t[0] += 10; sm.tick()
+        self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), [], "not kept as a server")
+        self.assertEqual(list(self.w.series["..:00:00:01|Port 1"])[-1][1:3], [30, 70], "Core B has the SNMP counters; Core A keeps UniFi's own")
+
+    def test_interface_addresses_that_fit_two_devices_or_none_do_not_decide(self):
+        sm = self.device_sampler(["Core A", "Core B"], conn_name="Unrelated", conn_host="192.0.2.99")
+        inner = sm.call
+        sm.call = lambda mod, method, params, timeout: ({**inner(mod, method, params, timeout), "macs": ["..:00:00:00", "..:00:00:01"]} if mod == "snmp" else inner(mod, method, params, timeout))
+        sm.tick()
+        self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), ["snmp:swc|Po1", "snmp:swc|Po2", "snmp:swc|Port 1"], "two devices claim it: stays a server")
+
     def test_a_connection_whose_own_name_is_the_switchs_is_read_as_the_switch_from_the_next_round(self):
         from monitorbox_app import lansampler
         sm = self.device_sampler(["Core B"], conn_name="Primary link", conn_host="192.0.2.99")

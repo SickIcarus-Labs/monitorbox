@@ -277,7 +277,7 @@ def counters(conn, only=None):
         try:
             out = _quick(s, lay, only)
             if out is not None:
-                return {"ports": out, "sysName": lay.get("sys", "")}
+                return {"ports": out, "sysName": lay.get("sys", ""), "macs": lay.get("macs", [])}
         except L.SnmpError:
             pass                                                       # fall back to the full walk, which says what is wrong
         _layouts.pop(key, None)
@@ -285,7 +285,7 @@ def counters(conn, only=None):
     if lay["ifs"]:
         lay["at"] = time.time()
         _layouts[key] = lay
-    return {"ports": out, "sysName": lay.get("sys", "")}
+    return {"ports": out, "sysName": lay.get("sys", ""), "macs": lay.get("macs", [])}
 
 
 def _row(a, b, wide, sp, lab, bad, oper=None):
@@ -358,7 +358,11 @@ def _full(s):
         sysname = L.text(s.get([SYS_NAME]).get(SYS_NAME) or b"")[:60]           # the device's own name: the App uses it to tell which UniFi device this connection is
     except L.SnmpError:
         sysname = ""
-    return out, {"wide": wide, "ifs": ifs, "sys": sysname}
+    try:
+        macs = sorted({_mac_text(m) for m in s.column(IF_PHYS).values() if isinstance(m, (bytes, bytearray)) and len(m) == 6 and any(m)})[:1000]     # every interface's address, shortened: the App matches them to a UniFi device's address
+    except L.SnmpError:
+        macs = []
+    return out, {"wide": wide, "ifs": ifs, "sys": sysname, "macs": macs}
 
 
 # ---------------------------------------------------------------- Re-detect ----
