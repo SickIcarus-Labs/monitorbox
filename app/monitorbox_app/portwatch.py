@@ -616,4 +616,4 @@ class PortWatch:
             parts.append(f"{d['label']}{' (' + d['other'] + ')' if d['other'] else ''}: link is down (was up, down for {mins} min)")
         if len(downs) > 3:
             more += f" (and {len(downs) - 3} more links down)"
-        return True, "; ".join(parts) + more, None, {"warn": True}
+        return True, "; ".join(parts) + more, None, {"warn": True, "names": [f["label"] for f in found] + [d["label"] for d in downs]}      # every port, not only the three the text has room for: History names them all

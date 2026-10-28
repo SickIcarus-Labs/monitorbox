@@ -113,6 +113,16 @@ class Watch(unittest.TestCase):
         self.assertIn("Core switch, Port 5", detail)
         self.assertIn("errors rising", detail)
 
+    def test_the_check_names_every_rising_port_even_past_the_three_its_text_has_room_for(self):
+        """#311: History adds ports that join a stretch to its reason, so the check hands it all of them, not just the ones in its text."""
+        self.w.set_enabled(True)
+        ports = [f"Port {i}" for i in range(1, 6)]
+        for m in range(61):
+            self.w.feed([dev("Core switch", **{p: (0 if m < 45 else (m - 45) * 40, 0, 0, 0, 0) for p in ports})], ["sw1"], now=m * 60)
+        ok, detail, _, extra = self.w.check()
+        self.assertIn("(and 2 more)", detail)
+        self.assertEqual(sorted(extra["names"]), [f"Core switch, Port {i}" for i in range(1, 6)])
+
     def test_a_quiet_network_is_fine_and_a_new_box_says_it_is_still_learning(self):
         self.w.set_enabled(True)
         self.run_minutes(10, lambda m: 0)

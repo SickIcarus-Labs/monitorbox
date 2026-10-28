@@ -249,5 +249,58 @@ class Brief(H):
         self.assertEqual(self.h.timeline("a")["seconds"]["failed"], 30)
 
 
+class MorePortsJoinAStretch(unittest.TestCase):
+    """#311: Port errors stays degraded while any port rises, so ports that start rising later in the same stretch used to go unnamed."""
+
+    setUp = H.setUp
+    lines = H.lines
+
+    def why(self, node="pe"):
+        items = self.h.trouble([node], 0, self.clk.t + 10 * D)["items"]
+        return [i.get("why") for i in items]
+
+    def test_a_port_that_joins_the_stretch_is_added_to_its_reason(self):
+        self.h.record({"pe": "degraded"}, {"pe": "Bay A, Port 4: errors rising"}, {"pe": ["Bay A, Port 4"]})
+        self.clk.t += 600; self.h.record({"pe": "degraded"}, {"pe": "Bay A, Port 4: errors rising; Den, Port 8: drops rising"}, {"pe": ["Bay A, Port 4", "Den, Port 8"]})
+        self.assertEqual(self.why(), ["Bay A, Port 4: errors rising; also Den, Port 8"], "a port the reason already names is not repeated")
+
+    def test_ports_past_the_third_are_named_too_and_each_only_once(self):
+        names = ["P1", "P2", "P3"]
+        self.h.record({"pe": "degraded"}, {"pe": "P1: x; P2: x; P3: x (and 1 more)"}, {"pe": names})
+        for extra in (["P4"], ["P4", "P5"], ["P4", "P5"]):
+            self.clk.t += 300; self.h.record({"pe": "degraded"}, {"pe": "P1: x; P2: x; P3: x (and 2 more)"}, {"pe": names + extra})
+        self.assertEqual(self.why(), ["P1: x; P2: x; P3: x (and 1 more); also P4; also P5"])
+
+    def test_the_reason_stays_inside_the_limit_and_says_when_it_is_cut(self):
+        first = "Bay A, Port 4: " + "x" * 380
+        self.h.record({"pe": "degraded"}, {"pe": first}, {"pe": ["Bay A, Port 4"]})
+        self.clk.t += 60; self.h.record({"pe": "degraded"}, {"pe": first}, {"pe": ["Bay A, Port 4", "Den, Port 8"]})
+        w = self.why()[0]
+        self.assertLessEqual(len(w), 400)
+        self.assertTrue(w.endswith("…"))
+
+    def test_the_added_ports_survive_a_restart(self):
+        self.h.record({"pe": "degraded"}, {"pe": "Bay A, Port 4: errors rising"}, {"pe": ["Bay A, Port 4"]})
+        self.clk.t += 60; self.h.record({"pe": "degraded"}, {"pe": "Bay A, Port 4: errors rising"}, {"pe": ["Bay A, Port 4", "Den, Port 8"]})
+        again = History(self.path, clock=self.clk)
+        self.assertEqual([i["why"] for i in again.trouble(["pe"], 0, self.clk.t + 10)["items"]], ["Bay A, Port 4: errors rising; also Den, Port 8"])
+        self.assertEqual(sum(1 for e in again.events if e[1] == "pe"), 1, "the update is not a second event")
+        self.clk.t += 60; again.record({"pe": "degraded"}, {"pe": "Bay A, Port 4: errors rising"}, {"pe": ["Bay A, Port 4", "Den, Port 8", "Hall, Port 2"]})
+        self.assertEqual([i["why"] for i in again.trouble(["pe"], 0, self.clk.t + 10)["items"]], ["Bay A, Port 4: errors rising; also Den, Port 8; also Hall, Port 2"])
+
+    def test_a_new_stretch_starts_with_its_own_reason_not_the_old_ports(self):
+        self.h.record({"pe": "degraded"}, {"pe": "Bay A, Port 4: errors rising"}, {"pe": ["Bay A, Port 4", "Den, Port 8"]})
+        self.clk.t += 60; self.h.record({"pe": "healthy"}, {"pe": "all 45 ports look normal"}, {"pe": []})
+        self.clk.t += 60; self.h.record({"pe": "degraded"}, {"pe": "Hall, Port 2: drops rising"}, {"pe": ["Hall, Port 2"]})
+        self.clk.t += 60
+        self.assertEqual(sorted(self.why()), ["Bay A, Port 4: errors rising", "Hall, Port 2: drops rising"])
+
+    def test_a_healthy_or_unreasoned_stretch_gets_nothing_added(self):
+        self.h.record({"pe": "healthy"}, {"pe": "fine"}, {"pe": ["Bay A, Port 4"]})
+        self.clk.t += 60; self.h.record({"pe": "healthy"}, {"pe": "fine"}, {"pe": ["Bay A, Port 4", "Den, Port 8"]})
+        self.assertEqual(self.h.trouble(["pe"], 0, self.clk.t + 10)["items"], [])
+        self.assertEqual([e for e in self.lines() if "w" in e], [])
+
+
 if __name__ == "__main__":
     unittest.main()
