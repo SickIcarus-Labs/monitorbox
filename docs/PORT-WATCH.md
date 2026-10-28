@@ -23,6 +23,12 @@ What the Port errors item watches, how it decides, and what it never does. The c
 - Errors are watched on every port in use. **Drops and link drops** only count on uplinks, links between devices and server ports, never on an ordinary client's port (a laptop that sleeps, or an Apple TV in standby, is not news).
 - The line says how many an hour, the receive/transmit split, how busy the port is, and the other end of the cable when there is one ("other end (label): N receive, M transmit an hour", "still learning" or "no counters"). One-sided counts are normal: the receiving side counts a bad frame.
 
+## Drops are usually congestion, not a fault
+
+A dropped packet on a port means the switch's outgoing queue for that port overflowed. That happens where a faster network feeds a slower port (a 10 Gbit server or uplink sending a burst to a 1 Gbit device): the switch drops what does not fit and the traffic slows down and recovers. It is normal on a LAN with mixed speeds, and more likely with flow control off. Errors are the better sign of a bad cable or module.
+
+That is why drops only alert on uplinks, links between switches and servers, never on client ports. If a server or uplink alerts on drops and the cause is a speed step-down, you can: untick the port, or ask for a drops-only option, or enable flow control if there are no latency-sensitive applications such as gaming or VoIP (flow control turns drops into pauses, which hurts those).
+
 ## What counts as a problem: links going away
 
 - A link on an uplink, between devices, or a server card that has been **up for an hour without a break** becomes expected up (learned, no setup).
