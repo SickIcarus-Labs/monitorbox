@@ -8,9 +8,7 @@ import threading, time
 
 from . import lanmap, followups
 
-def squash(name):
-    """A name without spaces, punctuation or capitals: \"Switch 2\" and \"Switch2\" are the same device."""
-    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
+squash = lanmap.squash
 
 
 EVERY = 10.0
@@ -45,6 +43,7 @@ class LanSampler:
         self.uptime = {}        # server id -> its uptime when last read: a drop in it is a restart, not a flap
         self.sys_of = {}        # SNMP connection id -> the device's own name (sysName), squashed: tells which UniFi device a connection is when the address does not
         self.roles = {}         # server id -> {"at", "switch", "links"}: which ports of an SNMP device that learns addresses or hears neighbours (a switch) are uplinks or links, read every ROLES_EVERY seconds
+        self.matched = {}       # SNMP connection id -> the id of the UniFi device it is, as last worked out: the map leaves those out (they are drawn as the UniFi device)
         self.wifi = {}          # port name in the history (under WIFI) -> {"name", "ap"}: the Wi-Fi clients read this round
 
     def tick(self):
@@ -115,6 +114,7 @@ class LanSampler:
             if c.get("module") != "snmp":
                 continue
             dev = match(c)
+            self.matched[str(c["id"])] = dev
             if not dev:
                 continue
             snmp_conf.add(dev)

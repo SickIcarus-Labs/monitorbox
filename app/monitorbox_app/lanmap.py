@@ -13,6 +13,11 @@ def is_iot(c):
     return any("iot" in str(c.get(k) or "").lower() for k in ("network", "essid"))
 
 
+def squash(name):
+    """A name without spaces, punctuation or capitals: "Switch 2" and "Switch2" are the same device."""
+    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
+
+
 def _kind(d):
     t = d.get("type")
     return "gateway" if t in GATEWAYS else "ap" if t == "uap" else "switch" if t == "usw" else "device"
@@ -36,7 +41,7 @@ def device_ids(devices):
     both use it, so a switch's readings line up with its place on the map."""
     ids, used = [], set()
     for d in devices:
-        base = d.get("mac") if d.get("mac") not in (None, "", "?") else d["name"]
+        base = d.get("id") or (d.get("mac") if d.get("mac") not in (None, "", "?") else d["name"])
         i, k = base, 2
         while i in used:
             i, k = f"{base}#{k}", k + 1
@@ -45,9 +50,82 @@ def device_ids(devices):
     return ids
 
 
-def build(sources):
-    """sources: the list the switch report returns ([{"connection","module","report"|"error"}]). Returns {"nodes", "counts", "notes"}."""
-    notes, devices, clients, hosts, switches = [], [], [], {}, set()
+def _is_switch(r):
+    return any(isinstance(p, dict) and (p.get("learned") or p.get("lldp")) for p in r.get("ports") or [])
+
+
+def _snmp_nodes(switches, devices):
+    """SNMP switches UniFi does not know, as devices in the shape of UniFi's (so the rest of the map treats them alike): a port is a port, a neighbour LLDP names is a
+    device on it, and a port with several addresses learned behind it has several. Each switch hangs off a neighbour already placed: every UniFi device is placed to start with,
+    and with no UniFi at all the switch with the most addresses learned is the top (a guess: LLDP shows which switches are linked, not which way is up).
+    -> (devices, clients); a device's id is "snmp:<connection>", the same name the port watch reads it under."""
+    nodes = []
+    for s in switches:
+        r = s["report"]
+        ports = []
+        for i, p in enumerate(r.get("ports") or []):
+            if not isinstance(p, dict) or not p.get("name"):
+                continue
+            idx = int(p["ifIndex"]) if str(p.get("ifIndex") or "").isdigit() else i + 1
+            ports.append({"port_idx": idx, "name": p["name"], "label": p.get("label"), "up": True, "speed": p.get("speedMbps"), "inBps": p.get("inBps"), "outBps": p.get("outBps"),
+                          "rx_errors": p.get("inErrors"), "tx_errors": p.get("outErrors"), "rx_dropped": p.get("inDiscards"), "tx_dropped": p.get("outDiscards"),
+                          "_learned": p.get("learned") or 0, "_lldp": p.get("lldp") if isinstance(p.get("lldp"), dict) else {}})
+        nodes.append({"id": "snmp:" + str(s["cid"]), "name": str(r.get("sysName") or s.get("name") or s["cid"]), "type": "usw", "model": "SNMP", "state": "connected",
+                      "ip": s.get("host") or None, "mac": None, "ports": ports, "uplink": {}})
+    nodes.sort(key=lambda n: n["name"].lower())
+    by_name, by_chassis = {}, {}
+    for d in list(devices) + nodes:
+        by_name.setdefault(squash(d.get("name")), []).append(d)
+    for d in devices:
+        if d.get("mac") not in (None, "", "?"):
+            by_chassis[d["mac"]] = d
+
+    def neighbour(p):
+        l = p["_lldp"]
+        hit = by_chassis.get(l.get("chassis"))
+        if hit:
+            return hit
+        same = by_name.get(squash(l.get("name"))) or []
+        return same[0] if len(same) == 1 else None
+    placed = {id(d) for d in devices}
+    children = {}                                                        # id of a node -> the port numbers on it that lead to a switch below it
+    while any(id(n) not in placed for n in nodes):
+        moved = False
+        for n in nodes:
+            if id(n) in placed:
+                continue
+            cands = [(p["_learned"], -p["port_idx"], p, nb) for p in n["ports"] for nb in [neighbour(p)] if nb is not None and nb is not n and id(nb) in placed]
+            if not cands:
+                continue
+            _, _, p, nb = max(cands, key=lambda c: c[:2])
+            remote = next((q["port_idx"] for q in nb.get("ports") or [] if isinstance(q, dict) and isinstance(q.get("_lldp"), dict) and neighbour(q) is n), None)
+            if remote is None:
+                text = p["_lldp"].get("port")
+                remote = next((q["port_idx"] for q in nb.get("ports") or [] if isinstance(q, dict) and text and text in (q.get("name"), q.get("label"), f"Port {text}")), None)
+            n["uplink"] = {"type": "wire", "to": nb["name"], "toMac": nb.get("mac"), "port": p["port_idx"], "remotePort": remote, "speedMbps": p.get("speed"), "up": True}
+            p["is_uplink"] = True
+            if remote is not None:
+                children.setdefault(id(nb), set()).add(remote)
+            placed.add(id(n))
+            moved = True
+        if not moved:                                                    # nothing reaches what is placed: the one with the most addresses learned starts a tree of its own
+            rest = [n for n in nodes if id(n) not in placed]
+            placed.add(id(max(rest, key=lambda n: sum(p["_learned"] for p in n["ports"]))))
+    clients = []
+    for n in nodes:
+        for p in n["ports"]:
+            if p.get("is_uplink") or p["port_idx"] in children.get(id(n), ()):
+                continue
+            who = str(p["_lldp"].get("name") or p.get("label") or "").strip() or None
+            for k in range(max(min(int(p["_learned"]), 50), 1 if who else 0)):
+                clients.append({"wired": True, "switch": n["name"], "port": p["port_idx"], "name": who if k == 0 else None})
+    return nodes, clients
+
+
+def build(sources, matched=None):
+    """sources: the list the switch report returns ([{"connection","module","report"|"error"}]). `matched`: SNMP connection id -> the UniFi device it is (what the sampler worked out).
+    Returns {"nodes", "counts", "notes"}."""
+    notes, devices, clients, hosts, switches, snmp_sw = [], [], [], {}, set(), []
     for s in sources or []:
         r = s.get("report")
         if not isinstance(r, dict):
@@ -62,8 +140,20 @@ def build(sources):
             for p in r.get("ports") or []:
                 if p.get("mac"):
                     hosts.setdefault(p["mac"], name)          # a server's own card address -> its name
-            if any(p.get("learned") or p.get("lldp") for p in r.get("ports") or []):
+            if _is_switch(r):
                 switches.add(name.lower())                    # it learns addresses or hears neighbours on its ports: a switch, not a server
+                snmp_sw.append({"cid": s.get("connection"), "name": s.get("name"), "host": s.get("host"), "report": r})
+    if snmp_sw:
+        def known(sw):
+            """A switch UniFi also lists is that device, not another one: the sampler's answer, else its address, else a name only one UniFi device has."""
+            if (matched or {}).get(sw["cid"]):
+                return True
+            if sw["host"] and any(str(d.get("ip") or "").strip().lower() == str(sw["host"]).strip().lower() for d in devices):
+                return True
+            return any(len([d for d in devices if squash(d.get("name")) == nm]) == 1 for nm in (squash(sw["name"]), squash(sw["report"].get("sysName"))) if nm)
+        extra, extra_clients = _snmp_nodes([sw for sw in snmp_sw if not known(sw)], devices)
+        devices += extra
+        clients += extra_clients
     if not devices:
         return {"iotIps": sorted({c["ip"] for c in clients if c.get("ip") and is_iot(c)}), "makers": {}, "nodes": [], "counts": {"devices": 0, "wired": 0, "wifi": 0}, "notes": notes + ["No UniFi devices to map yet. The map is built from a UniFi connection."]}
     # Two devices can share a name (a switch and an access point both called "Living Room"), so everything is tied together by id:
