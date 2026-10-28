@@ -98,6 +98,7 @@ class LanMap(unittest.TestCase):
     def test_with_nothing_to_map_it_says_so_and_a_login_that_cannot_read_clients_is_noted(self):
         self.assertEqual(lanmap.build([])["nodes"], [])
         self.assertIn("UniFi", lanmap.build([])["notes"][0])
+        self.assertIn("SNMP switches", lanmap.build([])["notes"][0])      # wording changed (owner approved): the map can be built from SNMP switches alone
         src = report(); src[0]["report"].pop("clients"); src[0]["report"]["clientsNote"] = "refused"
         out = lanmap.build(src)
         self.assertTrue(any("client list" in n for n in out["notes"]))
@@ -139,3 +140,62 @@ class SameNames(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def sw(cid, sysname, host, ports):
+    return {"connection": cid, "module": "snmp", "name": cid.upper(), "host": host, "report": {"sysName": sysname, "ports": ports}}
+
+
+def sp(idx, learned=0, lldp=None, label=None, speed=1000, **kw):
+    return dict({"ifIndex": str(idx), "name": f"Gi1/0/{idx}", "state": "up", "speedMbps": speed, "learned": learned, **({"lldp": lldp} if lldp else {}), **({"label": label} if label else {})}, **kw)
+
+
+class SnmpSwitchesOnTheMap(unittest.TestCase):
+    """SNMP switches UniFi does not know are map nodes too (#292): ports, speeds, the link between switches from LLDP, and what is behind each port from what it learned."""
+    def two(self):
+        a = sw("a", "swa", "192.0.2.51", [sp(1, 10, {"name": "swb", "port": "Gi1/0/1"}, speed=10000), sp(2, 1, label="Desk"), sp(3, 3)])
+        b = sw("b", "swb", "192.0.2.52", [sp(1, 9, {"name": "swa", "port": "Gi1/0/1"}, speed=10000), sp(2, 0, {"name": "AP-One"}), sp(5, 1)])
+        return [a, b]
+
+    def test_with_no_unifi_the_switches_are_nodes_and_the_one_with_most_learned_is_the_top(self):
+        m = lanmap.build(self.two())
+        n = {x["id"]: x for x in m["nodes"]}
+        self.assertEqual(sorted(n), ["snmp:a", "snmp:b"], "ids are the ones the port watch reads them under")
+        self.assertIsNone(n["snmp:a"]["parent"])
+        self.assertEqual(n["snmp:b"]["parent"], "snmp:a")
+        link = n["snmp:b"]["link"]
+        self.assertEqual((link["to"], link["speedMbps"], link["port"], link["parentPort"]), ("swa", 10000, 1, 1))
+        self.assertEqual(link["keys"], {"self": ["snmp:b", "Gi1/0/1"], "parent": ["snmp:a", "Gi1/0/1"]})
+        self.assertEqual(m["counts"]["devices"], 2)
+
+    def test_what_is_behind_a_port_comes_from_the_neighbour_and_the_addresses_learned(self):
+        n = {x["id"]: x for x in lanmap.build(self.two())["nodes"]}
+        a = {p["port"]: p["name"] for p in n["snmp:a"]["ports"]}
+        self.assertEqual(a, {"2": "Desk", "3": "unnamed device and 2 more"}, "the link to swb is not listed as an endpoint")
+        b = {p["port"]: p["name"] for p in n["snmp:b"]["ports"]}
+        self.assertEqual(b, {"2": "AP-One", "5": "unnamed device"})
+
+    def test_a_switch_unifi_also_knows_is_drawn_once_by_address_by_name_and_by_the_samplers_answer(self):
+        unifi = {"connection": "u", "module": "unifi-network", "report": {"devices": [
+            {"name": "Core-B", "type": "usw", "state": "connected", "ip": "192.0.2.2", "mac": "..:00:00:02", "ports": [port(1)]},
+            {"name": "Rack-C", "type": "usw", "state": "connected", "ip": "192.0.2.3", "mac": "..:00:00:03", "ports": [port(1)]},
+            {"name": "Edge-D", "type": "usw", "state": "connected", "ip": "192.0.2.4", "mac": "..:00:00:04", "ports": [port(1)]}], "clients": []}}
+        by_ip = sw("x1", "whatever", "192.0.2.2", [sp(1, 3)])
+        by_name = sw("x2", "Rack C", "192.0.2.99", [sp(1, 3)])
+        by_sampler = sw("x3", "other", "192.0.2.98", [sp(1, 3)])
+        own = sw("x4", "Lone-Switch", "192.0.2.97", [sp(1, 3)])
+        m = lanmap.build([unifi, by_ip, by_name, by_sampler, own], matched={"x3": "..:00:00:04"})
+        self.assertEqual(sorted(x["name"] for x in m["nodes"]), ["Core-B", "Edge-D", "Lone-Switch", "Rack-C"], "four nodes, not seven")
+
+    def test_a_switch_below_a_unifi_device_hangs_off_it(self):
+        unifi = {"connection": "u", "module": "unifi-network", "report": {"devices": [
+            {"name": "Core-B", "type": "usw", "state": "connected", "ip": "192.0.2.2", "mac": "..:00:00:02", "ports": [port(9)]}], "clients": []}}
+        below = sw("x", "swx", "192.0.2.60", [sp(1, 20, {"name": "Core-B", "port": "9"}), sp(2, 1)])
+        n = {x["id"]: x for x in lanmap.build([unifi, below])["nodes"]}
+        self.assertEqual(n["snmp:x"]["parent"], "..:00:00:02")
+        self.assertEqual(n["snmp:x"]["link"]["to"], "Core-B")
+
+    def test_a_server_that_learns_nothing_is_not_a_node(self):
+        server = sw("s", "nas", "192.0.2.70", [{"ifIndex": "2", "name": "eth0", "state": "up", "mac": "..:aa:aa:aa"}])
+        self.assertEqual(lanmap.build([server] + self.two())["counts"]["devices"], 2)
+        self.assertEqual(lanmap.build([server])["nodes"], [])

@@ -1077,7 +1077,7 @@ class App:
     def build_map(self):
         srcs = self.lan_report(wait=0)["sources"]
         self.last_sources = srcs
-        self.last_map = lanmap.build(srcs)
+        self.last_map = lanmap.build(srcs, matched=dict(self.lansampler.matched))
         self.map_at = time.time()
         self.annotate_ports(self.last_map)
         self._save_map()
@@ -1494,7 +1494,7 @@ class App:
         conns = [c for c in monconfig.load_config(self.paths).get("connections", []) if isinstance(c, dict) and c.get("module") in ("unifi-network", "snmp")]
 
         def one(c):
-            row = {"connection": str(c.get("id") or ""), "module": c["module"]}
+            row = {"connection": str(c.get("id") or ""), "module": c["module"], "name": str(c.get("name") or ""), "host": followups.host_of(c)}
             try:
                 row["report"] = self.modules.call(c["module"], "lan_report", {"connection": c, **({"wait": wait} if wait is not None else {})}, 40)
             except Exception as e:

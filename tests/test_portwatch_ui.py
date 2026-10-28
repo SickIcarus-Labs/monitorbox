@@ -32,7 +32,7 @@ class PortWatchUi(unittest.TestCase):
             pg.wait_for_function("typeof drawMap === 'function'")
             off = pg.evaluate(MAP_JS, [False, None])
             self.assertIn("Watch for rising port errors", off)
-            self.assertIn("1 UniFi devices · 47 switch ports in use · 29 Ethernet clients · 100 Wi-Fi clients. Reminder: an uplink between switches counts as 2 ports and 0 clients.", off, "the map footer says what each number counts")
+            self.assertIn("1 devices · 47 switch ports in use · 29 Ethernet clients · 100 Wi-Fi clients. Reminder: an uplink between switches counts as 2 ports and 0 clients.", off, "the map footer says what each number counts")
             self.assertNotIn('checked=""', off.split("Watch for rising port errors")[0].rsplit("<input", 1)[1], "off until ticked")
             self.assertNotIn("data-k=", off, "no per-port marks while the watch is off"); self.assertNotIn("rising (about", off); self.assertNotIn("learning what is normal</span>", off)
             rising = pg.evaluate(MAP_JS, [True, {"learning": False, "rising": ["errors"], "perHour": {"errors": 1600, "drops": 0, "flaps": 0}, "was": {"errors": 0}, "known": False}])

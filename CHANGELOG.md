@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.6.27** (#292) The network map now shows SNMP switches that UniFi does not know, with their ports, speeds, the neighbour on each port (from LLDP), how many devices sit behind a port (from the addresses it has learned) and the links between switches. A switch UniFi also lists is still drawn once. With no UniFi connection at all the map is built from SNMP switches alone.
 - **1.6.26** The Port errors page says how long a port has been read as hours and days when that is clearer: "17 h 26 min of readings" instead of "1046 min of readings".
 - **1.6.25** When a port's counter goes backwards (and its history starts again), the Port errors page now says from what to what, for example "from 24,282 down to 31". Found on a server card whose packet-drops counter kept stepping back.
 - **1.6.24** (#292) Port errors now work with SNMP switches alone, with no UniFi connection at all. An SNMP switch is read directly: errors, packet drops, link drops and speed per port, with the same learning period and rules. Ports with a neighbour or several addresses behind them count as links; the others are treated as clients' ports, where only errors count. Ports read over SNMP use the speed the device reports, so the minimums scale with the link. The map for SNMP-only networks comes next.
