@@ -1150,7 +1150,7 @@ class App:
         speeds = {}                    # port key -> link speed in Mbit/s, for the speed-scaled minimums
         for n in m.get("nodes", []):
             link = n.get("link")
-            if link and (link.get("keys") or {}).get("self"):
+            if link and ((link.get("keys") or {}).get("self") or (link.get("keys") or {}).get("parent")):       # an access point reports no ports of its own: the switch's end of its cable still counts
                 flap |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
                 shown |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
                 ends |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
