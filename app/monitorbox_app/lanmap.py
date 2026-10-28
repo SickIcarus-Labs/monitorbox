@@ -112,7 +112,8 @@ def build(sources):
                     members.setdefault(p["aggregated_by"], []).append(p)
             for idx in sorted(i for i in ports if isinstance(i, int)):
                 p = ports[idx]
-                if p.get("is_uplink") or idx in child_ports or p.get("aggregated_by"):
+                wan = bool(p.get("is_uplink")) and not node["link"]          # a gateway has no parent switch: its "uplink" port is the way out to the internet, a port in its own right
+                if (p.get("is_uplink") and not wan) or idx in child_ports or p.get("aggregated_by"):
                     continue
                 group = [p] + members.get(idx, [])
                 gports = {g.get("port_idx") for g in group}
@@ -120,9 +121,9 @@ def build(sources):
                 server = next((hosts[c["mac"]] for c in here if c.get("mac") in hosts), None)
                 if not server:
                     server = next((hosts[g["lastMac"]] for g in group if g.get("lastMac") in hosts), None)
-                who = server or (here[0].get("name") or here[0].get("ip") or "unnamed device" if here else "")
+                who = server or (here[0].get("name") or here[0].get("ip") or "unnamed device" if here else ("Internet (WAN)" if wan and node["kind"] == "gateway" else "Uplink" if wan else ""))
                 # a switch on this port (found by its SNMP name, or a client of that name) is a link between switches: everything behind it passes through
-                infra = bool(switches) and (str(server or "").lower() in switches or any(str(c.get("name") or "").lower() in switches for c in here))
+                infra = wan or (bool(switches) and (str(server or "").lower() in switches or any(str(c.get("name") or "").lower() in switches for c in here)))
                 if len(here) > 1 and not server:
                     who += f" and {len(here) - 1} more"
                 node["ports"].append({"keys": [[me, g.get("name")] for g in sorted(group, key=lambda g: g.get("port_idx") or 0) if g.get("name")],

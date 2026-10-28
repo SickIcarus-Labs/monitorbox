@@ -58,6 +58,12 @@ class LanMap(unittest.TestCase):
         self.assertEqual((self.n["Edge-D"]["link"]["down"], self.n["Edge-D"]["link"]["up_bps"]), (0, 0), "the port is there and reads zero")
         self.assertIsNone(self.n["AP-E"]["link"]["down"], "the access point reports no ports at all")
 
+    def test_the_gateways_way_out_is_a_port_of_its_own_with_its_speed(self):
+        # regression (Broad Leaf SFP+ 1, the modem): UniFi marks the WAN port "uplink", a gateway has no parent switch, so it was listed nowhere and its speed was unknown
+        wan = next(p for p in self.n["Gate-A"]["ports"] if p["port"] == "10")
+        self.assertEqual((wan["name"], wan["infra"], wan["server"], wan["speedMbps"]), ("Internet (WAN)", True, False, 1000))
+        self.assertEqual(wan["keys"], [["" + self.n["Gate-A"]["id"], "Port 10"]])
+
     def test_a_ports_that_lead_to_other_devices_and_the_uplink_are_not_listed_as_endpoints(self):
         self.assertEqual([p["port"] for p in self.n["Core-B"]["ports"]], ["13"], "7 is the access point, 9 and 25 lead to switches, 26 is the way up")
         self.assertEqual(self.n["Core-B"]["ports"][0]["name"], "TV-Three")
