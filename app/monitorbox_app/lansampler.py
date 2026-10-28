@@ -18,6 +18,9 @@ SERVER_EVERY = 3        # a server's network cards are read every third round (3
 WIFI = "wifi"           # the history's stand-in for a switch: every Wi-Fi client is a "port" under it
 
 
+ROLES_EVERY = 600
+
+
 def stacked(name):
     """A bond or team master, or a VLAN sub-interface: it only repeats the physical ports under it, so it is not a port of its own (one fault would show as three rows)."""
     n = str(name or "").strip().lower()
@@ -41,12 +44,13 @@ class LanSampler:
         self.links = {}         # server card key -> {"n": link drops counted, "abs": when its link last changed, "up": whether it was up}: the box counts them itself, from each card's last-change time
         self.uptime = {}        # server id -> its uptime when last read: a drop in it is a restart, not a flap
         self.sys_of = {}        # SNMP connection id -> the device's own name (sysName), squashed: tells which UniFi device a connection is when the address does not
+        self.roles = {}         # server id -> {"at", "switch", "links"}: which ports of an SNMP device that learns addresses or hears neighbours (a switch) are uplinks or links, read every ROLES_EVERY seconds
         self.wifi = {}          # port name in the history (under WIFI) -> {"name", "ap"}: the Wi-Fi clients read this round
 
     def tick(self):
         conns = [c for c in self.load_conns() if isinstance(c, dict) and c.get("id")]
         unifis = [c for c in conns if c.get("module") == "unifi-network"]
-        if not unifis:
+        if not unifis and not any(c.get("module") == "snmp" for c in conns):
             self.status.update(at=self.clock(), switches=0, snmp=0, unifi=0)
             return
         devices, wifi = [], {}
@@ -64,7 +68,7 @@ class LanSampler:
                 name = str(c.get("name") or c.get("ip") or "").strip()
                 if name:
                     wifi[f"{name}|{c.get('mac') or ''}"] = {"name": name, "ap": c.get("ap"), "rx": c["rxBps"], "tx": c["txBps"]}
-        if not devices:
+        if unifis and not devices:
             # UniFi gave no devices this round (slow or unreachable, e.g. just after a restart). Without its list nothing can be matched, so every SNMP switch would be read as a
             # server and every port forgotten: an outage is Unknown, not a different picture. Leave everything as it was until the next round.
             self.status.update(at=self.clock(), unifi=len(unifis), unifiEmpty=True)
@@ -180,12 +184,13 @@ class LanSampler:
                     continue
             if self.watch is not None:
                 self.watch.set_why(sid, self.explain(c))
+            role = self._role(c, sid)
             up_s = r.get("uptimeS") if isinstance(r, dict) else None
             rebooted = isinstance(up_s, int) and isinstance(self.uptime.get(sid), int) and up_s + 5 < self.uptime[sid]
             if isinstance(up_s, int):
                 self.uptime[sid] = up_s
             now = self.clock()
-            ports, members = [], {}
+            ports, members, speeds, clients = [], {}, {}, set()
             for nm, v in ((r or {}).get("ports") or {}).items():
                 if not isinstance(v, dict) or v.get("stacked") or stacked(nm) or not all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop")):
                     continue                                          # a bond, team or VLAN only repeats the cards under it
@@ -194,13 +199,33 @@ class LanSampler:
                               **({"link_down_count": self._link_drops(key, v, now, rebooted)} if isinstance(v.get("changedAgo"), int) else {})})
                 if v.get("bond"):
                     members[key] = ", ".join(v["bond"])
+                if isinstance(v.get("speedMbps"), (int, float)):
+                    speeds[key] = v["speedMbps"]
+                if role.get("switch") and nm not in role.get("links", ()):
+                    clients.add(key)                                  # a switch port with no neighbour and at most one address behind it: a client's
             if self.watch is not None:
+                self.watch.set_snmp_ports(sid, speeds, clients)
                 self.watch.set_cards(sid, [self.watch.key(sid, p["name"]) for p in ports if p.get("up") is not False], members)
             if ports:
                 out.append((sid, {"name": str(c.get("name") or c["id"]), "ports": ports}))
             else:
                 held.add(sid)
         return out, held
+
+    def _role(self, c, sid):
+        """Whether this SNMP device is a switch (it learns addresses or hears LLDP neighbours) and which of its ports are links (a neighbour, or several addresses behind it).
+        Read with the module's switch report, without its two-second traffic reading, once at first and then every ROLES_EVERY seconds; if it cannot be read the last answer stands."""
+        now, cur = self.clock(), self.roles.get(sid)
+        if cur and now - cur["at"] < ROLES_EVERY:
+            return cur
+        try:
+            r = self.call("snmp", "lan_report", {"connection": c, "wait": 0}, 40)
+        except Exception:
+            return cur or {}
+        ports = [p for p in (r or {}).get("ports") or [] if isinstance(p, dict) and p.get("name")]
+        cur = self.roles[sid] = {"at": now, "switch": any(p.get("learned") or p.get("lldp") for p in ports),
+                                 "links": {p["name"] for p in ports if p.get("lldp") or (p.get("learned") or 0) >= 2}}
+        return cur
 
     def _link_drops(self, key, v, now, rebooted):
         """How many times this card's link went down since the box started counting. The device only says when the link last changed, so a change since the last read is a drop if

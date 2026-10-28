@@ -331,7 +331,8 @@ class Servers(unittest.TestCase):
         def call(mod, method, params, timeout):
             if mod == "unifi-network":
                 return {"devices": [{"name": "Core-B", "mac": "..:00:00:02", "type": "usw", "ip": "192.0.2.2", "ports": []}]}
-            self.calls.append(params["connection"]["id"])
+            if method == "counters":
+                self.calls.append(params["connection"]["id"])      # the switch-role read (lan_report) is a different call from the counter reads this test counts
             if not answer:
                 raise RuntimeError("no answer")
             return {"ports": {"eth0": {"in": 1, "out": 1, "bits": 64, "rxErr": 10, "txErr": 20, "rxDrop": 30, "txDrop": 40}, "docker0": {"in": 1, "out": 1, "bits": 64}}}
@@ -347,7 +348,8 @@ class Servers(unittest.TestCase):
         def call(mod, method, params, timeout):
             if mod == "unifi-network":
                 return {"devices": devs}
-            self.calls.append(params["connection"]["id"])
+            if method == "counters":
+                self.calls.append(params["connection"]["id"])      # the switch-role read (lan_report) is a different call from the counter reads this test counts
             return {"ports": {"Port 1": dict(bad), "Po1": dict(bad), "Po2": dict(bad)}}
         conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "swc", "name": conn_name, "module": "snmp", "host": conn_host}]
         return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
@@ -910,3 +912,67 @@ class BySpeed(unittest.TestCase):
         self.assertEqual(portwatch.judge(q, True, 100)["rising"], ["drops"])
         self.assertEqual(portwatch.judge(q, True, 1000)["rising"], ["drops"])
         self.assertEqual(portwatch.judge(q, True, 10000)["rising"], [], "20,000 is a fifth of what a 10 Gbit port needs")
+
+
+class SnmpOnly(unittest.TestCase):
+    """No UniFi at all (#292): SNMP switches are watched straight from their own interfaces. Ports with a neighbour or several addresses behind them are links (all problems count),
+    the rest are clients' (only errors count), a device that is not a switch is read as a server, and a switch UniFi also knows is still read once."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory(); self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name); os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.w = portwatch.PortWatch(self.paths); self.w.set_enabled(True)
+        self.t = [1000.0]
+        self.minutes = lambda: (self.t[0] - 1000.0) / 60
+        self.calls = []
+
+    def sampler(self, conns, unifi=None):
+        from monitorbox_app import lansampler, portpeers
+        report = {
+            "swa": {"sysName": "swa-box", "ports": [{"name": "Gi1/0/1", "lldp": {"name": "swb-box"}, "learned": 4}, {"name": "Gi1/0/2", "learned": 1}, {"name": "Gi1/0/3"}]},
+            "swb": {"sysName": "swb-box", "ports": [{"name": "Gi1/0/1", "lldp": {"name": "swa-box"}, "learned": 9}, {"name": "Gi1/0/2", "learned": 1}]},
+            "nas": {"sysName": "nas-box", "ports": [{"name": "eth0"}]},
+        }
+        rising = lambda base: base + max(0, int(self.minutes()) - 45) * 20000        # nothing for 45 minutes, then 20,000 more a minute
+
+        def call(mod, method, params, timeout):
+            cid = params["connection"]["id"]
+            self.calls.append((mod, method, cid))
+            if mod == "unifi-network":
+                return {"devices": unifi or []}
+            if method == "lan_report":
+                return report[cid]
+            names = [p["name"] for p in report[cid]["ports"]]
+            return {"sysName": report[cid]["sysName"], "ports": {n: {"in": 1, "out": 1, "bits": 64, "up": True, "speedMbps": 1000, "rxErr": 0, "txErr": 0,
+                                                                  "rxDrop": rising(7), "txDrop": 3} for n in names}}
+        return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
+
+    def run_for(self, sm, minutes):
+        for _ in range(minutes * 6):
+            sm.tick(); self.t[0] += 10
+
+    def test_switches_are_watched_with_no_unifi_and_drops_count_only_on_links(self):
+        conns = [{"id": "swa", "name": "Switch A", "module": "snmp", "host": "192.0.2.41"}, {"id": "swb", "name": "Switch B", "module": "snmp", "host": "192.0.2.42"}]
+        self.run_for(self.sampler(conns), 61)
+        self.assertFalse([c for c in self.calls if c[0] == "unifi-network"], "no UniFi connection: none is asked")
+        self.assertEqual(sorted(self.w.series), ["snmp:swa|Gi1/0/1", "snmp:swa|Gi1/0/2", "snmp:swa|Gi1/0/3", "snmp:swb|Gi1/0/1", "snmp:swb|Gi1/0/2"])
+        kinds = {f["label"]: f["kinds"] for f in self.w.findings()}
+        self.assertEqual(kinds, {"Switch A, Gi1/0/1": ["drops"], "Switch B, Gi1/0/1": ["drops"]}, "the links alert; the client ports on the same switches do not")
+        self.assertEqual(self.w.card_speeds["snmp:swa|Gi1/0/1"], 1000, "the speed comes from the device itself")
+
+    def test_a_device_that_is_not_a_switch_is_a_server_and_every_card_counts(self):
+        self.run_for(self.sampler([{"id": "nas", "name": "NAS", "module": "snmp", "host": "192.0.2.43"}]), 61)
+        self.assertEqual({f["label"]: f["kinds"] for f in self.w.findings()}, {"NAS, eth0": ["drops"]})
+
+    def test_the_roles_are_read_once_and_then_only_every_ten_minutes(self):
+        sm = self.sampler([{"id": "swa", "name": "Switch A", "module": "snmp", "host": "192.0.2.41"}])
+        self.run_for(sm, 25)
+        reads = [c for c in self.calls if c[1] == "lan_report"]
+        self.assertEqual(len(reads), 3, "at first, then after 10 and 20 minutes")
+
+    def test_a_switch_that_unifi_also_knows_is_read_once_not_twice(self):
+        # regression guard: the SNMP-only path must not read a matched switch again as a server
+        unifi = [{"name": "Core", "mac": "..:00:00:02", "type": "usw", "ip": "192.0.2.41", "ports": [{"port_idx": 1, "name": "Gi1/0/1", "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0}]}]
+        conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "swa", "name": "Switch A", "module": "snmp", "host": "192.0.2.41"}]
+        self.run_for(self.sampler(conns, unifi), 5)
+        self.assertFalse([k for k in self.w.series if k.startswith("snmp:swa|")], "read as the UniFi device, not also as a separate one")
+        self.assertTrue([k for k in self.w.series if k.endswith("|Gi1/0/1")])
