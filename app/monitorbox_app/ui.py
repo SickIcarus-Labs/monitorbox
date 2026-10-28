@@ -218,6 +218,7 @@ function hdrItems(){const o=[],multi=!!(siCfg&&siCfg.sites.length);
   const pre=multi?t.name+': ':'',fu=d.fu,p=d.pend,nf=fu.reduce((a,x)=>a+(x.labels?x.labels.length:1),0); /* things, not offers: three containers from one machine are 3 */
   if(fu.length)o.push({id:'fu'+t.id,site:t.id,icon:HI.box,tint:'rgba(52,211,153,.18)',ink:'#6EE7B7',title:pre+(nf===1?'1 new thing found':nf+' new things found'),sub:[...new Set(fu.map(x=>x.on?'On '+x.on:x.title))].slice(0,3).join(', ')+(fu.length>3?' and '+(fu.length-3)+' more':''),cta:'Set up',go:'#/settings/servers'});
   if(p)o.push({id:'upd'+t.id,site:t.id,icon:HI.down,tint:'rgba(96,165,250,.20)',ink:'#93C5FD',title:pre+(p.target?'Update '+p.target+' is ready':'An update is ready'),sub:p.what,cta:'Update',go:'#/settings/updates'});
+  for(const a of d.auto||[])o.push({id:'auto'+t.id+a.id,site:t.id,icon:HI.down,tint:'rgba(52,211,153,.18)',ink:'#6EE7B7',title:pre+a.text,sub:'',cta:'OK',go:'#/settings/updates',seen:a.id});
   if(d.img)o.push({id:'img'+t.id,site:t.id,icon:HI.down,tint:'rgba(251,191,36,.18)',ink:'#FCD34D',title:pre+'The container image needs updating',sub:'Re-pull it to get the newest base.',cta:'How',go:'#/settings/updates'})}
  return o}
 function renderHeader(){const h=$('#hdr');if(!h||h.hidden)return;
@@ -236,7 +237,7 @@ function renderHeader(){const h=$('#hdr');if(!h||h.hidden)return;
 function hdrReveal(){const nv=document.querySelector('#hdr nav.tabs'),a=nv&&nv.querySelector('.tab[aria-pressed=true]');if(a)nv.scrollLeft=a.offsetLeft-(nv.clientWidth-a.offsetWidth)/2}
 function goHome(){bellOpen=false;if(location.hash){location.hash=''}else{if(drawer||svcOpen)closeDrawer();scrollTo(0,0);renderHeader()}}
 function toggleBell(e){if(e)e.stopPropagation();bellOpen=!bellOpen;renderHeader()}
-function bellGo(i){const x=hdrItems()[i];bellOpen=false;if(x&&x.site!==SITE)setSite(x.site);renderHeader();if(x)location.hash=x.go}
+function bellGo(i){const x=hdrItems()[i];bellOpen=false;if(x&&x.seen){const d=hdrSites[x.site];if(d)d.auto=(d.auto||[]).filter(a=>a.id!==x.seen);fetch((x.site?'/api/site/'+x.site+'/':'/api/')+'updates/seen',{method:'POST',headers:{'Content-Type':'application/json','X-MB':'1'},body:JSON.stringify({ids:[x.seen]})}).catch(()=>{})} /* a note about an update that already happened: tapping it clears it */ if(x&&x.site!==SITE)setSite(x.site);renderHeader();if(x)location.hash=x.go}
 /* pointerdown, not click: iPad Safari sends no click for a tap on plain page background, so a click listener never saw those taps */
 addEventListener('pointerdown',e=>{if(bellOpen&&!e.target.closest('#bell,#bellbtn')){bellOpen=false;renderHeader()}},true);
 addEventListener('keydown',e=>{if(e.key==='Escape'&&bellOpen){bellOpen=false;renderHeader();const b=$('#bellbtn');if(b)b.focus()}});
@@ -246,7 +247,7 @@ async function hdrOne(id){const pre='/api/'+(id?'site/'+id+'/':'');
  const g=async p=>{const r=await fetch(pre+p);if(!r.ok)throw new Error(r.status);return r.json()};
  const [v,f]=await Promise.all([g('versions'),g('followups').catch(()=>({suggestions:[]}))]);
  const mods=Object.entries(v.modules||{}).filter(([k,c])=>c.needsApply&&c.target&&!(c.failed||[]).includes(c.target)),appUp=v.app&&v.app.needsApply&&v.app.target&&!(v.app.failed||[]).includes(v.app.target);
- return {ver:v.version||'',img:!!(v.image&&v.image.outdated),fu:(f.suggestions||[]).map(x=>({title:x.title,on:x.on,labels:x.labels})),pend:(appUp||mods.length)?{target:appUp?v.app.target:'',what:appUp?'MonitorBox itself'+(mods.length?' and '+mods.length+' module'+(mods.length==1?'':'s'):''):mods.length+' module'+(mods.length==1?'':'s')+' ready to install'}:null}}
+ return {ver:v.version||'',auto:(v.autoNotes||[]).map(x=>({id:x.id,text:x.text})),img:!!(v.image&&v.image.outdated),fu:(f.suggestions||[]).map(x=>({title:x.title,on:x.on,labels:x.labels})),pend:(appUp||mods.length)?{target:appUp?v.app.target:'',what:appUp?'MonitorBox itself'+(mods.length?' and '+mods.length+' module'+(mods.length==1?'':'s'):''):mods.length+' module'+(mods.length==1?'':'s')+' ready to install'}:null}}
 /* the bell covers every site: ask this box and each linked site (through the pass-through) once a minute. A site that fails to answer keeps its last answer out of the bell; it is simply left out. */
 async function hdrPoll(){if(($('#hdr')||{}).hidden)return;
  const ids=[''].concat(((siCfg&&siCfg.sites)||[]).filter(s=>(s.link||{}).state==='linked').map(s=>s.id));
