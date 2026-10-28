@@ -124,6 +124,16 @@ class CountersQuick(unittest.TestCase):
         self.assertEqual(second["ports"]["port1"]["label"], "Port 1")
         self.assertNotIn("veth9", second["ports"])
 
+    def test_the_link_state_comes_along_each_time(self):
+        a = self.agent(); c = conn(a, "quick4")
+        OPER = "1.3.6.1.2.1.2.2.1.8"
+        a.mib[f"{OPER}.1"] = 1; a.mib[f"{OPER}.2"] = 2
+        got = C.counters(c)["ports"]
+        self.assertEqual((got["port1"]["up"], got["port2"]["up"]), (True, False))
+        a.mib[f"{OPER}.1"] = 2; a.mib[f"{OPER}.2"] = 1
+        got = C.counters(c)["ports"]
+        self.assertEqual((got["port1"]["up"], got["port2"]["up"]), (False, True), "the quick reading sees the change")
+
     def test_a_link_that_negotiates_down_shows_at_once(self):
         a = self.agent(); c = conn(a, "quick2")
         self.assertEqual(C.counters(c)["ports"]["port1"]["speedMbps"], 1000)

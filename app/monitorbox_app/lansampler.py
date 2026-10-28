@@ -102,7 +102,7 @@ class LanSampler:
             except Exception:
                 held.add(sid)
                 continue
-            ports = [{"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"]}
+            ports = [{"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"], "up": v.get("up")}
                      for nm, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict) and all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))]
             if ports:
                 out.append((sid, {"name": str(c.get("name") or c["id"]), "ports": ports}))

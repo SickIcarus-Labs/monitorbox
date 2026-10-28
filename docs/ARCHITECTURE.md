@@ -72,6 +72,8 @@ One code path, two outputs: **config backup** (`monitorbox.json`, nightly) and *
 
 States: healthy, degraded, failed, unknown, disabled; freshness is separate. The App keeps a dependency map from what you declare, what integrations discover (containers depend on their host, cameras on Scrypted and the network path) and the UniFi topology (device, switch port, switch, uplink). **One alert per root cause:** dependents are marked "affected by" it and stop raising their own alarms, while still displaying what is actually observed. Planned reboots and maintenance work the same way, with a timer, and alert only if the system has not returned when it ends. Alerts use hold-down times, recovery notices, deduplication, maintenance windows and silences. Messages go by email (any SMTP server) or to Home Assistant.
 
+**Port errors.** A built-in item that watches switch port counters and link state from UniFi and SNMP for rising errors, drops and links that go away. Read-only, Degraded never Failed. The rules are in [PORT-WATCH.md](PORT-WATCH.md).
+
 ## 8. Several sites
 
 A full MonitorBox per site. One (the main one) is paired with the others and can manage them; control goes **one way only**. Sites talk over a separate site port (default 8443, off until enabled) using TLS with a pre-shared key made at one-time pairing, so only one port needs forwarding and no certificates are involved. If the link drops, each site keeps watching and alerting on its own and its peers show it as Unknown.

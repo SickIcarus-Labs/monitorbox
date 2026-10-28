@@ -476,3 +476,107 @@ class Counted(unittest.TestCase):
     def test_a_map_that_matches_nothing_does_not_hide_every_port(self):
         self.w.set_shown({"other|Port 1"})
         self.assertEqual(self.w.page()["ports"], 8)
+
+
+class Links(unittest.TestCase):
+    """#293: a link that has been up for an hour is expected up; when it goes down that is a Degraded heads-up. Never for ordinary client ports."""
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.addCleanup(self.d.cleanup)
+        self.paths = Paths(self.d.name)
+        os.makedirs(os.path.dirname(self.paths.config), exist_ok=True)
+        self.t = 1_000_000.0
+        self.w = portwatch.PortWatch(self.paths, clock=lambda: self.t)
+        self.w.set_enabled(True)
+        self.up = {"Port 1": True, "Port 2": True, "Port 3": False}
+
+    def round(self, minutes, **change):
+        self.up.update(change)
+        for _ in range(minutes):
+            self.t += 60
+            self.w.feed([{"name": "Core switch", "ports": [{"name": n, "up": u, "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0} for n, u in self.up.items()]}],
+                        ["sw1"], now=self.t)
+
+    def uplinks(self, *names):
+        self.w.set_flap_ports({self.w.key("sw1", n) for n in names})
+
+    def test_a_link_up_for_an_hour_that_drops_is_a_heads_up_not_a_failure(self):
+        self.uplinks("Port 1")
+        self.round(65)
+        self.assertEqual(self.w.downs(), [])
+        self.round(3, **{"Port 1": False})
+        ok, detail, _, extra = self.w.check()
+        self.assertIs(ok, True)
+        self.assertTrue(extra.get("warn"))
+        self.assertIn("Core switch, Port 1: link is down (was up", detail)
+
+    def test_a_link_that_has_not_been_up_an_hour_is_not_expected(self):
+        self.uplinks("Port 1")
+        self.round(30)
+        self.round(3, **{"Port 1": False})
+        self.assertEqual(self.w.downs(), [])
+
+    def test_a_port_that_was_never_up_stays_quiet(self):
+        self.uplinks("Port 1", "Port 3")
+        self.round(120)
+        self.assertEqual(self.w.downs(), [], "an unplugged card is not a problem")
+
+    def test_an_ordinary_client_port_never_raises_it(self):
+        self.uplinks("Port 1")                                  # Port 2 is a laptop's port
+        self.round(65)
+        self.round(5, **{"Port 2": False})
+        self.assertEqual(self.w.downs(), [], "a laptop that sleeps is not news")
+
+    def test_a_short_blip_waits_for_the_confirmation_time(self):
+        self.uplinks("Port 1")
+        self.round(65)
+        self.up["Port 1"] = False
+        self.t += 30
+        self.w.feed([{"name": "Core switch", "ports": [{"name": "Port 1", "up": False, "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0}]}], ["sw1"], now=self.t)
+        self.assertEqual(self.w.downs(), [], "down for 30 seconds is not yet worth a line")
+
+    def test_not_coming_back_forgets_it_until_the_link_lights_again(self):
+        self.uplinks("Port 1")
+        self.round(65)
+        self.round(3, **{"Port 1": False})
+        key = self.w.downs()[0]["key"]
+        self.w.set_gone([key], True)
+        self.assertEqual(self.w.downs(), [])
+        self.round(3, **{"Port 1": True})
+        self.assertNotIn(key, self.w._gone(), "it lit again, so the mark is gone")
+        self.round(3, **{"Port 1": False})
+        self.assertEqual(self.w.downs(), [], "and it is not expected again until it has been up for an hour")
+        self.round(3, **{"Port 1": True})
+        self.round(65)
+        self.round(3, **{"Port 1": False})
+        self.assertEqual(len(self.w.downs()), 1)
+
+    def test_the_alert_tick_silences_it(self):
+        self.uplinks("Port 1")
+        self.round(65)
+        self.round(3, **{"Port 1": False})
+        self.w.set_known([self.w.downs()[0]["key"]], True)
+        self.assertEqual(self.w.downs(), [])
+
+    def test_both_ends_of_one_cable_are_one_line(self):
+        w = self.w
+        self.t = 2_000_000.0
+        def feed(up):
+            self.t += 60
+            w.feed([{"name": "Core switch", "ports": [{"name": "Port 1", "up": up, "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0}]},
+                    {"name": "Goliath", "ports": [{"name": "eth0", "up": up, "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0}]}], ["sw1", "snmp:srv"], now=self.t)
+        a, b = w.key("sw1", "Port 1"), w.key("snmp:srv", "eth0")
+        w.set_flap_ports({a})
+        w.set_peers({a: (b, "Goliath, eth0"), b: (a, "Core switch, Port 1")})
+        for _ in range(65):
+            feed(True)
+        for _ in range(3):
+            feed(False)
+        self.assertEqual(len(w.downs()), 1)
+
+    def test_the_expectation_survives_a_restart(self):
+        self.uplinks("Port 1")
+        self.round(65)
+        self.w.save(self.t, force=True)
+        again = portwatch.PortWatch(self.paths, clock=lambda: self.t)
+        self.assertTrue(again.links[again.key("sw1", "Port 1")]["expected"])
