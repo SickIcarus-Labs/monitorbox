@@ -273,23 +273,34 @@ def counters(conn, only=None):
     s = session(conn)
     key = json.dumps(conn, sort_keys=True)
     lay = _layouts.get(key)
+    try:
+        ut = clean(s.get([SYS_UPTIME]).get(SYS_UPTIME))                 # the device's uptime: with each interface's last-change time it says how long ago a link went up or down
+    except L.SnmpError:
+        ut = None
+    ut = ut if isinstance(ut, int) else None
     if lay and time.time() - lay["at"] < LAYOUT_FOR:
         try:
-            out = _quick(s, lay, only)
+            out = _quick(s, lay, only, ut)
             if out is not None:
-                return {"ports": out, "sysName": lay.get("sys", ""), "macs": lay.get("macs", [])}
+                return {"ports": out, "sysName": lay.get("sys", ""), "macs": lay.get("macs", []), **({"uptimeS": ut // 100} if ut is not None else {})}
         except L.SnmpError:
             pass                                                       # fall back to the full walk, which says what is wrong
         _layouts.pop(key, None)
-    out, lay = _full(s)
+    out, lay = _full(s, ut)
     if lay["ifs"]:
         lay["at"] = time.time()
         _layouts[key] = lay
-    return {"ports": out, "sysName": lay.get("sys", ""), "macs": lay.get("macs", [])}
+    return {"ports": out, "sysName": lay.get("sys", ""), "macs": lay.get("macs", []), **({"uptimeS": ut // 100} if ut is not None else {})}
 
 
-def _row(a, b, wide, sp, lab, bad, oper=None):
+def _ago(uptime, changed):
+    """Seconds since the link last changed, from the device's uptime and the interface's last-change time (both in hundredths of a second); None when either is missing."""
+    return (uptime - changed) // 100 if isinstance(uptime, int) and isinstance(changed, int) and uptime >= changed else None
+
+
+def _row(a, b, wide, sp, lab, bad, oper=None, ago=None, stack=None):
     return {"in": a, "out": b, "bits": 64 if wide else 32, **({"up": oper == 1} if isinstance(oper, int) else {}), **({"speedMbps": int(sp)} if isinstance(sp, int) and sp > 0 else {}), **({"label": lab} if lab else {}),
+            **({"changedAgo": ago} if isinstance(ago, int) else {}), **(stack or {}),
             **{k: v for k, v in bad.items() if isinstance(v, int)}}
 
 
@@ -314,14 +325,14 @@ def _read(s, idxs, wide, alias=False, counters_only=False):
     c_in, c_out = (IF_HC_IN, IF_HC_OUT) if wide else (IF_IN, IF_OUT)
     cols = [("in", c_in), ("out", c_out)]
     if not counters_only:
-        cols += [("speed", IF_HIGHSPEED), ("oper", IF_OPER), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC)]
+        cols += [("speed", IF_HIGHSPEED), ("oper", IF_OPER), ("changed", IF_LAST_CHANGE), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC)]
         if alias:
             cols.append(("alias", IF_ALIAS))
     got = _get_many(s, [f"{oid}.{idx}" for idx in idxs for _, oid in cols])
     return {idx: {name: clean(got.get(f"{oid}.{idx}")) for name, oid in cols} for idx in idxs}
 
 
-def _quick(s, lay, only=None):
+def _quick(s, lay, only=None, ut=None):
     """The counters of the interfaces already known, by index. None when an interface no longer answers (the list changed: read it again)."""
     wide, out = lay["wide"], {}
     want = set(only) if only else None
@@ -331,11 +342,44 @@ def _quick(s, lay, only=None):
         v = vals[idx]
         if not isinstance(v["in"], int) or not isinstance(v["out"], int):
             return None
-        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"])      # the speed is read each time: a link that negotiates down shows at once
+        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"], _ago(ut, v["changed"]), lay.get("stack", {}).get(idx))      # the speed is read each time: a link that negotiates down shows at once
     return out
 
 
-def _full(s):
+def _stack(s, names):
+    """Which interfaces sit on top of which, from the standard stack table: {index: {"stacked": True}} for a bond, team or VLAN (it has interfaces beneath it, so it only repeats them),
+    and {index: {"bond": ["bond0"]}} for a physical card that is a member of a link aggregation. Empty when the device has no such table."""
+    lower, higher = {}, {}
+    try:
+        for suffix in s.column(IF_STACK):
+            hi, _, lo = suffix.partition(".")
+            if hi.isdigit() and lo.isdigit() and hi != "0" and lo != "0":
+                lower.setdefault(hi, set()).add(lo)
+                higher.setdefault(lo, set()).add(hi)
+    except L.SnmpError:
+        return {}
+    try:
+        types = {i: clean(v) for i, v in s.column(IF_TYPE).items()}
+    except L.SnmpError:
+        types = {}
+    nm = lambda i: L.text(names.get(i) or b"")
+
+    def is_lag(i):
+        return types.get(i) == 161 or nm(i).lower().startswith(LAG_NAMES)
+    out = {}
+    for i in set(lower) | set(higher):
+        row = {}
+        if lower.get(i):
+            row["stacked"] = True
+        bonds = sorted(nm(h) for h in higher.get(i, ()) if len(lower.get(h, ())) >= 2 and is_lag(h) and nm(h))
+        if bonds:
+            row["bond"] = bonds[:3]
+        if row:
+            out[i] = row
+    return out
+
+
+def _full(s, ut=None):
     """The first reading: one walk of the interface names, then the counters of just the real interfaces by index (a server can have hundreds of container
     interfaces; walking every column across all of them is what made this slow)."""
     names = s.column(IF_NAME) or s.column(IF_DESCR)
@@ -347,12 +391,13 @@ def _full(s):
         if have:
             break
     vals = _read(s, have, wide, alias=True) if have else {}               # the rest only for interfaces that have counters at all (a switch can list hundreds that do not)
+    stack = _stack(s, names) if have else {}
     for idx, nm in real.items():
         v = vals.get(idx)
         if not v or not isinstance(v["in"], int) or not isinstance(v["out"], int):
             continue
         lab = L.text(v["alias"] or b"")[:60]
-        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"])
+        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"], _ago(ut, v["changed"]), stack.get(idx))
         ifs[idx] = (nm, v["speed"] if isinstance(v["speed"], int) else None, lab)
     try:
         sysname = L.text(s.get([SYS_NAME]).get(SYS_NAME) or b"")[:60]           # the device's own name: the App uses it to tell which UniFi device this connection is
@@ -362,7 +407,7 @@ def _full(s):
         macs = sorted({_mac_text(m) for m in s.column(IF_PHYS).values() if isinstance(m, (bytes, bytearray)) and len(m) == 6 and any(m)})[:1000]     # every interface's address, shortened: the App matches them to a UniFi device's address
     except L.SnmpError:
         macs = []
-    return out, {"wide": wide, "ifs": ifs, "sys": sysname, "macs": macs}
+    return out, {"wide": wide, "ifs": ifs, "sys": sysname, "macs": macs, "stack": stack}
 
 
 # ---------------------------------------------------------------- Re-detect ----
@@ -420,6 +465,9 @@ def discover(conn, params=None):
 IF_ALIAS = "1.3.6.1.2.1.31.1.1.1.18"
 IF_IN_ERR, IF_OUT_ERR, IF_IN_DISC, IF_OUT_DISC = (f"1.3.6.1.2.1.2.2.1.{i}" for i in (14, 20, 13, 19))
 SYS_DESCR = "1.3.6.1.2.1.1.1.0"
+IF_LAST_CHANGE, IF_TYPE = "1.3.6.1.2.1.2.2.1.9", "1.3.6.1.2.1.2.2.1.3"   # when the link last went up or down (timeticks), and what kind of interface it is (161 = link aggregation)
+IF_STACK = "1.3.6.1.2.1.31.1.2.1.3"                  # ifStackStatus, indexed higher.lower: which interfaces sit on top of which (a bond over its cards, a VLAN over a port)
+LAG_NAMES = ("bond", "team", "po", "port-channel", "ae", "lag")
 IF_PHYS = "1.3.6.1.2.1.2.2.1.6"                     # ifPhysAddress: the card's own address, so a server can be matched to the switch port it is plugged into
 LLDP_REM = "1.0.8802.1.1.2.1.4.1.1"                 # lldpRemTable: .5 chassis id, .7 port id, .9 system name; index = time mark . local port . remote index
 BASE_PORT_IF = "1.3.6.1.2.1.17.1.4.1.2"             # dot1dBasePortIfIndex: bridge port -> ifIndex

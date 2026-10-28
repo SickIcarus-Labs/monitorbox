@@ -357,6 +357,44 @@ class Servers(unittest.TestCase):
         self.assertEqual(sorted(self.w.series), ["..:00:00:00|Port 1"], "one reader for the switch: its UniFi port, with the SNMP counters; not a second set of interfaces")
         self.assertEqual(list(self.w.series["..:00:00:00|Port 1"])[-1][1:3], [30, 70], "the SNMP counters are the ones used")
 
+    def card_sampler(self, reply):
+        """A server whose answer is reply() (a dict of cards), read every round."""
+        from unittest import mock
+        from monitorbox_app import lansampler, portpeers
+        mock.patch.object(lansampler, "SERVER_EVERY", 1).start(); self.addCleanup(mock.patch.stopall)
+        other = {"name": "Other", "mac": "..:09:09:09", "type": "usw", "ip": "192.0.2.50", "ports": []}       # a UniFi device that is not the server
+        call = lambda mod, method, params, timeout: {"devices": [other]} if mod == "unifi-network" else reply()
+        conns = [{"id": "u", "module": "unifi-network", "host": "192.0.2.1"}, {"id": "nas", "name": "NAS", "module": "snmp", "host": "192.0.2.77"}]
+        return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
+
+    def test_a_server_card_with_a_link_is_a_counted_port_one_without_is_not_and_a_bond_is_skipped(self):
+        card = lambda **kw: {"in": 1, "out": 1, "bits": 64, "rxErr": 0, "txErr": 0, "rxDrop": 0, "txDrop": 0, **kw}
+        sm = self.card_sampler(lambda: {"ports": {"eth0": card(up=True, bond=["bond0"]), "eth1": card(up=True, bond=["bond0"]), "eth2": card(up=False), "bond0": card(up=True, stacked=True)}})
+        sm.tick()
+        page = self.w.page()
+        self.assertEqual(sorted(w["label"] for w in page["watched"]), ["NAS, eth0", "NAS, eth1"], "the two cards with a link; the unused card is read quietly, the bond is not a port")
+        self.assertEqual(page["cards"], 2)
+        self.assertEqual(page["others"]["names"], ["NAS, eth2"])
+        self.assertEqual(self.w.named(self.w.key("snmp:nas", "eth1"), "NAS, eth1"), "NAS, eth1 (in bond0)")
+        self.assertNotIn(self.w.key("snmp:nas", "bond0"), self.w.series)
+
+    def test_the_box_counts_link_drops_on_a_server_card_from_its_last_change_time(self):
+        state = {"up": True, "ago": 5000, "uptime": 90000}
+        reply = lambda: {"uptimeS": state["uptime"], "ports": {"eth0": {"in": 1, "out": 1, "bits": 64, "rxErr": 0, "txErr": 0, "rxDrop": 0, "txDrop": 0, "up": state["up"], "changedAgo": state["ago"]}}}
+        sm = self.card_sampler(reply)
+        key = self.w.key("snmp:nas", "eth0")
+        flaps = lambda: list(self.w.series[key])[-1][3]
+        step = lambda **kw: (state.update(kw), self.t.__setitem__(0, self.t[0] + 30), sm.tick())
+        sm.tick(); self.assertEqual(flaps(), 0)
+        step(up=False, ago=5, uptime=90030); self.assertEqual(flaps(), 1, "the link went down")
+        step(up=True, ago=5, uptime=90060); self.assertEqual(flaps(), 1, "coming back up ends the drop, it is not another")
+        step(up=True, ago=10, uptime=90090); self.assertEqual(flaps(), 2, "up before, up now, changed in between: down and up again")
+        step(up=True, ago=40, uptime=90120); self.assertEqual(flaps(), 2, "no change, no drop")
+        step(up=False, ago=3, uptime=100); self.assertEqual(flaps(), 2, "the whole device restarted: every link time started over, that is not a drop")
+        self.w.save(self.t[0], force=True)
+        again = portwatch.PortWatch(self.paths, clock=lambda: self.t[0])
+        self.assertEqual(again.last_flaps(key), 2, "a restarted box carries on from the count it had")
+
     def test_a_connection_is_the_switch_whose_address_one_of_its_interfaces_has_whatever_it_is_called(self):
         sm = self.device_sampler(["Core A", "Core B"], conn_name="Unrelated", conn_host="192.0.2.99")      # UniFi addresses: ..:00:00:00 (Core A) and ..:00:00:01 (Core B)
         inner = sm.call
@@ -417,7 +455,8 @@ class Servers(unittest.TestCase):
     def test_a_device_read_as_a_server_says_why_and_what_unifi_calls_its_devices(self):
         sm = self.device_sampler(["Core B"], conn_name="Primary link", conn_host="192.0.2.99")
         inner = sm.call
-        sm.call = lambda mod, method, params, timeout: ({**inner(mod, method, params, timeout), "sysName": "Chassis-7"} if mod == "snmp" else inner(mod, method, params, timeout))
+        down = lambda r: {**r, "sysName": "Chassis-7", "ports": {n: {**v, "up": False} for n, v in r["ports"].items()}}       # cards with no link are the "other interfaces"; cards with a link are counted ports now
+        sm.call = lambda mod, method, params, timeout: (down(inner(mod, method, params, timeout)) if mod == "snmp" else inner(mod, method, params, timeout))
         sm.tick()
         self.w.set_shown({"..:00:00:00|Port 1"})
         others = self.w.page()["others"]

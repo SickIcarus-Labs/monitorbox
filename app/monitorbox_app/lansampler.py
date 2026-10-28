@@ -36,6 +36,8 @@ class LanSampler:
         self.sys_raw = {}       # SNMP connection id -> the device's own name as it reported it
         self.explain = lambda c: ""
         self.macs_of = {}       # SNMP connection id -> the shortened addresses of all its interfaces ("..:dd:ee:ff", like the UniFi report): the surest way to tell which UniFi device it is
+        self.links = {}         # server card key -> {"n": link drops counted, "abs": when its link last changed, "up": whether it was up}: the box counts them itself, from each card's last-change time
+        self.uptime = {}        # server id -> its uptime when last read: a drop in it is a restart, not a flap
         self.sys_of = {}        # SNMP connection id -> the device's own name (sysName), squashed: tells which UniFi device a connection is when the address does not
         self.wifi = {}          # port name in the history (under WIFI) -> {"name", "ap"}: the Wi-Fi clients read this round
 
@@ -176,13 +178,43 @@ class LanSampler:
                     continue
             if self.watch is not None:
                 self.watch.set_why(sid, self.explain(c))
-            ports = [{"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"], "up": v.get("up")}
-                     for nm, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict) and not stacked(nm) and all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))]
+            up_s = r.get("uptimeS") if isinstance(r, dict) else None
+            rebooted = isinstance(up_s, int) and isinstance(self.uptime.get(sid), int) and up_s + 5 < self.uptime[sid]
+            if isinstance(up_s, int):
+                self.uptime[sid] = up_s
+            now = self.clock()
+            ports, members = [], {}
+            for nm, v in ((r or {}).get("ports") or {}).items():
+                if not isinstance(v, dict) or v.get("stacked") or stacked(nm) or not all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop")):
+                    continue                                          # a bond, team or VLAN only repeats the cards under it
+                key = self.watch.key(sid, nm) if self.watch is not None else f"{sid}|{nm}"
+                ports.append({"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"], "up": v.get("up"),
+                              **({"link_down_count": self._link_drops(key, v, now, rebooted)} if isinstance(v.get("changedAgo"), int) else {})})
+                if v.get("bond"):
+                    members[key] = ", ".join(v["bond"])
+            if self.watch is not None:
+                self.watch.set_cards(sid, [self.watch.key(sid, p["name"]) for p in ports if p.get("up") is not False], members)
             if ports:
                 out.append((sid, {"name": str(c.get("name") or c["id"]), "ports": ports}))
             else:
                 held.add(sid)
         return out, held
+
+    def _link_drops(self, key, v, now, rebooted):
+        """How many times this card's link went down since the box started counting. The device only says when the link last changed, so a change since the last read is a drop if
+        the link is down now, or if it is up now and was up before (down and up again between two reads); coming back up after being down is the end of a drop, not a new one."""
+        st = self.links.get(key)
+        if st is None:
+            st = self.links[key] = {"n": self.watch.last_flaps(key) if self.watch is not None else 0, "abs": None, "up": v.get("up")}
+        absn = now - v["changedAgo"]
+        if rebooted or st["abs"] is None:
+            st["abs"] = absn                                          # a restart resets every link's time: not a flap
+        elif absn - st["abs"] > 3:
+            if v.get("up") is False or (v.get("up") is True and st["up"] is True):
+                st["n"] += 1
+            st["abs"] = absn
+        st["up"] = v.get("up")
+        return st["n"]
 
     def _feed_watch(self, devices, ids, snmp_bad, snmp_conf, now, servers=(), held_servers=()):
         """The port watch's counters. UniFi's port table has them for every UniFi device; a switch that is also an SNMP connection gives them over SNMP

@@ -131,6 +131,29 @@ class CountersQuick(unittest.TestCase):
         self.assertEqual(C.counters(c)["macs"], ["..:aa:bb:cc", "..:aa:bb:cd"])
         self.assertEqual(C.counters(c)["macs"], ["..:aa:bb:cc", "..:aa:bb:cd"], "kept with the layout")
 
+    def test_a_link_says_how_long_ago_it_last_changed(self):
+        a = self.agent(); c = conn(a, "quick12")
+        a.mib["1.3.6.1.2.1.1.3.0"] = 100_000                              # up for 1,000 seconds
+        a.mib[f"{self.T}.9.1"] = 70_000                                   # port1 changed at 700 s: 300 s ago
+        first = C.counters(c)
+        self.assertEqual(first["ports"]["port1"]["changedAgo"], 300)
+        self.assertEqual(first["uptimeS"], 1000)
+        self.assertNotIn("changedAgo", first["ports"]["port2"], "no last-change time: nothing invented")
+        a.mib["1.3.6.1.2.1.1.3.0"] = 100_500; a.mib[f"{self.T}.9.1"] = 100_000
+        self.assertEqual(C.counters(c)["ports"]["port1"]["changedAgo"], 5, "a link that just changed")
+
+    def test_a_bond_and_a_vlan_are_stacked_and_the_cards_under_a_bond_say_so(self):
+        a = self.agent(); c = conn(a, "quick13")
+        X, T, S = self.X, self.T, "1.3.6.1.2.1.31.1.2.1.3"
+        a.mib.update({f"{X}.1.4": "bond0", f"{X}.6.4": ("c64", 5), f"{X}.10.4": ("c64", 6), f"{X}.1.5": "port2.100", f"{X}.6.5": ("c64", 7), f"{X}.10.5": ("c64", 8),
+                      f"{S}.4.1": 1, f"{S}.4.2": 1, f"{S}.5.2": 1, f"{S}.0.4": 1, f"{S}.0.5": 1, f"{S}.0.1": 1})        # bond0 (4) over port1 and port2; a VLAN (5) over port2 alone
+        got = C.counters(c)["ports"]
+        self.assertTrue(got["bond0"]["stacked"] and got["port2.100"]["stacked"])
+        self.assertEqual(got["port1"]["bond"], ["bond0"])
+        self.assertEqual(got["port2"]["bond"], ["bond0"], "a VLAN over a single card is not a bond: only the bond is named")
+        self.assertNotIn("stacked", got["port1"])
+        self.assertEqual(C.counters(c)["ports"]["port1"]["bond"], ["bond0"], "remembered with the layout")
+
     def test_the_devices_own_name_comes_with_the_counters_first_read_and_after(self):
         a = self.agent(); c = conn(a, "quick10")
         a.mib["1.3.6.1.2.1.1.5.0"] = "Switch2"
@@ -146,7 +169,7 @@ class CountersQuick(unittest.TestCase):
         before = len(a.requests)
         got = C.counters(c, only=["Port 1"])["ports"]                    # by the label, as the App knows the port
         self.assertEqual(set(got), {"port1"})
-        asked = [o for t, oids in a.requests[before:] if t == L.GET for o in oids]
+        asked = [o for t, oids in a.requests[before:] if t == L.GET for o in oids if o != "1.3.6.1.2.1.1.3.0"]       # the device's uptime is asked on every read (it dates link changes): not a port
         self.assertTrue(asked and all(o.rsplit(".", 1)[1] == "1" for o in asked), "port2 was not asked for")
         self.assertEqual(set(C.counters(c, only=["no such port"])["ports"]), {"port1", "port2"}, "nothing matched: read them all")
 
