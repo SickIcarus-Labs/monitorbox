@@ -73,6 +73,33 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_update_all_sites_button_starts_the_sites_and_shows_each_ones_progress(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+            self.assertEqual(pg.locator("#upsites").count(), 0, "no linked site, no button")
+            pg.evaluate("""()=>{window._posted=[];let n=0;const f=window.fetch;
+              window.fetch=(u,o)=>{u=String(u);
+                if(u.endsWith('/api/sites')&&!(o&&o.method))return f(u,o).then(async r=>{const j=await r.json();j.sites=[{id:'tb',name:'Cabin',address:'x',link:{state:'linked'}}];return new Response(JSON.stringify(j))});
+                if(u.endsWith('/api/versions'))return f(u,o).then(async r=>{const j=await r.json();if(j.app){j.app.needsApply=true;j.app.target='9.9.9';j.app.failed=[]}return new Response(JSON.stringify(j))});
+                if(u.endsWith('/api/sites/update-all')){
+                  if(o&&o.method==='POST'){window._posted.push(u);return Promise.resolve(new Response(JSON.stringify({running:true,sites:[],local:null})))}
+                  n++;const st=n<2?'asking':'restarting';return Promise.resolve(new Response(JSON.stringify({running:n<2,sites:[{id:'tb',name:'Cabin',state:st,message:''}],local:{state:n<2?'waiting':'done',message:''}})))}
+                return f(u,o)};
+              loadSiteCfg().then(()=>route())}""")
+            pg.wait_for_selector("#upsites:not([disabled])")
+            self.assertEqual(pg.inner_text("#upsites"), "Update all sites")
+            pg.click("#upsites")
+            pg.wait_for_function("document.querySelector('#upsitesout').innerText.includes('Cabin: installing, restarting')", timeout=15000)
+            self.assertEqual(len(pg.evaluate("window._posted")), 1, "pressed once, asked once")
+            self.assertIn("This box: done", pg.inner_text("#upsitesout"))
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_bell_says_when_the_container_image_needs_re_pulling_and_the_updates_page_explains(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:
