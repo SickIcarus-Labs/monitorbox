@@ -59,7 +59,7 @@ class LanSampler:
                 r = self.call("unifi-network", "lan_report", {"connection": u, "clients": True}, 30)
             except Exception:
                 continue
-            devices += [d for d in (r or {}).get("devices") or [] if isinstance(d, dict)]
+            devices += lanmap.tell_ports_apart([d for d in (r or {}).get("devices") or [] if isinstance(d, dict)])
             for c in (r or {}).get("clients") or []:
                 # a Wi-Fi client has no switch port of its own; the controller's per-client rate (through the access point, so local traffic too) stands in for one.
                 # rx/tx are kept as the controller names them: which way they point is settled against the port being asked about (server.lan_peers), not assumed here.

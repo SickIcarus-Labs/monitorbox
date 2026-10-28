@@ -23,6 +23,25 @@ def _kind(d):
     return "gateway" if t in GATEWAYS else "ap" if t == "uap" else "switch" if t == "usw" else "device"
 
 
+def tell_ports_apart(devices):
+    """Port names repeat ("Data" on three ports of one access point), and the port watch files each port under its device and name, so two same-named ports
+    would share one history. A name that repeats on a device gets " (port N)" added; an access point's ports always do (its port names are generic, and
+    the controller only reports the ones that are up, so a repeat could appear later). Returns copies; the report is not changed."""
+    out = []
+    for d in devices:
+        ports = d.get("ports") if isinstance(d.get("ports"), list) else None
+        if not ports:
+            out.append(d)
+            continue
+        count = {}
+        for p in ports:
+            if isinstance(p, dict) and p.get("name"):
+                count[p["name"]] = count.get(p["name"], 0) + 1
+        ap = d.get("type") == "uap"
+        out.append({**d, "ports": [{**p, "name": f"{p['name']} (port {p.get('port_idx')})"} if isinstance(p, dict) and p.get("name") and (ap or count[p["name"]] > 1) else p for p in ports]})
+    return out
+
+
 def _state(word):
     """The controller's own word for a device -> one of our five states (display only: the monitored states come from the checks)."""
     if word == "connected":
@@ -131,7 +150,7 @@ def build(sources, matched=None):
         if not isinstance(r, dict):
             continue
         if s.get("module") == "unifi-network":
-            devices += [d for d in r.get("devices") or [] if isinstance(d, dict)]
+            devices += tell_ports_apart([d for d in r.get("devices") or [] if isinstance(d, dict)])
             clients += [c for c in r.get("clients") or [] if isinstance(c, dict)]
             if r.get("clientsNote"):
                 notes.append("This UniFi login cannot read the client list, so devices on ports are not named.")
@@ -194,34 +213,34 @@ def build(sources, matched=None):
                                      "parent": [node["parent"], pname[node["parent"]].get(up.get("remotePort"))] if pname[node["parent"]].get(up.get("remotePort")) else None}}
         if node["kind"] == "ap":
             node["wifi"] = sum(1 for c in clients if not c.get("wired") and c.get("ap") == name)      # clients name their access point; same-named ones share the count
-        else:
-            child_ports = {(c.get("uplink") or {}).get("remotePort") for c in children.get(me, [])}
-            members = {}
-            for p in ports.values():
-                if p.get("aggregated_by"):
-                    members.setdefault(p["aggregated_by"], []).append(p)
-            for idx in sorted(i for i in ports if isinstance(i, int)):
-                p = ports[idx]
-                wan = bool(p.get("is_uplink")) and not node["link"]          # a gateway has no parent switch: its "uplink" port is the way out to the internet, a port in its own right
-                if (p.get("is_uplink") and not wan) or idx in child_ports or p.get("aggregated_by"):
-                    continue
-                group = [p] + members.get(idx, [])
-                gports = {g.get("port_idx") for g in group}
-                here = [c for c in wired if c.get("switch") == name and c.get("port") in gports]
-                server = next((hosts[c["mac"]] for c in here if c.get("mac") in hosts), None)
-                if not server:
-                    server = next((hosts[g["lastMac"]] for g in group if g.get("lastMac") in hosts), None)
-                who = server or (here[0].get("name") or here[0].get("ip") or "unnamed device" if here else ("Internet (WAN)" if wan and node["kind"] == "gateway" else "Uplink" if wan else ""))
-                # a switch on this port (found by its SNMP name, or a client of that name) is a link between switches: everything behind it passes through
-                infra = wan or (bool(switches) and (str(server or "").lower() in switches or any(str(c.get("name") or "").lower() in switches for c in here)))
-                if len(here) > 1 and not server:
-                    who += f" and {len(here) - 1} more"
-                node["ports"].append({"keys": [[me, g.get("name")] for g in sorted(group, key=lambda g: g.get("port_idx") or 0) if g.get("name")],
-                                      "port": "+".join(str(g.get("port_idx")) for g in sorted(group, key=lambda g: g.get("port_idx") or 0)), "name": who,
-                                      "server": bool(server), "infra": infra, "macs": [c.get("mac") for c in here if c.get("mac")], "ips": [c.get("ip") for c in here if c.get("ip")], "speedMbps": sum(_num(g.get("speed")) for g in group),
-                                      "down": sum(_num(g.get("outBps")) for g in group), "up_bps": sum(_num(g.get("inBps")) for g in group),
-                                      "errors": sum(_num(g.get("rx_errors")) + _num(g.get("tx_errors")) for g in group),
-                                      "drops": sum(_num(g.get("rx_dropped")) + _num(g.get("tx_dropped")) for g in group)})
+        # an access point can have wired ports of its own (an in-wall one has four): listed like a switch's
+        child_ports = {(c.get("uplink") or {}).get("remotePort") for c in children.get(me, [])}
+        members = {}
+        for p in ports.values():
+            if p.get("aggregated_by"):
+                members.setdefault(p["aggregated_by"], []).append(p)
+        for idx in sorted(i for i in ports if isinstance(i, int)):
+            p = ports[idx]
+            wan = bool(p.get("is_uplink")) and not node["link"]          # a gateway has no parent switch: its "uplink" port is the way out to the internet, a port in its own right
+            if (p.get("is_uplink") and not wan) or idx in child_ports or p.get("aggregated_by"):
+                continue
+            group = [p] + members.get(idx, [])
+            gports = {g.get("port_idx") for g in group}
+            here = [c for c in wired if c.get("switch") == name and c.get("port") in gports]
+            server = next((hosts[c["mac"]] for c in here if c.get("mac") in hosts), None)
+            if not server:
+                server = next((hosts[g["lastMac"]] for g in group if g.get("lastMac") in hosts), None)
+            who = server or (here[0].get("name") or here[0].get("ip") or "unnamed device" if here else ("Internet (WAN)" if wan and node["kind"] == "gateway" else "Uplink" if wan else ""))
+            # a switch on this port (found by its SNMP name, or a client of that name) is a link between switches: everything behind it passes through
+            infra = wan or (bool(switches) and (str(server or "").lower() in switches or any(str(c.get("name") or "").lower() in switches for c in here)))
+            if len(here) > 1 and not server:
+                who += f" and {len(here) - 1} more"
+            node["ports"].append({"keys": [[me, g.get("name")] for g in sorted(group, key=lambda g: g.get("port_idx") or 0) if g.get("name")],
+                                  "port": "+".join(str(g.get("port_idx")) for g in sorted(group, key=lambda g: g.get("port_idx") or 0)), "name": who,
+                                  "server": bool(server), "infra": infra, "macs": [c.get("mac") for c in here if c.get("mac")], "ips": [c.get("ip") for c in here if c.get("ip")], "speedMbps": sum(_num(g.get("speed")) for g in group),
+                                  "down": sum(_num(g.get("outBps")) for g in group), "up_bps": sum(_num(g.get("inBps")) for g in group),
+                                  "errors": sum(_num(g.get("rx_errors")) + _num(g.get("tx_errors")) for g in group),
+                                  "drops": sum(_num(g.get("rx_dropped")) + _num(g.get("tx_dropped")) for g in group)})
         nodes.append(node)
     nodes.sort(key=lambda n: (n["kind"] != "gateway", n["name"].lower()))
     iot = sorted({c["ip"] for c in clients if c.get("ip") and is_iot(c)})

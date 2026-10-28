@@ -37,6 +37,8 @@ A **packet drop** (not to be confused with a **link drop**, where the link itsel
 
 That is why packet drops only alert on uplinks, links between switches and servers, never on client ports. If a server or uplink alerts on drops and the cause is a speed step-down, you can: untick the port, or ask for a drops-only option, or enable flow control if there are no latency-sensitive applications such as gaming or VoIP (flow control turns drops into pauses, which hurts those).
 
+**Access points and repeated names:** an access point with Ethernet ports of its own (an in-wall one) has them listed and watched like a switch's; its uplink is the link to its parent. Ports that repeat a name on one device ("Data" on three ports) are told apart by port number ("Data (port 4)"), so each keeps its own history. An access point's ports always carry the number, because the controller reports only the ports that are up and a repeat could appear later.
+
 **Wi-Fi servers:** link drops are far more common on Wi-Fi than on Ethernet (roaming, power saving). They are counted under the same rules as a wired card, so a Wi-Fi server that flaps more than its own usual still gets a heads-up. Hard-wire the server, or untick that link, if it is too chatty.
 
 ## What counts as a problem: links going away
