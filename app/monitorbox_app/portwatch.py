@@ -113,6 +113,7 @@ class PortWatch:
         self.series = {}          # "device id|port name" -> deque of [t, errors, drops, flaps]
         self.labels = {}          # the same keys -> "Switch name, Port 5"
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
+        self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
         self.restore()
 
@@ -148,7 +149,7 @@ class PortWatch:
         stale = sorted(k for k in known if k not in snap)
         for k in stale:
             off.append({"key": k, "label": k.split("|", 1)[-1] if "|" in k else k, "alert": False, "kinds": []})
-        return {"on": self.enabled(), "ports": len(snap), "rising": rising, "off": off}
+        return {"on": self.enabled(), "ports": len(self._counted(snap)), "rising": rising, "off": off}
 
     def known(self):
         """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""
@@ -233,6 +234,14 @@ class PortWatch:
         if not j["split"]:
             return {"label": label, "state": "learning", "split": {}}
         return {"label": label, "state": "figures", "split": j["split"]}
+
+    def set_shown(self, keys):
+        self.shown = set(keys)
+
+    def _counted(self, keys):
+        keys = list(keys)
+        mine = [k for k in keys if k in self.shown]
+        return mine or keys           # nothing matched the map (or no map yet): count what is read rather than say there is nothing
 
     def set_flap_ports(self, keys):
         """The ports whose link drops are worth reporting. A port with a laptop or a TV on it drops every time that sleeps, so it is left out."""
@@ -340,8 +349,9 @@ class PortWatch:
         if not self.enabled():
             return None, "port watching is switched off", None, {}
         with self.lock:
-            n = len(self.series)
-            ready = sum(1 for q in self.series.values() if len(q) >= 2 and q[-1][0] - q[0][0] >= MIN_HISTORY)
+            mine = self._counted(self.series)
+            n = len(mine)
+            ready = sum(1 for k in mine if len(self.series[k]) >= 2 and self.series[k][-1][0] - self.series[k][0][0] >= MIN_HISTORY)
         if not self.fed and self.clock() - self.started < FIRST_READINGS:
             return None, "waiting for the first port readings", None, {"starting": True}      # a restart: its counters come in a moment, that is not "unknown"
         if not self.fed:

@@ -1137,14 +1137,18 @@ class App:
         if not on:
             return
         flap = set()          # link drops only count on uplinks, links between switches and servers
+        shown = set()         # every port the map shows: the ports "in use", which is what the watch counts and lists
         for n in m.get("nodes", []):
             link = n.get("link")
             if link and (link.get("keys") or {}).get("self"):
                 flap |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
+                shown |= {self.portwatch.key(*link["keys"][side]) for side in ("self", "parent") if link["keys"].get(side)}
             for p in n.get("ports", []):
+                shown |= {self.portwatch.key(*k) for k in p.get("keys") or []}
                 if p.get("server") or p.get("infra"):
                     flap |= {self.portwatch.key(*k) for k in p.get("keys") or []}
         self.portwatch.set_flap_ports(flap)
+        self.portwatch.set_shown(shown)
         peers = {}            # the two ends of every link between devices
         for n in m.get("nodes", []):
             link = n.get("link")
