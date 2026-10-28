@@ -1134,6 +1134,14 @@ class App:
         """Adds what the port watch knows to each map port and uplink (only while it is switched on): `watch` = {learning, rising, perHour, was, known}."""
         on = self.portwatch.enabled()
         m["portwatch"] = {"on": on}
+        used = set()          # the ports the map shows: those with something on them, and both ends of each cable between devices (the same ports the watch counts)
+        for n in m.get("nodes", []):
+            ks = ((n.get("link") or {}).get("keys")) or {}
+            used |= {self.portwatch.key(*ks[side]) for side in ("self", "parent") if ks.get(side)}
+            for p in n.get("ports", []):
+                used |= {self.portwatch.key(*k) for k in p.get("keys") or []}
+        if isinstance(m.get("counts"), dict):
+            m["counts"]["ports"] = len(used)
         if not on:
             return
         flap = set()          # link drops only count on uplinks, links between switches and servers
