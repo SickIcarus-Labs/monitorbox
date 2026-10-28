@@ -135,6 +135,8 @@ class PortWatch:
         self.members = {}         # key -> the bond or team a network card belongs to ("bond0"): said in the alert
         self.used_at = {}         # key -> when the map last showed this port: a port that was in use in the last day keeps its history while its device sleeps (link down), the rest of the clean-up is for interfaces that never were ports
         self.speeds = {}          # key -> link speed in Mbit/s, from the map, so the minimums scale with the port
+        self.raw = {}             # key -> the last raw [rx errors, tx errors, rx drops, tx drops] read
+        self.off = {}             # key -> what has been added to each of those so far to undo wraps: some drivers report a 16-bit counter, which starts again after 65,535
         self.card_speeds = {}     # the same for ports read over SNMP, from the device itself (the map does not show a switch that UniFi does not know)
         self.client_ports = set() # keys of ports on an SNMP-only switch that look like a client's (no neighbour, at most one address behind them): packet and link drops are not a problem there
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
@@ -249,13 +251,26 @@ class PortWatch:
                     seen.add(k)
                     self._link(k, p.get("up"), now)
                     self.labels[k] = f"{d.get('name') or 'A switch'}, {p['name']}"
-                    row = [now, sum(e), sum(dr), fl or 0, e[0], e[1], dr[0], dr[1]]
+                    raw = [e[0], e[1], dr[0], dr[1]]
+                    off = self.off.setdefault(k, [0, 0, 0, 0])
+                    prev = self.raw.get(k)
+                    for n in range(4):
+                        if prev and raw[n] < prev[n]:
+                            for bits in (16, 32):                         # a counter that falls from just under its top went round, it did not reset
+                                if (1 << bits) * 0.9 <= prev[n] < (1 << bits):
+                                    off[n] += 1 << bits
+                                    break
+                    self.raw[k] = raw
+                    a = [raw[n] + off[n] for n in range(4)]
+                    row = [now, a[0] + a[1], a[2] + a[3], fl or 0, a[0], a[1], a[2], a[3]]
                     q = self.series.setdefault(k, deque())
                     if q and any(row[j] < q[-1][j] for j in (1, 2, 3)):
                         col = next(j for j in (1, 2, 3) if row[j] < q[-1][j])
                         kind = KINDS[col - 1]
                         r = self.resets.setdefault(k, [0, kind, 0.0, None, None])
                         r[0], r[1], r[2], r[3], r[4] = r[0] + 1, kind, now, q[-1][col], row[col]      # what it read before and what it reads now: shown on the page
+                        self.off[k] = [0, 0, 0, 0]
+                        row = [now, raw[0] + raw[1], raw[2] + raw[3], fl or 0, raw[0], raw[1], raw[2], raw[3]]
                         q.clear()                                 # a counter went backwards: the device restarted, so start again from here
                     if not q or now - q[-1][0] >= EVERY:
                         q.append(row)
@@ -269,12 +284,14 @@ class PortWatch:
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
+                self.raw.pop(k, None); self.off.pop(k, None)
             if self.shown:                                              # readings of interfaces the map does not show and nothing has fed for a while: forgotten
                 for k in [k for k in self.series if k not in self.shown and k not in seen and k.rsplit("|", 1)[0] not in hold and not self._was_in_use(k, now)
                           and (not self.series[k] or self.series[k][-1][0] < now - STALE_OTHERS)]:
                     del self.series[k]
                     self.labels.pop(k, None)
                     self.links.pop(k, None)
+                    self.raw.pop(k, None); self.off.pop(k, None)
             if seen:
                 self.fed = True
         self.save(now)
@@ -468,7 +485,8 @@ class PortWatch:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump({"saved": now, "ports": thin, "links": {k: dict(v) for k, v in self.links.items()},
-                           "shown": {"all": sorted(self.shown), "used": sorted(self.used), "ends": sorted(self.link_ends), "speeds": self.speeds, "usedAt": self.used_at, "cards": {k: sorted(v) for k, v in self.cards.items()}}}, f, separators=(",", ":"))
+                           "shown": {"all": sorted(self.shown), "used": sorted(self.used), "ends": sorted(self.link_ends), "speeds": self.speeds, "usedAt": self.used_at, "cards": {k: sorted(v) for k, v in self.cards.items()}},
+                           "wrap": {k: {"raw": self.raw[k], "off": o} for k, o in self.off.items() if any(o) and k in self.raw and k in self.series}}, f, separators=(",", ":"))
             os.replace(tmp, self.history_path)
         except OSError:
             pass                                            # only a slower start next time
@@ -502,6 +520,12 @@ class PortWatch:
                 if isinstance(v, dict) and isinstance(v.get("up"), bool) and isinstance(v.get("since"), (int, float)):
                     self.links[str(k)] = {"up": v["up"], "since": float(v["since"]), "expected": v.get("expected") is True}
         except (AttributeError, TypeError, ValueError):
+            pass
+        try:
+            for k, v in (data.get("wrap") or {}).items():       # ports whose counter has wrapped: without this a restart would read the next wrap as a reset
+                if str(k) in self.series and len(v["raw"]) == 4 and len(v["off"]) == 4:
+                    self.raw[str(k)], self.off[str(k)] = [int(x) for x in v["raw"]], [int(x) for x in v["off"]]
+        except (AttributeError, TypeError, ValueError, KeyError):
             pass
         try:
             sh = data.get("shown") or {}

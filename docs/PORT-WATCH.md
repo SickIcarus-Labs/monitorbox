@@ -23,6 +23,10 @@ What the Port errors item watches, how it decides, and what it never does. The c
 - Errors are watched on every port in use. **Packet drops and link drops** only count on uplinks, links between devices and server ports, never on an ordinary client's port (a laptop that sleeps, or an Apple TV in standby, is not news).
 - The line says how many an hour, the receive/transmit split, how busy the port is, and the other end of the cable when there is one ("other end (label): N receive, M transmit an hour", "still learning" or "no counters"). One-sided counts are normal: the receiving side counts a bad frame.
 
+## Counters that go round
+
+A counter that falls from just under 65,536 (a 16-bit counter) or just under 4,294,967,296 (a 32-bit one) has gone round: the box keeps adding on, so the port's history is not started again. A fall from anywhere else (a device restart) is a reset: the history starts again and the Port errors page says from what to what. Some network cards report a 16-bit drops counter, which goes round every 10 to 15 minutes at around a hundred drops a second.
+
 ## Packet drops are usually congestion, not a fault
 
 A **packet drop** (not to be confused with a **link drop**, where the link itself goes down and comes back) on a port means the switch's outgoing queue for that port overflowed. That happens where a faster network feeds a slower port (a 10 Gbit server or uplink sending a burst to a 1 Gbit device): the switch drops what does not fit and the traffic slows down and recovers. It is normal on a LAN with mixed speeds, and more likely with flow control off. Errors are the better sign of a bad cable or module.

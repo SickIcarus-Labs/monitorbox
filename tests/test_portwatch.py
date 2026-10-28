@@ -977,3 +977,45 @@ class SnmpOnly(unittest.TestCase):
         self.run_for(self.sampler(conns, unifi), 5)
         self.assertFalse([k for k in self.w.series if k.startswith("snmp:swa|")], "read as the UniFi device, not also as a separate one")
         self.assertTrue([k for k in self.w.series if k.endswith("|Gi1/0/1")])
+
+
+class WrappingCounters(unittest.TestCase):
+    """Regression (Arrrrr3, eno3): a card that reports a 16-bit drop counter (it starts again after 65,535) read as a reset every 10 to 15 minutes, so the port never finished learning.
+    A counter that falls from just under its top went round; one that falls from anywhere else is a reset."""
+    def make(self):
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        paths = Paths(d.name); os.makedirs(os.path.dirname(paths.config), exist_ok=True)
+        w = portwatch.PortWatch(paths, clock=lambda: 200.0); w.set_enabled(True)
+        return w, paths
+
+    def feed(self, w, raws, start=0):
+        for m, v in enumerate(raws):
+            w.feed([dev("Core", **{"Port 1": (0, 0, v, 0, 0)})], ["sw1"], now=start + m * 30)
+
+    def test_a_sixteen_bit_counter_going_round_is_not_a_reset(self):
+        w, _ = self.make()
+        raws = [(60000 + 700 * m) % 65536 for m in range(60)]               # climbs 700 a reading, goes round at least four times
+        self.assertTrue(any(b < a for a, b in zip(raws, raws[1:])))
+        self.feed(w, raws)
+        self.assertNotIn("sw1|Port 1", w.resets, "never counted as going backwards")
+        q = list(w.series["sw1|Port 1"])
+        self.assertEqual(len(q), 60, "the history was never started again")
+        self.assertTrue(all(b[2] >= a[2] for a, b in zip(q, q[1:])), "the stored total only climbs")
+        self.assertEqual(q[-1][2] - q[0][2], 700 * 59, "and it climbs by what really happened")
+
+    def test_a_fall_from_anywhere_else_is_still_a_reset(self):
+        w, _ = self.make()
+        self.feed(w, [1000, 2000, 30000, 500, 900])                         # not near 65,536: the device restarted
+        self.assertEqual(w.resets["sw1|Port 1"][0], 1)
+        self.assertEqual(len(w.series["sw1|Port 1"]), 2, "history started again at the reset")
+
+    def test_a_restart_in_the_middle_of_a_wrap_keeps_it(self):
+        w, paths = self.make()
+        self.feed(w, [64000, 64700, 65400, 500, 1200])                      # went round once
+        w.save(now=150, force=True)
+        w2 = portwatch.PortWatch(paths, clock=lambda: 200.0); w2.set_enabled(True); w2.restore()
+        self.feed(w2, [1900, 2600, 3300], start=180)
+        self.assertNotIn("sw1|Port 1", w2.resets)
+        q = list(w2.series["sw1|Port 1"])
+        # the saved history is thinned to one reading per five minutes, so its first row is the last one read (1200, plus the 65,536 that went round)
+        self.assertEqual((q[0][2], q[-1][2]), (1200 + 65536, 3300 + 65536), "the total carries on across the restart, still counting the lap")

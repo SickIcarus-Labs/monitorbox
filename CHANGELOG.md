@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.6.28** A counter that goes round is no longer taken for a reset. Some network cards report a 16-bit drops counter, which starts again after 65,535; at around a hundred a second that happens every 10 to 15 minutes, so the port (Arrrrr3's eno3) kept starting over and never finished learning. A counter that falls from just under 65,536 (or 4,294,967,296) now counts as having gone round, and its total carries on. A fall from anywhere else is still a reset.
 - **1.6.27** (#292) The network map now shows SNMP switches that UniFi does not know, with their ports, speeds, the neighbour on each port (from LLDP), how many devices sit behind a port (from the addresses it has learned) and the links between switches. A switch UniFi also lists is still drawn once. With no UniFi connection at all the map is built from SNMP switches alone.
 - **1.6.26** The Port errors page says how long a port has been read as hours and days when that is clearer: "17 h 26 min of readings" instead of "1046 min of readings".
 - **1.6.25** When a port's counter goes backwards (and its history starts again), the Port errors page now says from what to what, for example "from 24,282 down to 31". Found on a server card whose packet-drops counter kept stepping back.
