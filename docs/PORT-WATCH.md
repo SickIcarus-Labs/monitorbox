@@ -20,14 +20,14 @@ What the Port errors item watches, how it decides, and what it never does. The c
 - The minimums for **errors and drops scale with the link speed**, because a faster port carries more frames and the same count is a smaller share. On a 1 Gbit link: errors 20, drops 10,000. At 10 Gbit: errors 200, drops 100,000. Slower links use the lowest minimums (errors 20, drops 1,000). A port whose speed is unknown counts as 1 Gbit. Link drops need 3 on any port.
 - A port needs about half an hour of readings before it is judged ("learning what is normal"). Readings are kept for 24 hours and survive a restart (saved every 5 minutes, thinned to 5-minute points, readable only by the app).
 - A counter that goes backwards means the device restarted: that port's history starts again.
-- Errors are watched on every port in use. **Drops and link drops** only count on uplinks, links between devices and server ports, never on an ordinary client's port (a laptop that sleeps, or an Apple TV in standby, is not news).
+- Errors are watched on every port in use. **Packet drops and link drops** only count on uplinks, links between devices and server ports, never on an ordinary client's port (a laptop that sleeps, or an Apple TV in standby, is not news).
 - The line says how many an hour, the receive/transmit split, how busy the port is, and the other end of the cable when there is one ("other end (label): N receive, M transmit an hour", "still learning" or "no counters"). One-sided counts are normal: the receiving side counts a bad frame.
 
-## Drops are usually congestion, not a fault
+## Packet drops are usually congestion, not a fault
 
-A dropped packet on a port means the switch's outgoing queue for that port overflowed. That happens where a faster network feeds a slower port (a 10 Gbit server or uplink sending a burst to a 1 Gbit device): the switch drops what does not fit and the traffic slows down and recovers. It is normal on a LAN with mixed speeds, and more likely with flow control off. Errors are the better sign of a bad cable or module.
+A **packet drop** (not to be confused with a **link drop**, where the link itself goes down and comes back) on a port means the switch's outgoing queue for that port overflowed. That happens where a faster network feeds a slower port (a 10 Gbit server or uplink sending a burst to a 1 Gbit device): the switch drops what does not fit and the traffic slows down and recovers. It is normal on a LAN with mixed speeds, and more likely with flow control off. Errors are the better sign of a bad cable or module.
 
-That is why drops only alert on uplinks, links between switches and servers, never on client ports. If a server or uplink alerts on drops and the cause is a speed step-down, you can: untick the port, or ask for a drops-only option, or enable flow control if there are no latency-sensitive applications such as gaming or VoIP (flow control turns drops into pauses, which hurts those).
+That is why packet drops only alert on uplinks, links between switches and servers, never on client ports. If a server or uplink alerts on drops and the cause is a speed step-down, you can: untick the port, or ask for a drops-only option, or enable flow control if there are no latency-sensitive applications such as gaming or VoIP (flow control turns drops into pauses, which hurts those).
 
 ## What counts as a problem: links going away
 
