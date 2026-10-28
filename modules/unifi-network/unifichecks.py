@@ -76,6 +76,49 @@ def check_device(params, devices):
     return {"state": state, "detail": " · ".join(bits)}
 
 
+HOT_C = 80          # degrees C; editable per check (max_c)
+
+
+def readings(d):
+    """Every temperature the controller reports for a device, as (label, degrees C). Empty when it reports none."""
+    out = []
+    t = d.get("general_temperature")
+    if isinstance(t, (int, float)) and not isinstance(t, bool):
+        out.append(("board", t))
+    for x in d.get("temperatures") or []:
+        v = x.get("value") if isinstance(x, dict) else None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out.append((str(x.get("name") or "sensor"), v))
+    return out
+
+
+def check_temperature(params, devices):
+    if not params.get("name") and not params.get("mac"):
+        return {"state": "unknown", "detail": "this check needs a device 'name' (or 'mac'). Use Re-detect."}
+    d = find_device(devices, params.get("name"), params.get("mac"))
+    if not d:
+        return {"state": "unknown", "detail": f"the controller has no device called '{params.get('name') or params.get('mac')}'"}
+    if d.get("state") != 1:
+        return {"state": "unknown", "detail": "device is not connected, so its temperature is not known"}
+    limit = params.get("max_c") or HOT_C
+    rs = readings(d)
+    if not rs and not d.get("overheating"):
+        return {"state": "unknown", "detail": "the controller reports no temperature for this device"}
+    bits = []
+    hot = bool(d.get("overheating"))
+    if rs:
+        label, top = max(rs, key=lambda r: r[1])
+        bits.append(f"{top:g} °C" + (f" ({label})" if len(rs) > 1 else ""))
+        hot = hot or top >= limit
+    if isinstance(d.get("fan_level"), (int, float)) and not isinstance(d.get("fan_level"), bool):
+        bits.append(f"fan {d['fan_level']:g}%")
+    if d.get("overheating"):
+        bits.append("device says it is overheating")
+    elif hot:
+        bits.append(f"hot, limit {limit:g} °C")
+    return {"state": "degraded" if hot else "healthy", "detail": " · ".join(bits)}
+
+
 def check_devices(params, devices):
     names = {str(n).lower() for n in params.get("names") or []}
     mine = [d for d in devices if d.get("adopted", True) and (not names or dev_name(d).lower() in names)]
@@ -219,6 +262,8 @@ def discover(devices, health, networks=(), connections=None):
     topo = []
     for d in sorted((x for x in devices if x.get("adopted", True)), key=dev_name):
         sug.append({"label": f"UniFi {dev_name(d)}", "check": "device", "params": {"name": dev_name(d)}, "batch": "Devices"})
+        if readings(d) or d.get("overheating"):
+            sug.append({"label": f"UniFi {dev_name(d)} temperature", "check": "temperature", "params": {"name": dev_name(d)}, "batch": "Temperatures"})
         up = uplink_of(d, devices)
         topo.append({"name": dev_name(d), "model": d.get("model"), "type": d.get("type"), "ip": d.get("ip"), "state": STATE_WORDS.get(d.get("state"), d.get("state")),
                      "uplink": up[0] if up else None, "uplink_mbps": up[1] if up else None})
