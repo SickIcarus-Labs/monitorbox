@@ -3,6 +3,7 @@
 UniFi gives every device's ports and rates in one request. A switch that is also an SNMP connection (matched by its address) is read
 over SNMP instead, which gives exact counters for every port. Ports are keyed by (device id, the port's name as UniFi spells it), so
 a switch's history lines up with its place on the map. A source that does not answer is skipped; nothing is invented."""
+import re
 import threading, time
 
 from . import lanmap, followups
@@ -15,6 +16,12 @@ def squash(name):
 EVERY = 10.0
 SERVER_EVERY = 3        # a server's network cards are read every third round (30 s): the port watch moves slowly
 WIFI = "wifi"           # the history's stand-in for a switch: every Wi-Fi client is a "port" under it
+
+
+def stacked(name):
+    """A bond or team master, or a VLAN sub-interface: it only repeats the physical ports under it, so it is not a port of its own (one fault would show as three rows)."""
+    n = str(name or "").strip().lower()
+    return bool(re.match(r"^(bond|team|vlan|po|port-channel|ae|lag)\d+$", n) or re.match(r"^(vlan|bond|team)[-_ ]?\d+$", n) or re.match(r"^[a-z][a-z0-9_-]*\d+\.\d+$", n))
 
 
 class LanSampler:
@@ -164,7 +171,7 @@ class LanSampler:
             if self.watch is not None:
                 self.watch.set_why(sid, self.explain(c))
             ports = [{"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"], "up": v.get("up")}
-                     for nm, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict) and all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))]
+                     for nm, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict) and not stacked(nm) and all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))]
             if ports:
                 out.append((sid, {"name": str(c.get("name") or c["id"]), "ports": ports}))
             else:

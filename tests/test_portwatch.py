@@ -338,12 +338,24 @@ class Servers(unittest.TestCase):
         self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), [], "not kept as a server")
         self.assertEqual(list(self.w.series["..:00:00:01|Port 1"])[-1][1:3], [30, 70], "Core B has the SNMP counters; Core A keeps UniFi's own")
 
+    def test_bonds_teams_port_channels_and_vlan_sub_interfaces_are_not_ports_of_their_own(self):
+        from monitorbox_app import lansampler
+        for name in ("bond0", "Bond1", "team0", "vlan20", "Po12", "port-channel3", "eth0.100", "enp3s0.20", "ae0"):
+            self.assertTrue(lansampler.stacked(name), name)
+        for name in ("eth0", "eth1", "enp3s0", "Port 1", "SFP+ 2", "ens1f0np0", "lo", "br0"):
+            self.assertFalse(lansampler.stacked(name), name)
+        sm = self.device_sampler(["Core B"], conn_name="NAS", conn_host="192.0.2.99")
+        real = {"in": 1, "out": 1, "bits": 64, "rxErr": 1, "txErr": 1, "rxDrop": 1, "txDrop": 1}
+        sm.call = lambda mod, method, params, timeout: ({"devices": []} if mod == "unifi-network" else {"ports": {n: dict(real) for n in ("eth0", "eth1", "bond0", "eth0.100")}})
+        sm.tick()
+        self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), ["snmp:swc|eth0", "snmp:swc|eth1"], "the two cards that make up the bond are watched; the bond and its VLAN are not")
+
     def test_interface_addresses_that_fit_two_devices_or_none_do_not_decide(self):
         sm = self.device_sampler(["Core A", "Core B"], conn_name="Unrelated", conn_host="192.0.2.99")
         inner = sm.call
         sm.call = lambda mod, method, params, timeout: ({**inner(mod, method, params, timeout), "macs": ["..:00:00:00", "..:00:00:01"]} if mod == "snmp" else inner(mod, method, params, timeout))
         sm.tick()
-        self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), ["snmp:swc|Po1", "snmp:swc|Po2", "snmp:swc|Port 1"], "two devices claim it: stays a server")
+        self.assertEqual(sorted(k for k in self.w.series if k.startswith("snmp:")), ["snmp:swc|Port 1"], "two devices claim it: stays a server (its port-channels Po1 and Po2 are no longer listed as ports of their own)")
 
     def test_a_connection_whose_own_name_is_the_switchs_is_read_as_the_switch_from_the_next_round(self):
         from monitorbox_app import lansampler
