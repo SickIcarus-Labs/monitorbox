@@ -40,8 +40,8 @@ jobs:
         id: build
         shell: bash          # bash -eo pipefail: a failed build must fail the job, not be hidden by the pipe into tee
         run: |
-          # hello is the sample module; its builds live in the test repository now (see #264), so this repo no longer offers it
-          python3 tools/build_release.py --out dist --skip hello \
+          # hello is the sample module: offered on dev only. The releases repo's promotion drops it (DEV_ONLY in tools/pointer.py), so beta and stable never list it
+          python3 tools/build_release.py --out dist \
             --url-template "https://github.com/${RELEASES_REPO}/releases/download/{tag}/{file}" \
             --pointer releases/channels/dev.json --catalog releases/catalog.json | tee build.json
       - name: Upload release assets
