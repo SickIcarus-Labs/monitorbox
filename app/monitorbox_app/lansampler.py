@@ -28,6 +28,7 @@ class LanSampler:
         self.rounds = 0
         self.sys_raw = {}       # SNMP connection id -> the device's own name as it reported it
         self.explain = lambda c: ""
+        self.macs_of = {}       # SNMP connection id -> the shortened addresses of all its interfaces ("..:dd:ee:ff", like the UniFi report): the surest way to tell which UniFi device it is
         self.sys_of = {}        # SNMP connection id -> the device's own name (sysName), squashed: tells which UniFi device a connection is when the address does not
         self.wifi = {}          # port name in the history (under WIFI) -> {"name", "ap"}: the Wi-Fi clients read this round
 
@@ -59,12 +60,20 @@ class LanSampler:
         for d, i in zip(devices, ids):
             by_name.setdefault(squash(d.get("name")), []).append(i)
 
+        by_mac = {}
+        for d, i in zip(devices, ids):
+            if str(d.get("mac") or "").startswith("..:"):
+                by_mac.setdefault(d["mac"].lower(), []).append(i)
+
         def match(c):
-            """The UniFi device an SNMP connection is: by its address, else by a name (the connection's, or the device's own sysName) that exactly one UniFi device has
+            """The UniFi device an SNMP connection is: by its address, else by an interface address that exactly one UniFi device has, else by a name (the connection's, or the device's own sysName) that exactly one UniFi device has
             (the SNMP address is often not the one UniFi lists)."""
             hit = by_ip.get(followups.host_of(c))
             if hit:
                 return hit
+            found = {i for m in self.macs_of.get(str(c.get("id")), []) for i in by_mac.get(m, [])}
+            if len(found) == 1:
+                return next(iter(found))
             for nm in (squash(c.get("name")), self.sys_of.get(str(c.get("id")), "")):
                 same = by_name.get(nm) or [] if nm else []
                 if len(same) == 1:
@@ -74,7 +83,8 @@ class LanSampler:
         def explain(c):
             """Why a connection is read as a server: what it was matched on and what UniFi calls its devices (shown on the Port errors page, so a mismatch can be seen)."""
             host, nm, own = followups.host_of(c), squash(c.get("name")), self.sys_of.get(str(c.get("id")), "")
-            return (f"address {host or '?'} is not a UniFi device address; name \"{c.get('name') or ''}\" (compared as \"{nm}\") matches {len(by_name.get(nm) or [])} of {len(devices)} UniFi devices; "
+            macs = self.macs_of.get(str(c.get("id")), [])
+            return (f"address {host or '?'} is not a UniFi device address; {len(macs)} interface addresses match {len({i for m in macs for i in by_mac.get(m, [])})} of {len(devices)} UniFi devices; name \"{c.get('name') or ''}\" (compared as \"{nm}\") matches {len(by_name.get(nm) or [])} of {len(devices)} UniFi devices; "
                     f"its own name \"{self.sys_raw.get(str(c.get('id')), '') or 'not reported'}\" (compared as \"{own}\") matches {len(by_name.get(own) or []) if own else 0}")
         self.explain = explain
         if self.watch is not None:
@@ -94,6 +104,8 @@ class LanSampler:
                 continue
             if isinstance(r, dict) and r.get("sysName"):
                 self.sys_of[str(c["id"])] = squash(r["sysName"])
+            if isinstance(r, dict) and r.get("macs"):
+                self.macs_of[str(c["id"])] = [str(m).lower() for m in r["macs"]]
             ports = {(v.get("label") or name): v for name, v in ((r or {}).get("ports") or {}).items() if isinstance(v, dict)}
             if ports:
                 self.series.feed_counters(dev, ports, now)
@@ -139,8 +151,12 @@ class LanSampler:
                 continue
             if isinstance(r, dict) and r.get("sysName"):
                 self.sys_raw[str(c["id"])] = str(r["sysName"])
-            if isinstance(r, dict) and r.get("sysName") and self.sys_of.get(str(c["id"])) != squash(r["sysName"]):
-                self.sys_of[str(c["id"])] = squash(r["sysName"])
+            fresh = isinstance(r, dict) and bool(r.get("macs")) and self.macs_of.get(str(c["id"])) != [str(m).lower() for m in r["macs"]]
+            if fresh:
+                self.macs_of[str(c["id"])] = [str(m).lower() for m in r["macs"]]
+            if (isinstance(r, dict) and r.get("sysName") and self.sys_of.get(str(c["id"])) != squash(r["sysName"])) or fresh:
+                if isinstance(r, dict) and r.get("sysName"):
+                    self.sys_of[str(c["id"])] = squash(r["sysName"])
                 if match(c):                                         # its own name says it is a UniFi device: from the next round it is read as that device, not as a server
                     if self.watch is not None:
                         self.watch.drop_device(sid)
