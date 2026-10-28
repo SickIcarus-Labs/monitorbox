@@ -902,7 +902,7 @@ class UI(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
-    def test_update_all_shows_only_when_more_than_one_update_is_waiting(self):
+    def test_update_all_shows_whenever_an_update_is_waiting_even_just_one(self):
         c = self.start()
         with sync_playwright() as p:
             b = p.chromium.launch(); pg = b.new_page(viewport={"width": 390, "height": 844})
@@ -911,6 +911,9 @@ class UI(T.SnmpE2E):
             pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".card")
             pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
             self.assertEqual(pg.locator("#upall").count(), 0, "nothing is waiting, so no button")
+            self.publish(hello="0.3.1"); c.post("/api/check")                                    # one module update, nothing else
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/servers"); pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("#upall")
+            self.assertEqual(pg.inner_text("#upall"), "Update all (1)", "a single update gets the button too")
             self.publish(app="0.13.0", hello="0.3.1"); c.post("/api/check")                      # an App update and a module update
             pg.goto(f"http://127.0.0.1:{self.port}/#/settings/servers"); pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("#upall")
             self.assertEqual(pg.inner_text("#upall"), "Update all (2)")

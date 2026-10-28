@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.6.33** (#313) The "Update all" button on the Updates page now shows whenever at least one update is waiting (the app or a module), not only when there are two or more.
 - **1.6.32** (#310) When MonitorBox updates itself (automatic updates on), the bell now says so: "MonitorBox updated itself from 1.6.31 to 1.6.32." for the app, and the same for each module. Tap the note to clear it; notes also go after a week. An update you start yourself does not add a note.
 - **1.6.31** (#292) A device plugged into an access point's own Ethernet port (a computer on the back of an in-wall access point, say) now shows up on the network map and in the port watch, instead of being read and then listed as "no link". Ports that share a name on one device ("Data" on three ports) are now watched separately, with the port number added to the name, so they can no longer share one history.
 - **1.6.30** (#292) The list of other interfaces is back on the Port errors page, as its own section under Which ports: "7 other interfaces are read but not counted (no link)", with the names listed inside. The explanation of why a device was read on its own stays out of it, and only shows for a switch that was not matched.
