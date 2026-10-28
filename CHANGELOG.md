@@ -6,6 +6,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.5.1** On the network map, every port now has an "alert" tick (on by default) in place of the "known issue" link: untick it to keep watching a port but never be told about it. The Port errors page and the map are the same setting. The Port errors page now says what the port count covers (every port the switches report, plugged in or not, which is why it is more than the map's ports in use). The explanation under "Watch for rising port errors" no longer says it is off by default.
 - **1.5.0** Port errors is on by default on any box that has a switch to read (a UniFi or SNMP login), and starts quietly while it learns. It has its own page now: an Enable / Disable button (switched off by hand stays off), a link to the network map, the ports that are rising with an "Alert on this port" tick each (on by default; unticked ports are still watched and shown, they just never raise the Degraded heads-up), and a list of the ports not alerting. The check reads "Port counters", and Mark critical, Mark expected down and Stop watching are hidden there.
 - **1.4.3** The network map page opens at once. It shows the last map straight away (kept on disk, so it works right after a restart too) and refreshes it in the background when it is more than a minute old, instead of waiting for a fresh scan of the network.
 
