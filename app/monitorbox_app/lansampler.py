@@ -21,6 +21,8 @@ WIFI = "wifi"           # the history's stand-in for a switch: every Wi-Fi clien
 def stacked(name):
     """A bond or team master, or a VLAN sub-interface: it only repeats the physical ports under it, so it is not a port of its own (one fault would show as three rows)."""
     n = str(name or "").strip().lower()
+    if re.match(r"^(dummy|lxdbr|lxcbr|virbr|docker|ifb|sit|ip6tnl|ip6gre|gre|gretap|erspan|tunl|nlmon)\d*$", n):
+        return True        # leftovers that are not a cable at all: dummy and container bridges, tunnel stubs
     return bool(re.match(r"^(bond|team|vlan|po|port-channel|ae|lag)\d+$", n) or re.match(r"^(vlan|bond|team)[-_ ]?\d+$", n) or re.match(r"^[a-z][a-z0-9_-]*\d+\.\d+$", n))
 
 

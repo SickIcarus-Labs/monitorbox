@@ -119,7 +119,7 @@ class Watch(unittest.TestCase):
         ok, detail, _, extra = self.w.check()
         self.assertTrue(ok)
         self.assertFalse(extra.get("warn"))
-        self.assertIn("half an hour", detail)
+        self.assertIn("learning what is normal", detail)      # wording changed (owner approved): the line no longer says "half an hour"
 
     def test_a_flapping_client_port_is_quiet_and_a_flapping_server_port_is_not(self):
         self.w.set_enabled(True)
@@ -422,7 +422,7 @@ class Servers(unittest.TestCase):
 
     def test_bonds_teams_port_channels_and_vlan_sub_interfaces_are_not_ports_of_their_own(self):
         from monitorbox_app import lansampler
-        for name in ("bond0", "Bond1", "team0", "vlan20", "Po12", "port-channel3", "eth0.100", "enp3s0.20", "ae0"):
+        for name in ("bond0", "Bond1", "team0", "vlan20", "Po12", "port-channel3", "eth0.100", "enp3s0.20", "ae0", "dummy0", "lxdbr0", "sit0", "virbr0", "docker0"):
             self.assertTrue(lansampler.stacked(name), name)
         for name in ("eth0", "eth1", "enp3s0", "Port 1", "SFP+ 2", "ens1f0np0", "lo", "br0"):
             self.assertFalse(lansampler.stacked(name), name)
