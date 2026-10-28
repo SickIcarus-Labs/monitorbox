@@ -1413,7 +1413,7 @@ async function renderSettings(){
  const last=v.last&&v.last.result!='ok'?`<div class=box>Last install: ${esc(v.last.version)} — ${esc(v.last.result)}</div>`:'';
  const nPending=((v.app&&v.app.needsApply&&v.app.target&&!v.app.failed.includes(v.app.target))?1:0)+Object.values(v.modules||{}).filter(c=>c.needsApply&&c.target&&!c.failed.includes(c.target)).length;
  const linked=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'),waiting=Object.values(hdrSites).some(d=>d&&d.pend)||nPending>0;
- const sitesBox=(SITE===''&&linked.length)?`<div class=box><div class=row><button class="btn pri" id=upsites onclick="updateSites(this)" ${waiting?'':'disabled'}>Update all sites</button></div><div id=upsitesout class=sub></div></div>`:'';
+ const sitesBox=(SITE===''&&linked.length&&waiting)?`<div class=box><div class=row><button class="btn pri" id=upsites onclick="updateSites(this)">Update all sites</button></div><div id=upsitesout class=sub></div></div>`:'';
  const sec=(location.hash.split('/')[2]||''),nServers=new Set((conn.connections||[]).map(hostOf).filter(Boolean)).size,nNodes=((mon.monitoring||{}).nodes||[]).length,
   upd=!!(v.app&&v.app.needsApply)||Object.values(v.modules||{}).some(c=>c.needsApply),lastBk=bk.backups&&bk.backups[0];
  const SECS=[['display','Display','How the main screen looks on this device',`${view==='detail'?'Detailed':'Summarized'} · history ${HWIN.find(x=>x[0]===getHWin())[1]}`],
