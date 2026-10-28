@@ -29,6 +29,8 @@ A **packet drop** (not to be confused with a **link drop**, where the link itsel
 
 That is why packet drops only alert on uplinks, links between switches and servers, never on client ports. If a server or uplink alerts on drops and the cause is a speed step-down, you can: untick the port, or ask for a drops-only option, or enable flow control if there are no latency-sensitive applications such as gaming or VoIP (flow control turns drops into pauses, which hurts those).
 
+**Wi-Fi servers:** link drops are far more common on Wi-Fi than on Ethernet (roaming, power saving). They are counted under the same rules as a wired card, so a Wi-Fi server that flaps more than its own usual still gets a heads-up. Hard-wire the server, or untick that link, if it is too chatty.
+
 ## What counts as a problem: links going away
 
 - A link on an uplink, between devices, or a server card that has been **up for an hour without a break** becomes expected up (learned, no setup).

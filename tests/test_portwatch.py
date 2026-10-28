@@ -180,11 +180,11 @@ class Watch(unittest.TestCase):
             n = 0 if m < 45 else (m - 45) * 20000
             w.feed([dev("Theater", **{"Port 2": (0, 0, 0, n, 0)})], ["sw"], now=m * 60)
         detail = w.check()[1]
-        self.assertIn("Theater, Port 2 (Apple TV): drops rising", detail)
+        self.assertIn("Theater, Port 2 (Apple TV): packet drops rising", detail)
         self.assertEqual(w.page()["rising"][0]["label"], "Theater, Port 2 (Apple TV)")
         self.assertEqual(w.named(up, "Theater, Port 9"), "Theater, Port 9", "a link between devices already says what is at the far end")
         w.set_attached({})
-        self.assertIn("Theater, Port 2: drops rising", w.check()[1])
+        self.assertIn("Theater, Port 2: packet drops rising", w.check()[1])
 
     def test_interfaces_the_map_does_not_show_are_forgotten_when_nothing_feeds_them_any_more(self):
         clock = [0.0]
@@ -890,7 +890,7 @@ class CountedSplit(unittest.TestCase):
         for t, v in ((0, 10), (60, 20), (120, 5), (180, 9)):            # the drop counter falls from 20 to 5
             w.feed([dev("Core", **{"Port 1": (0, 0, v, 0, 0)})], ["sw1"], now=t)
         row = w.page()["watched"][0]
-        self.assertEqual((row["resets"], row["resetKind"]), (1, "drops"))
+        self.assertEqual((row["resets"], row["resetKind"]), (1, "packet drops"))
         self.assertEqual(row["minutes"], 1, "its history started again at the reset")
 
 
