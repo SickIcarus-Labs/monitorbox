@@ -29,7 +29,7 @@ A counter that falls from just under 65,536 (a 16-bit counter) or just under 4,2
 
 ## What the Port errors page lists
 
-**Which ports** lists every counted port, how long it has been read, and, if its counter went backwards, from what to what. The last line there says how many other interfaces are read but not counted (unused cards, ports of a sleeping device, leftovers); they are not listed, since unused ports are not news. When a device that looks like a switch (it learns addresses or hears LLDP neighbours) is read on its own while UniFi has devices, the page says so and shows why it was not matched to a UniFi device, with the names UniFi uses, so a mismatch can be seen. Nothing is shown for an SNMP-only network.
+**Which ports** lists every counted port, how long it has been read, and, if its counter went backwards, from what to what. Under it, **other interfaces** says how many are read but not counted (cards with no link, ports of a sleeping device) and lists them by name, so a card can be found when it is not in the first list. When a device that looks like a switch (it learns addresses or hears LLDP neighbours) is read on its own while UniFi has devices, the page says so and shows why it was not matched to a UniFi device, with the names UniFi uses, so a mismatch can be seen. Nothing is shown for an SNMP-only network.
 
 ## Packet drops are usually congestion, not a fault
 
