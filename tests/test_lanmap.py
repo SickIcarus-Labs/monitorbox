@@ -199,3 +199,44 @@ class SnmpSwitchesOnTheMap(unittest.TestCase):
         server = sw("s", "nas", "192.0.2.70", [{"ifIndex": "2", "name": "eth0", "state": "up", "mac": "..:aa:aa:aa"}])
         self.assertEqual(lanmap.build([server] + self.two())["counts"]["devices"], 2)
         self.assertEqual(lanmap.build([server])["nodes"], [])
+
+
+class AccessPointWithItsOwnPorts(unittest.TestCase):
+    """An in-wall access point has wired ports of its own (a computer plugged into port 4). Made-up names and addresses."""
+
+    def office(self, names=("PoE Out", "Data", "Data", "Data", "PoE In + Data")):
+        ports = [port(i + 1, name=n, speed=1000) for i, n in enumerate(names)]
+        ports[3].update(lastMac="..:c4:c4:c4", inBps=800, outBps=600)
+        ports[4].update(is_uplink=True, speed=2500)
+        ports[0]["up"] = ports[1]["up"] = ports[2]["up"] = False                       # the controller leaves these out; kept here to be sure they would not count
+        ports = [p for p in ports if p["up"]]
+        devices = [{"name": "Gate-A", "type": "udm", "state": "connected", "ip": "192.0.2.1", "mac": "..:00:00:01", "ports": [port(13)]},
+                   {"name": "Office-AP", "type": "uap", "state": "connected", "ip": "192.0.2.50", "mac": "..:00:00:50", "model": "IWX",
+                    "uplink": {"type": "wire", "to": "Gate-A", "toMac": "..:00:00:01", "speedMbps": 2500, "up": True, "port": 5, "remotePort": 13}, "ports": ports}]
+        clients = [{"name": "Desk-Mac", "ip": "192.0.2.51", "mac": "..:c4:c4:c4", "wired": True, "switch": "Office-AP", "port": 4},
+                   {"name": "Phone-Seven", "ip": "192.0.2.52", "mac": "..:77:77:77", "wired": False, "ap": "Office-AP"}]
+        return [{"connection": "u", "module": "unifi-network", "report": {"devices": devices, "clients": clients}}]
+
+    def node(self, **kw):
+        return {n["name"]: n for n in lanmap.build(self.office(**kw))["nodes"]}["Office-AP"]
+
+    def test_a_computer_on_the_access_points_own_port_is_listed(self):
+        n = self.node()
+        self.assertEqual([(p["port"], p["name"]) for p in n["ports"]], [("4", "Desk-Mac")], "only the up port that is not the uplink")
+        self.assertEqual(n["wifi"], 1, "the Wi-Fi count is still there")
+
+    def test_the_uplink_is_not_listed_as_an_endpoint(self):
+        self.assertNotIn("5", [p["port"] for p in self.node()["ports"]])
+
+    def test_ports_with_the_same_name_get_different_keys(self):
+        k = lanmap.build(self.office())["nodes"][0]
+        ap = self.node()
+        self.assertEqual(ap["ports"][0]["keys"], [[ap["id"], "Data (port 4)"]])
+        self.assertEqual(ap["link"]["keys"]["self"], [ap["id"], "PoE In + Data (port 5)"])
+        self.assertIsNotNone(k)
+
+    def test_the_same_name_twice_on_a_switch_is_told_apart_but_unique_names_are_left_alone(self):
+        devices = [{"name": "Sw-Z", "type": "usw", "state": "connected", "ip": "192.0.2.9", "ports": [port(1, name="Data"), port(2, name="Data"), port(3, name="Uplink-ish")]}]
+        n = lanmap.build([{"connection": "u", "module": "unifi-network", "report": {"devices": devices, "clients": []}}])["nodes"][0]
+        names = sorted(k[1] for p in n["ports"] for k in p["keys"])
+        self.assertEqual(names, ["Data (port 1)", "Data (port 2)", "Uplink-ish"])
