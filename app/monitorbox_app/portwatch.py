@@ -19,6 +19,7 @@ from collections import deque
 
 from .store import read_json, write_json
 
+STALE_OTHERS = 1800      # seconds: an interface the map does not show, with no new reading for this long, is dropped
 KEEP = 24 * 3600          # seconds of readings kept per port (a day, so the last busy spell is still remembered)
 EVERY = 30                # at most one kept reading per port per this many seconds
 RECENT = 900              # the window that is compared with the port's earlier pace (15 minutes)
@@ -179,8 +180,16 @@ class PortWatch:
             r = self.resets.get(k)
             watched.append({"label": snap[k][0], "minutes": int((q[-1][0] - q[0][0]) // 60) if len(q) > 1 else 0,
                             **({"resets": r[0], "resetKind": WORDS.get(r[1], r[1]), "resetAgoMin": int((self.clock() - r[2]) // 60)} if r else {})})
-        others = sorted(snap[k][0] for k in snap if k not in set(counted))
-        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40]},
+        rest = [k for k in snap if k not in set(counted)]
+        others = sorted(snap[k][0] for k in rest)
+        groups = {}
+        for k in rest:
+            g = groups.setdefault(k.rsplit("|", 1)[0], {"from": snap[k][0].rsplit(", ", 1)[0], "id": k.rsplit("|", 1)[0], "count": 0, "last": 0})
+            g["count"] += 1
+            g["last"] = max(g["last"], snap[k][1][-1][0] if snap[k][1] else 0)
+        now = self.clock()
+        where = [{"from": g["from"], "id": g["id"], "count": g["count"], "lastAgoMin": int((now - g["last"]) // 60)} for g in sorted(groups.values(), key=lambda g: -g["count"])]
+        return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "inUse": inuse, "onLinks": links, "watched": watched, "others": {"count": len(others), "names": others[:40], "where": where},
                 "rising": rising, "off": off, "down": down}
 
     def known(self):
@@ -250,6 +259,12 @@ class PortWatch:
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
+            if self.shown:                                              # readings of interfaces the map does not show and nothing has fed for a while: forgotten
+                for k in [k for k in self.series if k not in self.shown and k not in seen and k.rsplit("|", 1)[0] not in hold
+                          and (not self.series[k] or self.series[k][-1][0] < now - STALE_OTHERS)]:
+                    del self.series[k]
+                    self.labels.pop(k, None)
+                    self.links.pop(k, None)
             if seen:
                 self.fed = True
         self.save(now)

@@ -177,6 +177,21 @@ class Watch(unittest.TestCase):
         w.set_attached({})
         self.assertIn("Theater, Port 2: drops rising", w.check()[1])
 
+    def test_interfaces_the_map_does_not_show_are_forgotten_when_nothing_feeds_them_any_more(self):
+        clock = [0.0]
+        w = portwatch.PortWatch(self.paths, clock=lambda: clock[0])
+        w.set_enabled(True)
+        for m in range(0, 5):
+            w.feed([dev("Agg", **{"Port 1": (0, 0, 0, 0, 0), "Po1": (0, 0, 0, 0, 0)}), dev("Other", **{"Port 1": (0, 0, 0, 0, 0)})], ["agg", "oth"], now=m * 30)
+        w.set_shown({"agg|Port 1", "oth|Port 1"})
+        clock[0] = 4 * 30
+        self.assertEqual((w.page()["others"]["count"], w.page()["others"]["where"][0]["lastAgoMin"]), (1, 0))
+        # a later source stops feeding Po1 (it is read as another device now): after the wait it goes, a shown port never does
+        t = 4 * 30 + portwatch.STALE_OTHERS + 1
+        clock[0] = t
+        w.feed([dev("Agg", **{"Port 1": (0, 0, 0, 0, 0)}), dev("Other", **{"Port 1": (0, 0, 0, 0, 0)})], ["agg", "oth"], now=t)
+        self.assertEqual(sorted(w.series), ["agg|Port 1", "oth|Port 1"])
+
     def test_a_known_port_keeps_its_numbers_but_never_raises_anything(self):
         self.w.set_enabled(True)
         key = self.w.key("sw1", "Port 5")
@@ -665,7 +680,8 @@ class CountedSplit(unittest.TestCase):
         page = w.page()
         self.assertEqual((page["ports"], page["inUse"], page["onLinks"]), (4, 3, 1), "ports 5 and 6 are empty: read, not counted")
         self.assertEqual([x["label"] for x in page["watched"]], ["Core, Port 1", "Core, Port 2", "Core, Port 3", "Core, Port 4"], "the page can list exactly what it counts")
-        self.assertEqual(page["others"], {"count": 2, "names": ["Core, Port 5", "Core, Port 6"]}, "and what it reads but does not count")
+        self.assertEqual({k: page["others"][k] for k in ("count", "names")}, {"count": 2, "names": ["Core, Port 5", "Core, Port 6"]}, "and what it reads but does not count")
+        self.assertEqual([(g["from"], g["id"], g["count"]) for g in page["others"]["where"]], [("Core", "sw1", 2)], "and which device they come from")
 
     def test_a_counter_going_backwards_is_counted_and_shown(self):
         d = tempfile.TemporaryDirectory(); w = portwatch.PortWatch(Paths(d.name)); self.addCleanup(d.cleanup)
