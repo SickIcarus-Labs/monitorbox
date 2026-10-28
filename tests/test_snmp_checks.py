@@ -136,6 +136,16 @@ class CountersQuick(unittest.TestCase):
         bulks = [t for t, _ in a.requests if t != L.GET]
         self.assertLessEqual(len(bulks), 40, "one walk of the names, not one per column")
 
+    def test_interfaces_without_counters_are_only_asked_for_their_counters_on_the_first_read(self):
+        a = self.agent(); c = conn(a, "quick6")
+        for i in range(10, 210):
+            a.mib[f"{self.X}.1.{i}"] = f"sw0.{i}"                       # a name that is not "virtual" but has no counters
+        got = C.counters(c)["ports"]
+        self.assertEqual(set(got), {"port1", "port2"})
+        asked = [o for t, oids in a.requests if t == L.GET for o in oids]
+        extra = [o for o in asked if int(o.rsplit(".", 1)[1]) >= 10]
+        self.assertTrue(all(o.startswith((f"{self.X}.6.", f"{self.X}.10.")) for o in extra), "only the two counters were tried on them")
+
     def test_the_link_state_comes_along_each_time(self):
         a = self.agent(); c = conn(a, "quick4")
         OPER = "1.3.6.1.2.1.2.2.1.8"

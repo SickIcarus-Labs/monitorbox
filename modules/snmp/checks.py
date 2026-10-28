@@ -309,12 +309,14 @@ def _get_many(s, oids):
     return got
 
 
-def _read(s, idxs, wide, alias=False):
-    """{index: {"in", "out", "speed", "oper", "rxErr", "txErr", "rxDrop", "txDrop"[, "alias"]}} for just these interfaces."""
+def _read(s, idxs, wide, alias=False, counters_only=False):
+    """{index: {"in", "out", "speed", "oper", "rxErr", "txErr", "rxDrop", "txDrop"[, "alias"]}} for just these interfaces (counters_only: just "in" and "out")."""
     c_in, c_out = (IF_HC_IN, IF_HC_OUT) if wide else (IF_IN, IF_OUT)
-    cols = [("in", c_in), ("out", c_out), ("speed", IF_HIGHSPEED), ("oper", IF_OPER), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC)]
-    if alias:
-        cols.append(("alias", IF_ALIAS))
+    cols = [("in", c_in), ("out", c_out)]
+    if not counters_only:
+        cols += [("speed", IF_HIGHSPEED), ("oper", IF_OPER), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC)]
+        if alias:
+            cols.append(("alias", IF_ALIAS))
     got = _get_many(s, [f"{oid}.{idx}" for idx in idxs for _, oid in cols])
     return {idx: {name: clean(got.get(f"{oid}.{idx}")) for name, oid in cols} for idx in idxs}
 
@@ -338,12 +340,14 @@ def _full(s):
     real = {idx: L.text(n) for idx, n in names.items() if L.text(n) and not L.text(n).startswith(VIRTUAL_IF)}
     out, ifs, wide = {}, {}, True
     for wide in (True, False):                                           # 64-bit counters first, then the 32-bit pair
-        vals = _read(s, list(real), wide, alias=True)
-        if any(isinstance(v["in"], int) and isinstance(v["out"], int) for v in vals.values()):
+        first = _read(s, list(real), wide, counters_only=True)
+        have = [i for i, v in first.items() if isinstance(v["in"], int) and isinstance(v["out"], int)]
+        if have:
             break
+    vals = _read(s, have, wide, alias=True) if have else {}               # the rest only for interfaces that have counters at all (a switch can list hundreds that do not)
     for idx, nm in real.items():
-        v = vals[idx]
-        if not isinstance(v["in"], int) or not isinstance(v["out"], int):
+        v = vals.get(idx)
+        if not v or not isinstance(v["in"], int) or not isinstance(v["out"], int):
             continue
         lab = L.text(v["alias"] or b"")[:60]
         out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"])
