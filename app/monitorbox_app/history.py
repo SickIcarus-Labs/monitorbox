@@ -11,7 +11,11 @@ because "we could not look" says nothing about the thing itself.
 import json, os, tempfile, threading, time
 
 DAYS = 30
-WHY_MAX = 160              # longest reason kept with a stretch
+WHY_MAX = 400              # longest reason kept with a stretch (a port alert that names both ends of a link runs past 250 characters)
+
+
+def _cut(w):
+    return w if len(w) <= WHY_MAX else w[:WHY_MAX - 1].rstrip() + "…"      # says so when it is cut, never ends mid-word as if complete
 GAP_SECONDS = 150          # an App that was silent this long left a hole in the record
 HEARTBEAT_EVERY = 30
 PRUNE_EVERY = 6 * 3600
@@ -63,7 +67,7 @@ class History:
         with open(self.path, "a") as f:
             for t, n, s in rows:
                 rec = {"t": t, "n": n, "s": s}
-                w = str((why or {}).get(n) or "")[:WHY_MAX]
+                w = _cut(str((why or {}).get(n) or ""))
                 if w and s != "healthy":
                     rec["w"] = w
                     self.why[(t, n)] = w

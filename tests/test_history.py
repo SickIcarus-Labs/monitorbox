@@ -180,10 +180,15 @@ class Why(H):
         t0 = self.clk.t
         self.h.record({"a": "healthy"}); self.clk.t += 60
         self.h.record({"a": "failed"}, {"a": "x" * 500})
-        self.assertEqual(len(self.lines()[-1]["w"]), 160)
+        self.assertEqual(self.lines()[-1]["w"], "x" * 399 + "…", "cut at the limit, and it says so")
         self.clk.t += 120
         again = History(self.path, clock=self.clk)
-        self.assertEqual(again.trouble(["a"], t0, t0 + 300)["items"][0]["why"], "x" * 160)
+        self.assertEqual(again.trouble(["a"], t0, t0 + 300)["items"][0]["why"], "x" * 399 + "…")
+        self.clk.t += 60
+        self.h.record({"a": "healthy"}); self.clk.t += 60
+        port = "Broad Leaf, SFP+ 2: errors rising (about 29,420 an hour: 29,420 receive, 0 transmit), carrying about 93.9 Mbit/s (peak 121.7 Mbit/s) · other end (Aggregation, SFP28 2): 0 receive, 0 transmit an hour"
+        self.h.record({"a": "degraded"}, {"a": port})
+        self.assertEqual(self.lines()[-1]["w"], port, "a real port alert is kept whole")
 
     def test_older_lines_without_a_reason_still_load_and_list_without_one(self):
         t0 = self.clk.t
