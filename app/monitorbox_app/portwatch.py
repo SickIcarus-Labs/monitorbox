@@ -24,7 +24,8 @@ EVERY = 30                # at most one kept reading per port per this many seco
 RECENT = 900              # the window that is compared with the port's earlier pace (15 minutes)
 MIN_HISTORY = 1800        # readings of a port needed before it can be called rising (30 minutes)
 RISE = 5                  # the recent pace must be at least this many times the earlier pace
-FLOOR = {"errors": 20, "drops": 1000, "flaps": 3}      # new in the window, at least, before it is worth a line
+FLOOR = {"errors": 20, "drops": 10000, "flaps": 3}     # new in the window, at least, before it is worth a line, on a 1 Gbit link; errors and drops scale with the link speed (below)
+FLOOR_MIN = {"errors": 20, "drops": 1000}               # ... but never lower than this, however slow the link
 WORDS = {"errors": "errors", "drops": "drops", "flaps": "link drops"}
 KINDS = ("errors", "drops", "flaps")
 EXPECT_AFTER = 3600       # seconds a link must have been up without a break before it is expected to stay up (learned, no setup)
@@ -71,7 +72,16 @@ def _worst(q, end_t, i):
     return best if full else None
 
 
-def judge(q, flaps=True):
+def floor_for(kind, speed_mbps=None):
+    """The least a port must gain in 15 minutes before it is worth a line. Errors and drops scale with the link's speed (a 10 Gbit port carries ten times the frames of
+    a 1 Gbit one, so the same count is a tenth of the share), down to a minimum for slow links. Link drops do not scale. Unknown speed counts as 1 Gbit."""
+    if kind not in FLOOR_MIN:
+        return FLOOR[kind]
+    scale = (speed_mbps if isinstance(speed_mbps, (int, float)) and speed_mbps > 0 else 1000) / 1000.0
+    return max(FLOOR_MIN[kind], round(FLOOR[kind] * scale))
+
+
+def judge(q, flaps=True, speed=None):
     """How one port is doing, from its readings [[t, errors, drops, flaps], ...] (oldest first).
     -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}"""
     out = {"learning": True, "rising": [], "perHour": {}, "was": {}, "split": {}}
@@ -96,7 +106,7 @@ def judge(q, flaps=True):
             worst = cut[i] - q[0][i]                                  # less than one stretch of history: what there was
         was = None if worst is None else worst * 3600 / RECENT
         out["was"][kind] = None if was is None else round(was)
-        if out["learning"] or new < FLOOR[kind]:
+        if out["learning"] or new < floor_for(kind, speed):
             continue
         if was is None or new * 3600 / RECENT >= RISE * was:
             out["rising"].append(kind)
@@ -117,6 +127,7 @@ class PortWatch:
         self.peers = {}           # key -> (key of the port at the other end of that link, "Switch name, Port 3"): set from the map
         self.used, self.link_ends = set(), set()
         self.shown = set()        # keys of the ports the map shows (in use); when known, only these are counted and listed, the rest are read quietly so a port plugged in later has history
+        self.speeds = {}          # key -> link speed in Mbit/s, from the map, so the minimums scale with the port
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
         self.resets = {}          # key -> [times its counter went backwards (so its history started again), which counter, when]: shown on the page, to explain a port that never finishes learning
         self.links = {}           # key -> {"up": bool, "since": when it last changed, "expected": it has been up for an hour, so its going away is news}
@@ -149,7 +160,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         rising, off = [], []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, k in self.flap_ports)
+            j = judge(q, k in self.flap_ports, self.speeds.get(k))
             row = {"key": k, "label": label, "alert": k not in known}
             if k in known:
                 off.append({**row, "kinds": j["rising"]})
@@ -300,10 +311,13 @@ class PortWatch:
             q = list(self.series.get(pk) or [])
         if not q:
             return {"label": label, "state": "none", "split": {}}
-        j = judge(q, pk in self.flap_ports)
+        j = judge(q, pk in self.flap_ports, self.speeds.get(pk))
         if not j["split"]:
             return {"label": label, "state": "learning", "split": {}}
         return {"label": label, "state": "figures", "split": j["split"]}
+
+    def set_speeds(self, speeds):
+        self.speeds = dict(speeds)
 
     def set_shown(self, keys, used=(), link_ends=()):
         """keys: the ports the map shows. used: those listed under a device (in use). link_ends: the ends of links between devices that are not in that list."""
@@ -401,7 +415,7 @@ class PortWatch:
         """One map port (one or several keys, a bonded pair) in words and figures, or None when there is nothing to say."""
         known = self.known()
         with self.lock:
-            js = [judge(list(self.series[k]), k in self.flap_ports) for k in keys if k in self.series]
+            js = [judge(list(self.series[k]), k in self.flap_ports, self.speeds.get(k)) for k in keys if k in self.series]
         if not js:
             return None
         per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
@@ -420,7 +434,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         out = []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, k in self.flap_ports)
+            j = judge(q, k in self.flap_ports, self.speeds.get(k))
             if j["rising"] and k not in known:
                 out.append({"label": label, "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
