@@ -74,11 +74,11 @@ class LanSampler:
         def explain(c):
             """Why a connection is read as a server: what it was matched on and what UniFi calls its devices (shown on the Port errors page, so a mismatch can be seen)."""
             host, nm, own = followups.host_of(c), squash(c.get("name")), self.sys_of.get(str(c.get("id")), "")
-            return (f"address {host or '?'} is not a UniFi device address; name \"{c.get('name') or ''}\" matches {len(by_name.get(nm) or [])} UniFi devices; "
-                    f"its own name \"{self.sys_raw.get(str(c.get('id')), '') or 'not reported'}\" matches {len(by_name.get(own) or []) if own else 0}")
+            return (f"address {host or '?'} is not a UniFi device address; name \"{c.get('name') or ''}\" (compared as \"{nm}\") matches {len(by_name.get(nm) or [])} of {len(devices)} UniFi devices; "
+                    f"its own name \"{self.sys_raw.get(str(c.get('id')), '') or 'not reported'}\" (compared as \"{own}\") matches {len(by_name.get(own) or []) if own else 0}")
         self.explain = explain
         if self.watch is not None:
-            self.watch.set_unifi_names(sorted({str(d.get("name") or "") for d in devices if d.get("name")}))
+            self.watch.set_unifi_names(sorted({f"{d.get('name')} (as \"{squash(d.get('name'))}\")" for d in devices if d.get("name")}))
         covered, snmp_bad, snmp_conf = set(), {}, set()      # snmp_bad: device id -> {port label: error and drop counters over SNMP}; snmp_conf: devices that have an SNMP connection at all
         for c in conns:
             if c.get("module") != "snmp":

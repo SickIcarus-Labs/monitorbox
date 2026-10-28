@@ -20,7 +20,7 @@ What the Port errors item watches, how it decides, and what it never does. The c
 - The minimums for **errors and drops scale with the link speed**, because a faster port carries more frames and the same count is a smaller share. On a 1 Gbit link: errors 20, drops 10,000. At 10 Gbit: errors 200, drops 100,000. Slower links use the lowest minimums (errors 20, drops 1,000). A port whose speed is unknown counts as 1 Gbit. Link drops need 3 on any port.
 - A port needs about half an hour of readings before it is judged ("learning what is normal"). Readings are kept for 24 hours and survive a restart (saved every 5 minutes, thinned to 5-minute points, readable only by the app).
 - A counter that goes backwards means the device restarted: that port's history starts again.
-- Errors and drops are watched on every port in use. **Link drops** only count on uplinks, links between devices and server ports, never on an ordinary client's port (a laptop that sleeps is not news).
+- Errors are watched on every port in use. **Drops and link drops** only count on uplinks, links between devices and server ports, never on an ordinary client's port (a laptop that sleeps, or an Apple TV in standby, is not news).
 - The line says how many an hour, the receive/transmit split, how busy the port is, and the other end of the cable when there is one ("other end (label): N receive, M transmit an hour", "still learning" or "no counters"). One-sided counts are normal: the receiving side counts a bad frame.
 
 ## What counts as a problem: links going away
