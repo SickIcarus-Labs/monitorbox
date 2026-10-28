@@ -201,6 +201,16 @@ class Watch(unittest.TestCase):
         w.feed([dev("Agg", **{"Port 1": (0, 0, 0, 0, 0)}), dev("Other", **{"Port 1": (0, 0, 0, 0, 0)})], ["agg", "oth"], now=t)
         self.assertEqual(sorted(w.series), ["agg|Port 1", "oth|Port 1"])
 
+    def test_a_server_network_card_alerts_on_packet_drops_as_well_as_errors(self):
+        # regression (found after 1.6.13): only ports the map called servers counted drops; the cards read over SNMP as servers ("snmp:<connection>") never did
+        w = portwatch.PortWatch(self.paths)
+        w.set_enabled(True)
+        for m in range(0, 61):
+            w.feed([dev("goliath", **{"eth0": (0, 0, 0, 0 if m < 45 else (m - 45) * 20000, 0)})], ["snmp:g"], now=m * 60)
+            w.feed([dev("Theater", **{"Port 2": (0, 0, 0, 0 if m < 45 else (m - 45) * 20000, 0)})], ["sw"], now=m * 60)
+        kinds = {f["label"]: f["kinds"] for f in w.findings()}
+        self.assertEqual(kinds, {"goliath, eth0": ["drops"]}, "the server's card alerts; the client's port (Theater) does not")
+
     def test_a_port_whose_device_sleeps_keeps_what_it_learned(self):
         # regression (#316, Office Port 2, a Mac that wakes for backups): the port leaves the map while its link is down, and its history was cleared 30 minutes later
         clock = [0.0]

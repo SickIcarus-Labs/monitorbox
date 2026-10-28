@@ -165,7 +165,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         rising, off = [], []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, k in self.flap_ports, self.speeds.get(k))
+            j = judge(q, self._links(k), self.speeds.get(k))
             row = {"key": k, "label": label, "alert": k not in known}
             if k in known:
                 off.append({**row, "kinds": j["rising"]})
@@ -272,6 +272,10 @@ class PortWatch:
                 self.fed = True
         self.save(now)
 
+    def _links(self, k):
+        """Packet drops and link drops count on this port: an uplink, a link between switches, or a server (the map says which; every network card read over SNMP is a server's)."""
+        return k in self.flap_ports or k.startswith("snmp:")
+
     def _was_in_use(self, k, now):
         """The map showed this port within the last day: its device may just be asleep (a Mac that wakes for a backup), so what it learned is kept."""
         t = self.used_at.get(k)
@@ -342,7 +346,7 @@ class PortWatch:
             q = list(self.series.get(pk) or [])
         if not q:
             return {"label": label, "state": "none", "split": {}}
-        j = judge(q, pk in self.flap_ports, self.speeds.get(pk))
+        j = judge(q, self._links(pk), self.speeds.get(pk))
         if not j["split"]:
             return {"label": label, "state": "learning", "split": {}}
         return {"label": label, "state": "figures", "split": j["split"]}
@@ -483,7 +487,7 @@ class PortWatch:
         """One map port (one or several keys, a bonded pair) in words and figures, or None when there is nothing to say."""
         known = self.known()
         with self.lock:
-            js = [judge(list(self.series[k]), k in self.flap_ports, self.speeds.get(k)) for k in keys if k in self.series]
+            js = [judge(list(self.series[k]), self._links(k), self.speeds.get(k)) for k in keys if k in self.series]
         if not js:
             return None
         per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
@@ -502,7 +506,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         out = []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, k in self.flap_ports, self.speeds.get(k))
+            j = judge(q, self._links(k), self.speeds.get(k))
             if j["rising"] and k not in known:
                 out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
