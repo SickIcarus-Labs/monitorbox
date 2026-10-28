@@ -1786,9 +1786,10 @@ async function setting(b){try{await api('settings',b)}catch(e){$('#msg').textCon
 function sitesLines(d){const w={asking:'asked…',restarting:'installing, restarting',done:'done',failed:'did not update',waiting:'next',working:'installing here'};
  return (d.sites||[]).map(r=>`<div><b>${esc(r.name)}</b>: ${esc(w[r.state]||r.state)}${r.message?' · '+esc(r.message):''}</div>`).join('')+(d.local?`<div><b>This box</b>: ${esc(w[d.local.state]||d.local.state)}${d.local.message?' · '+esc(d.local.message):''}</div>`:'')}
 async function updateSites(btn){btn.disabled=true;const out=$('#upsitesout');
+ const restart=()=>{$('#m').textContent='Restarting…';setTimeout(boot,4000)};         /* this box updated itself: wait for it, then reload the page, as for any other App update */
  try{await api('sites/update-all',{})}catch(e){if(out)out.textContent=e.message||'Could not start.';btn.disabled=false;return}
- for(let i=0;i<150;i++){let d;try{d=await api('sites/update-all')}catch(e){if(out)out.textContent='This box is restarting. The sites carry on without it.';return}
-  const o=$('#upsitesout');if(!o)return;o.innerHTML=sitesLines(d);if(!d.running)break;await new Promise(r=>setTimeout(r,2000))}
+ for(let i=0;i<150;i++){let d;try{d=await api('sites/update-all')}catch(e){restart();return}      /* it stopped answering after it started: it is restarting */
+  const o=$('#upsitesout');if(!o)return;o.innerHTML=sitesLines(d);if(d.local&&d.local.state==='restarting'){restart();return}if(!d.running)break;await new Promise(r=>setTimeout(r,2000))}
  const b=$('#upsites');if(b)b.disabled=false}
 async function updateAll(btn){btn.disabled=true;btn.textContent='Updating…';await act('apply-all',{});btn.disabled=false}
 async function restartApp(){if(!await askYes('Restart MonitorBox now?'))return;await act('app/restart',{})}
