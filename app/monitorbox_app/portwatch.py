@@ -135,6 +135,8 @@ class PortWatch:
         self.members = {}         # key -> the bond or team a network card belongs to ("bond0"): said in the alert
         self.used_at = {}         # key -> when the map last showed this port: a port that was in use in the last day keeps its history while its device sleeps (link down), the rest of the clean-up is for interfaces that never were ports
         self.speeds = {}          # key -> link speed in Mbit/s, from the map, so the minimums scale with the port
+        self.card_speeds = {}     # the same for ports read over SNMP, from the device itself (the map does not show a switch that UniFi does not know)
+        self.client_ports = set() # keys of ports on an SNMP-only switch that look like a client's (no neighbour, at most one address behind them): packet and link drops are not a problem there
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
         self.resets = {}          # key -> [times its counter went backwards (so its history started again), which counter, when]: shown on the page, to explain a port that never finishes learning
         self.links = {}           # key -> {"up": bool, "since": when it last changed, "expected": it has been up for an hour, so its going away is news}
@@ -167,7 +169,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         rising, off = [], []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, self._links(k), self.speeds.get(k))
+            j = judge(q, self._links(k), self._speed(k))
             row = {"key": k, "label": label, "alert": k not in known}
             if k in known:
                 off.append({**row, "kinds": j["rising"]})
@@ -277,7 +279,10 @@ class PortWatch:
 
     def _links(self, k):
         """Packet drops and link drops count on this port: an uplink, a link between switches, or a server (the map says which; every network card read over SNMP is a server's)."""
-        return k in self.flap_ports or k.startswith("snmp:")
+        return k in self.flap_ports or (k.startswith("snmp:") and k not in self.client_ports)
+
+    def _speed(self, k):
+        return self.speeds.get(k) or self.card_speeds.get(k)
 
     def _was_in_use(self, k, now):
         """The map showed this port within the last day: its device may just be asleep (a Mac that wakes for a backup), so what it learned is kept."""
@@ -317,7 +322,7 @@ class PortWatch:
         known, gone, now = self.known(), self._gone(), self.clock()
         with self.lock:
             cand = {k: dict(L) for k, L in self.links.items() if L["expected"] and not L["up"] and now - L["since"] >= DOWN_AFTER
-                    and (k in self.flap_ports or k.startswith("snmp:")) and k not in known and k not in gone}
+                    and self._links(k) and k not in known and k not in gone}
             labels = {k: self.labels.get(k, k) for k in cand}
         out = []
         for k, L in sorted(cand.items(), key=lambda x: labels[x[0]]):
@@ -350,7 +355,7 @@ class PortWatch:
             q = list(self.series.get(pk) or [])
         if not q:
             return {"label": label, "state": "none", "split": {}}
-        j = judge(q, self._links(pk), self.speeds.get(pk))
+        j = judge(q, self._links(pk), self._speed(pk))
         if not j["split"]:
             return {"label": label, "state": "learning", "split": {}}
         return {"label": label, "state": "figures", "split": j["split"]}
@@ -413,6 +418,13 @@ class PortWatch:
         with self.lock:
             q = self.series.get(key)
             return int(q[-1][3]) if q else 0
+
+    def set_snmp_ports(self, sid, speeds, clients):
+        """What one SNMP device's own report says about its ports (key -> speed in Mbit/s), and which of them look like a client's, for a device that is a switch."""
+        with self.lock:
+            pre = sid + "|"
+            self.card_speeds = {**{k: v for k, v in self.card_speeds.items() if not k.startswith(pre)}, **{k: v for k, v in speeds.items() if isinstance(v, (int, float)) and v > 0}}
+            self.client_ports = {k for k in self.client_ports if not k.startswith(pre)} | set(clients)
 
     def set_flap_ports(self, keys):
         """The ports whose link drops are worth reporting. A port with a laptop or a TV on it drops every time that sleeps, so it is left out."""
@@ -508,7 +520,7 @@ class PortWatch:
         """One map port (one or several keys, a bonded pair) in words and figures, or None when there is nothing to say."""
         known = self.known()
         with self.lock:
-            js = [judge(list(self.series[k]), self._links(k), self.speeds.get(k)) for k in keys if k in self.series]
+            js = [judge(list(self.series[k]), self._links(k), self._speed(k)) for k in keys if k in self.series]
         if not js:
             return None
         per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
@@ -527,7 +539,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         out = []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, self._links(k), self.speeds.get(k))
+            j = judge(q, self._links(k), self._speed(k))
             if j["rising"] and k not in known:
                 out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
