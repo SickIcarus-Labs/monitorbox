@@ -4,7 +4,7 @@ from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 
-from .modules import current as modules_current
+from .modules import current as modules_current, DEV_ONLY
 from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
 from . import sitesupdate
@@ -1870,9 +1870,22 @@ class App:
                 os.unlink(p)
         shutil.rmtree(self.paths.module_releases, ignore_errors=True)     # installed modules: first_run_sync fetches the channel's again
 
+    def drop_dev_only(self):
+        """A box that is not on dev has no dev-only modules (the sample module): uninstall any that are there. Like any uninstall it is
+        remembered as declined, so moving back to dev does not put it back; it can be installed by hand there."""
+        if self.cfg()["channel"] == "dev":
+            return []
+        gone = []
+        for mid in DEV_ONLY:
+            if mid in self.modules.state():
+                self.uninstall(mid)
+                gone.append(mid)
+        return gone
+
     def first_run_sync(self):
         """Install the modules the channel names that we have never had (hello runs on first start)."""
         try:
+            self.drop_dev_only()
             self.refresh()
             st = self.modules.state()
             d = self.default_id()
@@ -2803,6 +2816,7 @@ class App:
                         return self.send(200, {**out, "view": app.view()})
                     if path == "/api/channel":
                         updates.set_update_cfg(app.paths, channel=body.get("channel", ""))
+                        app.drop_dev_only()
                         app.refresh()
                         return self.send(200, app.view())
                 except (ValueError, PermissionError) as e:
