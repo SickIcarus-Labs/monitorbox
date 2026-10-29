@@ -18,6 +18,7 @@ Tests (each says what it tells you):
                   session: if the light reads are slow only when they share, calls are queueing behind each other; if both are slow the
                   device is the bottleneck
   6 cpu           how much of a request is this computer working (SNMP v3 encryption is done in Python) instead of waiting for the device
+  8 what          what the interfaces are: how many of each type and state, with a few names of each (no addresses)
   7 functions     MonitorBox's own readings, run exactly as the box runs them: the first counters reading (walks the layout), the next
                   one (just the counters), the LAN report and Re-detect: how long each takes and how many requests it makes
 
@@ -250,9 +251,32 @@ def t_functions():
         time.sleep(1)
 
 
+IF_TYPE, IF_OPER = "1.3.6.1.2.1.2.2.1.3", "1.3.6.1.2.1.2.2.1.8"
+TYPES = {6: "ethernet", 24: "loopback", 53: "virtual", 135: "vlan", 136: "vlan-sub", 161: "link-aggregate", 117: "gigabit-eth", 131: "tunnel", 142: "ip-forward", 150: "mpls", 209: "bridge", 53 + 1000: ""}
+
+
+def t_what(s):
+    print("8 what: the device's interfaces, by type and state")
+    try:
+        names = {o.rsplit(".", 1)[1]: L.text(v) for o, v in s.walk(IF_NAME)}
+        types = {o.rsplit(".", 1)[1]: v for o, v in s.walk(IF_TYPE)}
+        oper = {o.rsplit(".", 1)[1]: v for o, v in s.walk(IF_OPER)}
+    except L.SnmpError as e:
+        print(f"  failed ({e})")
+        return
+    groups = {}
+    for idx, nm in names.items():
+        t = types.get(idx)
+        key = (TYPES.get(t, f"type {t}"), "up" if oper.get(idx) == 1 else "down" if oper.get(idx) == 2 else "other")
+        groups.setdefault(key, []).append(nm)
+    print(f"  {len(names)} interfaces")
+    for (t, st), lst in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        print(f"  {len(lst):>4}  {t:<15} {st:<6} e.g. {', '.join(lst[:4])}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="SNMP speed test (read-only)")
-    ap.add_argument("--only", default="1,2,3,4,6,7,5")
+    ap.add_argument("--only", default="1,2,3,4,6,8,7,5")
     ap.add_argument("--seconds", type=int, default=20)
     a = ap.parse_args()
     want = {x.strip() for x in a.only.split(",")}
@@ -277,6 +301,8 @@ def main():
         t_tables(s, m)
     if "6" in want:
         t_cpu(s, m)
+    if "8" in want:
+        t_what(s)
     if "7" in want:
         t_functions()
     if "5" in want:
