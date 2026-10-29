@@ -587,6 +587,26 @@ class Header(T.SnmpE2E):
             self.assertIn(["limit", {"id": "drv", "max_c": 58}], pg.evaluate("window._calls"))
             b.close()
 
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_an_installed_module_that_is_idle_still_offers_uninstall(self):
+        """Regression: a module that is installed but not running ("idle until something uses it") had no Uninstall button."""
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 900})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".head em")
+            pg.evaluate("""()=>{const o=settingsData;settingsData=async(u)=>{const D=await o(u);
+              D.s.modules=[{id:'hello',version:'0.3.0',running:false,card:null,error:'idle until something uses it'}];
+              const c=Object.assign({},D.v.app||{},{installed:true,running:null,options:[],failed:[],pin:'latest',needsApply:false,uses:0});
+              D.v.modules={hello:c};return D}}""")
+            pg.evaluate("location.hash='#/settings/updates'")
+            pg.wait_for_selector("[data-sw=hello]")
+            self.assertEqual(pg.locator("[data-sw=hello] button:has-text('Uninstall')").count(), 1, "installed but idle: row")
+            pg.evaluate("""()=>{const o=settingsData;settingsData=async(u)=>{const D=await o(u);D.v.modules={};return D}}""")
+            pg.evaluate("renderSettings()"); pg.wait_for_function("document.querySelector('[data-sw=hello]') && !document.querySelector('[data-sw=hello] select')")
+            self.assertEqual(pg.locator("[data-sw=hello] button:has-text('Uninstall')").count(), 1, "installed but idle: fallback box")
+            b.close()
+
     def test_the_limit_route_refuses_nonsense_and_an_unknown_item(self):
         c = self.start(); self.configure(c, [], [])
         for body in ({"id": "nope", "max_c": 70}, {"id": "", "max_c": 70}, {"id": "nope", "max_c": 5}):
