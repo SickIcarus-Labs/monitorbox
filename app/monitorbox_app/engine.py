@@ -254,10 +254,13 @@ def evaluate(nodes, results, now_iso=""):
             cam_rep[i] = ids
 
     # --- what is worth the person's attention: roots only; aggregates only when they are down
+    def counts_for_attention(n):
+        return n.get("kind") != "aggregate" or eff[n["id"]] == FAILED
+
     def counts_for_banner(n):
         if n["id"].startswith(("site-", "managed-by-")):
-            return False                          # another site's trouble is shown on that site's tab and in the bell, never in this site's own banner
-        return n.get("kind") != "aggregate" or eff[n["id"]] == FAILED
+            return False                          # another site's trouble is listed under "needs attention" and colours that site's tab, but never changes this site's own headline
+        return counts_for_attention(n)
 
     attention = []
     for n in nodes:
@@ -266,7 +269,7 @@ def evaluate(nodes, results, now_iso=""):
             continue                              # the same camera from another source: the first one speaks for it
         src = by_id[max(ids, key=lambda i: _SEVERITY[eff[i]])] if ids else n          # the source with the most to say
         s = eff[src["id"]]
-        if s not in (FAILED, DEGRADED, UNKNOWN) or src["id"] in affected_by or not counts_for_banner(src) or n["id"] in muted:
+        if s not in (FAILED, DEGRADED, UNKNOWN) or src["id"] in affected_by or not counts_for_attention(src) or n["id"] in muted:
             continue
         o = out_nodes[src["id"]]
         w = why[src["id"]]

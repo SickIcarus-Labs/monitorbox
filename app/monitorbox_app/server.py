@@ -445,7 +445,7 @@ class App:
         internet is fine. They follow the pairings (removing a pairing removes them)."""
         try:
             info = self.peer.get()
-            mk = lambda i, name, chk: {"id": i, "name": name, "group": "Sites", "checks": [dict(chk, id="link", interval=15)], "confirmFailures": 2, "confirmSeconds": 30}
+            mk = lambda i, name, chk: {"id": i, "name": name, "group": "Sites", "checks": [dict(chk, id="link", interval=10)], "confirmFailures": 2, "confirmSeconds": 20}
             monconfig.sync_nodes(self.paths, "site-", [mk("site-" + s["id"], (s.get("name") or "Site") + " link", {"type": "site", "site": s["id"]}) for s in info["sites"]])
             monconfig.sync_nodes(self.paths, "managed-by-", [mk("managed-by-" + m["id"], "Managed by " + (m.get("name") or "another MonitorBox"), {"type": "manager", "manager": m["id"]}) for m in info["managers"]])
             self.reload_monitoring()
