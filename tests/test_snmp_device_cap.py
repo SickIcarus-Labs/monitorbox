@@ -1,8 +1,12 @@
 """One SNMP device that stops answering must not take every worker from the others (#327)."""
 import contextlib, io, json, os, sys, threading, time, unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "modules", "snmp"))
-import main as M  # noqa: E402
+import importlib.util  # noqa: E402
+MOD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "modules", "snmp")
+sys.path.insert(0, MOD)
+_spec = importlib.util.spec_from_file_location("snmp_main_for_cap", os.path.join(MOD, "main.py"))     # not "import main": other modules have a main.py too
+M = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(M)
 
 
 def req(i, host, method="check"):
