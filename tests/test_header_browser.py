@@ -227,6 +227,29 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_the_bell_checks_every_15_seconds_when_in_front_at_once_on_return_and_never_twice_at_a_time(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.add_init_script("window._ivs=[];const si=window.setInterval;window.setInterval=(f,ms,...a)=>{window._ivs.push(ms);return si(f,ms,...a)}")
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            self.assertIn(15000, pg.evaluate("window._ivs"))
+            self.assertNotIn(60000, pg.evaluate("window._ivs"), "the old once-a-minute check is gone")
+            pg.evaluate("""()=>{window._n=0;let rel;const f=window.fetch;window.fetch=(u,o)=>{if(String(u).endsWith('/api/versions')){window._n++;return new Promise(r=>{window._rel=()=>r(f(u,o))})}return f(u,o)}}""")
+            pg.evaluate("hdrBusy=false;hdrPoll();hdrPoll();hdrPoll()")
+            self.assertEqual(pg.evaluate("window._n"), 1, "a round still waiting is not started again")
+            pg.evaluate("window._rel()")
+            pg.wait_for_function("hdrBusy===false")
+            pg.evaluate("""()=>{window._n=0;window.fetch=(u,o)=>{if(String(u).endsWith('/api/versions'))window._n++;return Promise.reject(new Error('x'))};
+              Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'))}""")
+            pg.wait_for_timeout(300)
+            self.assertEqual(pg.evaluate("window._n"), 0, "hidden: nothing is asked")
+            pg.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'))")
+            pg.wait_for_function("window._n>=1")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_bell_says_when_the_container_image_needs_re_pulling_and_the_updates_page_explains(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:
