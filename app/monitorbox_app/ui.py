@@ -155,7 +155,11 @@ const SDOT={green:'#34d399',yellow:'#fbbf24',red:'#f87171',blue:'#60a5fa',unknow
 function siteTabs(){const c=siCfg;if(!c||!c.sites.length)return[];
  const here=(SITE===''&&snap&&snap.banner)||locBanner;
  return [{id:'',name:c.name||c.nameDefault,st:here?here.status:'unknown',head:here?here.headline:'checking…'}].concat(c.sites.map(s=>{const l=s.link||{};
-  return l.state==='linked'&&l.banner?{id:s.id,name:s.name,st:l.banner.status,head:l.banner.headline}:{id:s.id,name:s.name,st:'unknown',head:'Unknown'+(l.lastSeen?' · last heard '+siAgo(l.lastSeen):''),unk:1}}))}
+  const cn=snap&&snap.nodes&&snap.nodes['site-'+s.id],cs=cn?ds(cn,cn.state):'';
+  if(cs==='failed')return {id:s.id,name:s.name,st:'red',head:'Down'};  /* this box's own check says that site is down: that wins over its last report */
+  const w=cs==='degraded'?{st:'yellow',head:'Link trouble'}:null;
+  if(l.state==='linked'&&l.banner){const r={red:3,yellow:2,blue:1,green:0};return w&&(r[l.banner.status]||0)<2?{id:s.id,name:s.name,st:w.st,head:w.head}:{id:s.id,name:s.name,st:l.banner.status,head:l.banner.headline}}
+  return {id:s.id,name:s.name,st:'unknown',head:'Unknown'+(l.lastSeen?' · last heard '+siAgo(l.lastSeen):''),unk:1}}))}
 function renderTabs(){renderHeader()}
 /* ---------- the header: on every page once signed in. Mark (home), site tabs that swipe, the bell, the version, Settings ---------- */
 let SXC=null,rsTok=0,UPDCHK=0,LASTV='';
@@ -217,6 +221,8 @@ const HI={bell:'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10.3 21a1.9 1.9 0 0 0
 const hico=d=>`<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2 stroke-linecap=round stroke-linejoin=round aria-hidden=true><path d="${d}"/></svg>`;
 /* what the bell lists: new things found on the network, and an update that is ready. Each says where tapping it goes. */
 function hdrItems(){const o=[],multi=!!(siCfg&&siCfg.sites.length);
+ for(const s of (siCfg?siCfg.sites:[])){const n=snap&&snap.nodes&&snap.nodes['site-'+s.id],st=n?ds(n,n.state):'';  /* a paired site that is down or not answering */
+  if(st==='failed'||st==='degraded')o.push({id:'sitedown'+s.id,site:s.id,icon:HI.bell,tint:st==='failed'?'rgba(248,113,113,.18)':'rgba(251,191,36,.18)',ink:st==='failed'?'#FCA5A5':'#FCD34D',title:s.name+(st==='failed'?' is down':' has link trouble'),sub:n.detail||'',cta:'Look',go:'#/'})}
  for(const t of (siteTabs().length?siteTabs():[{id:'',name:''}])){const d=hdrSites[t.id];if(!d||t.unk)continue; /* a site that is not answering adds nothing: silence stays Unknown */
   const pre=multi?t.name+': ':'',fu=d.fu,p=d.pend,nf=fu.reduce((a,x)=>a+(x.labels?x.labels.length:1),0); /* things, not offers: three containers from one machine are 3 */
   if(fu.length)o.push({id:'fu'+t.id,site:t.id,icon:HI.box,tint:'rgba(52,211,153,.18)',ink:'#6EE7B7',title:pre+(nf===1?'1 new thing found':nf+' new things found'),sub:[...new Set(fu.map(x=>x.on?'On '+x.on:x.title))].slice(0,3).join(', ')+(fu.length>3?' and '+(fu.length-3)+' more':''),cta:'Set up',go:'#/settings/servers'});

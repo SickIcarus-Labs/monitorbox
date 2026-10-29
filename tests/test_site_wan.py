@@ -260,3 +260,24 @@ class Exchange(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OtherSiteDoesNotChangeThisSite(unittest.TestCase):
+    """A paired site that is down must not turn this site's own banner or attention list red (#324)."""
+
+    def test_banner_stays_green_when_a_paired_site_or_manager_is_down(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from test_engine import leaf, R
+        from monitorbox_app import engine
+        nodes = [leaf("nas", "NAS"), leaf("site-aa11", "Elsewhere link", group="Sites"), leaf("managed-by-bb22", "Managed by Other", group="Sites")]
+        out = engine.evaluate(nodes, R(nas=True, **{"site-aa11": False, "managed-by-bb22": False}))
+        self.assertEqual(out["banner"]["status"], "green")
+        self.assertEqual(out["attention"], [])
+        self.assertEqual(out["nodes"]["site-aa11"]["state"], "failed")          # the observed state is untouched
+
+    def test_this_sites_own_trouble_still_counts(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from test_engine import leaf, R
+        from monitorbox_app import engine
+        out = engine.evaluate([leaf("nas", "NAS", critical=True), leaf("site-aa11", "Elsewhere link", group="Sites")], R(nas=False, **{"site-aa11": True}))
+        self.assertNotEqual(out["banner"]["status"], "green")

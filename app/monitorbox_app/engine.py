@@ -255,6 +255,8 @@ def evaluate(nodes, results, now_iso=""):
 
     # --- what is worth the person's attention: roots only; aggregates only when they are down
     def counts_for_banner(n):
+        if n["id"].startswith(("site-", "managed-by-")):
+            return False                          # another site's trouble is shown on that site's tab and in the bell, never in this site's own banner
         return n.get("kind") != "aggregate" or eff[n["id"]] == FAILED
 
     attention = []
