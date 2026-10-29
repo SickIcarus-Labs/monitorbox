@@ -29,6 +29,7 @@ from .store import read_json, write_json
 DEFAULT_PORT = 8443
 PAIR_TTL = 600
 POLL_EVERY = 10.0
+STALE_LINK = 35         # seconds without a good answer before a 'linked' site counts as silent
 MANAGER_QUIET = 90.0      # a managing box polls every 10 s; this long without a word and it is called quiet
 MAX_SITES = 8
 CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -237,6 +238,7 @@ class Peer:
         self.wan_peek = None                        # set by the app: () -> what is known of this box's own address without looking it up, or None
         self.gateway = wanaddr.default_gateway     # () -> this box's own default gateway, told to the other site (see _verdict)
         self.ping = None                            # set by the app: (host) -> (ok, detail, ms); ok None means ping is not possible here
+        self.probes = {}                            # ("sites"|"managers", id) -> {"wan": True/False/None, "gw": True/False/None}: the lights under a site on the main screen
         self.control = ("1.1.1.1", "8.8.8.8")       # public addresses used to tell "that site is down" from "this box's own internet is down"
 
     # -- stored settings -----------------------------------------------------
@@ -268,8 +270,8 @@ class Peer:
         return {"name": c["name"], "nameDefault": str(self.hostname() or "MonitorBox"), "listen": c["listen"],
                 "listening": bool(self.srv), "ownWan": own,
                 "pairing": ({"code": p["code"], "expiresIn": int(p["expires"] - self.clock())} if p else None),
-                "managers": [{"id": m["id"], "name": m.get("name", ""), "since": m.get("since"), "wan": m.get("wan"), "gw": m.get("gw")} for m in c["managers"]],
-                "sites": [{"id": s["id"], "name": s.get("name", ""), "address": s["address"], "since": s.get("since"), "link": links.get(s["id"]), "wan": s.get("wan"), "gw": s.get("gw")} for s in c["sites"]]}
+                "managers": [{"id": m["id"], "name": m.get("name", ""), "since": m.get("since"), "wan": m.get("wan"), "gw": m.get("gw"), "probe": self.probes.get(("managers", m["id"]))} for m in c["managers"]],
+                "sites": [{"id": s["id"], "name": s.get("name", ""), "address": s["address"], "since": s.get("since"), "link": links.get(s["id"]), "wan": s.get("wan"), "gw": s.get("gw"), "probe": self.probes.get(("sites", s["id"]))} for s in c["sites"]]}
 
     def set_name(self, name):
         c = self._cfg()
@@ -395,6 +397,8 @@ class Peer:
         with self.lock:
             link = dict(self.links.get(sid) or {})
         st = link.get("state")
+        if st == "linked" and link.get("lastSeen") is not None and self.clock() - link["lastSeen"] > STALE_LINK:
+            st = "unknown"                                  # the last good answer is too old: do not keep saying "answering" while a slow poll is still timing out
         if st == "linked":
             self._learn_gw("sites", s)
             return True, f"answering from here{' · version ' + str(link['version']) if link.get('version') else ''}{' · internet address ' + s['wan'] if s.get('wan') else ''}", None
@@ -487,6 +491,35 @@ class Peer:
         if changed:
             self._write(c)
 
+    def _remember_ok(self, kind, ident, field):
+        c = self._cfg()
+        row = next((x for x in c[kind] if x["id"] == ident), None)
+        if row is not None and not row.get(field):
+            row[field] = True
+            self._write(c)
+
+    def probe_once(self):
+        """Ping each other site's internet address and gateway (the lights under a site) and, while the link works, note which of them answer at all."""
+        c = self._cfg()
+        for kind in ("sites", "managers"):
+            for row in c[kind]:
+                if not self.ping:
+                    return
+                res = {}
+                for field, ip in (("wan", row.get("wan")), ("gw", row.get("gw"))):
+                    if not ip:
+                        res[field] = None
+                        continue
+                    try:
+                        ok = self.ping(ip)[0]
+                    except Exception:
+                        ok = None
+                    res[field] = ok
+                    if ok is True:
+                        self._remember_ok(kind, row["id"], "wanok" if field == "wan" else "gwok")
+                with self.lock:
+                    self.probes[(kind, row["id"])] = res
+
     def _learn_gw(self, kind, row):
         """While the link works, find out once whether the other site's gateway answers a ping from here."""
         if row.get("gw") and not row.get("gwok") and self.ping:
@@ -521,6 +554,8 @@ class Peer:
         if wanaddr.classify(ip or "") != "public" or self.ping is None:
             return None
         ok, detail, _ms = self.ping(ip)
+        if ok is False and not (row or {}).get("wanok"):
+            return None                         # that address has never answered a ping from here (a firewall may drop it), so its silence proves nothing
         if ok is True:
             gw = (row or {}).get("gw") if (row or {}).get("gwok") else None          # only a gateway that has answered before can speak for the VPN
             if gw:
@@ -744,6 +779,18 @@ class Peer:
                     time.sleep(0.5)
         self.poll_thread = threading.Thread(target=loop, daemon=True, name="site-links")
         self.poll_thread.start()
+
+        def lights():
+            while not self.stopped:
+                try:
+                    self.probe_once()
+                except Exception:
+                    pass
+                for _ in range(int(POLL_EVERY * 2)):
+                    if self.stopped:
+                        return
+                    time.sleep(0.5)
+        threading.Thread(target=lights, daemon=True, name="site-lights").start()
 
     def stop(self):
         self.stopped = True

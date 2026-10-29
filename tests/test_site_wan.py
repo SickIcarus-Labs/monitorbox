@@ -141,9 +141,11 @@ class Verdict(unittest.TestCase):
             return self.replies.get(host, False), "", None
         self.p.ping = ping
 
+    learned = True            # the address has answered a ping from here before
+
     def silent_site(self, wan=THEIRS):
         c = self.p._cfg()
-        c["sites"] = [{"id": "tb", "name": "Turnberry", "address": "192.0.2.5:8443", "mid": "m1", "key": "00" * 32, "since": 1, **({"wan": wan} if wan else {})}]
+        c["sites"] = [{"id": "tb", "name": "Turnberry", "address": "192.0.2.5:8443", "mid": "m1", "key": "00" * 32, "since": 1, **({"wan": wan, "wanok": self.learned} if wan else {})}]
         self.p._write(c)
         self.p._note("tb", "unknown", "Turnberry could not be reached (OSError)")
         return self.p.link_check("tb")
@@ -191,7 +193,7 @@ class Verdict(unittest.TestCase):
 
     def test_the_managing_box_going_quiet_is_judged_the_same_way_from_the_managed_side(self):
         c = self.p._cfg()
-        c["managers"] = [{"id": "mgr", "name": "Broad Leaf", "key": "00" * 32, "since": 1, "wan": MINE}]
+        c["managers"] = [{"id": "mgr", "name": "Broad Leaf", "key": "00" * 32, "since": 1, "wan": MINE, "wanok": True}]
         self.p._write(c)
         self.p.seen["mgr"] = 1000.0 - 600
         self.replies[MINE] = True
@@ -294,7 +296,7 @@ class GatewayVerdict(Verdict):
 
     def silent_with_gateway(self, learned=True):
         c = self.p._cfg()
-        c["sites"] = [{"id": "tb", "name": "Turnberry", "address": "192.0.2.5:8443", "mid": "m1", "key": "00" * 32, "since": 1, "wan": THEIRS, "gw": self.GW, "gwok": learned}]
+        c["sites"] = [{"id": "tb", "name": "Turnberry", "address": "192.0.2.5:8443", "mid": "m1", "key": "00" * 32, "since": 1, "wan": THEIRS, "wanok": True, "gw": self.GW, "gwok": learned}]
         self.p._write(c)
         self.p._note("tb", "unknown", "Turnberry could not be reached (OSError)")
         return self.p.link_check("tb")
@@ -347,3 +349,41 @@ class GatewayVerdict(Verdict):
             h.write("Iface\tDestination\tGateway\tFlags\n" "eth0\t00000000\t0100370A\t0003\n" "eth0\t0000370A\t00000000\t0001\n")
         self.assertEqual(wanaddr.default_gateway(f), "10.55.0.1")
         self.assertIsNone(wanaddr.default_gateway(os.path.join(self.d.name, "none")))
+
+
+class LightsAndTiming(Verdict):
+    def test_an_address_that_never_answered_cannot_prove_the_site_is_down(self):
+        self.learned = False
+        self.replies["8.8.8.8"] = True
+        ok, detail, _ = self.silent_site()
+        self.assertIsNone(ok)
+        self.assertEqual(detail, "Turnberry could not be reached (OSError)")
+
+    def test_an_address_that_never_answered_still_counts_when_it_does_answer(self):
+        self.learned = False
+        self.replies[THEIRS] = True
+        self.assertIs(self.silent_site()[0], True)
+
+    def test_the_lights_follow_each_ping_and_the_address_is_learned_once_it_answers(self):
+        self.learned = False
+        self.silent_site()
+        c = self.p._cfg(); c["sites"][0]["gw"] = "10.77.0.1"; self.p._write(c)
+        self.replies[THEIRS] = True
+        self.p.probe_once()
+        self.assertEqual(self.p.get()["sites"][0]["probe"], {"wan": True, "gw": False})
+        self.assertTrue(self.p._cfg()["sites"][0]["wanok"])
+        self.assertFalse(self.p._cfg()["sites"][0].get("gwok"))
+        self.replies["10.77.0.1"] = True; self.replies[THEIRS] = False
+        self.p.probe_once()
+        self.assertEqual(self.p.get()["sites"][0]["probe"], {"wan": False, "gw": True})
+
+    def test_a_linked_site_whose_last_good_answer_is_too_old_counts_as_silent(self):
+        self.silent_site()
+        self.p._note("tb", "linked", "", version="1.7.9")
+        self.p.links["tb"]["lastSeen"] = 1000.0 - peer.STALE_LINK - 5
+        self.replies["8.8.8.8"] = True
+        self.assertIs(self.p.link_check("tb")[0], False)
+
+    def test_site_nodes_are_confirmed_in_30_seconds_not_60(self):
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "monitorbox_app", "server.py")).read()
+        self.assertIn('"confirmFailures": 2, "confirmSeconds": 30', src)
