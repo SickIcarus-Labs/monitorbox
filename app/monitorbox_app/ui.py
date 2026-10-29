@@ -287,7 +287,7 @@ function setSite(id){if(id===SITE)return;liveReset();SITE=id;siRemote=null;try{i
  /* everything the screens fetched belongs to the site they were fetched from: forget it, so the other site's screens load their own */
  grCfg=[];grData=null;bzData=null;bzPanel=null;flPanel=null;grLoaded=0;grPick=null;alCfg=null;cams=null;camT=0;box=null;setupConns=[];setupMon=null;setupRev=0;scans={};openCards.clear();
  try{sessionStorage.removeItem('mb-sx')}catch(e){}
- renderTabs();hdrInfo={ver:''};hdrPoll();hdrReveal();route()}
+ renderTabs();hdrInfo={ver:''};hdrPoll();hdrReveal();route();if(id)refreshSites()}   /* fetch the other site's pairings now, not at the next 10 s round, so its card is complete on first open */
 function remoteDown(name,msg){snap=null;lastJson='';$('#m').innerHTML=`<div class=box><h2 style="margin-top:0">${esc(name)} is not answering from here</h2><p>${esc(msg)}</p><p class=sub>That does not mean it is down: ${esc(name)} keeps running and alerting on its own. This screen comes back by itself when it answers. Use the tabs above to go to another site.</p></div>`}
 let drawerSig='',svcTop='',svcPrev=[],ICONS=null,view=getView(),lastTouch=0,deferred=null,drawerTop=0,snap=null,live=false,lastEvent=0,es=null,drawer=null,svcOpen=false,lastJson='';
 const chip=(st,label)=>`<span class="chip ${esc(st)}">${esc(label)}</span>`;
