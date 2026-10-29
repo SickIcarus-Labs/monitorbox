@@ -1,7 +1,8 @@
 """30-day history: state changes only, pruned to the window, gaps read Unknown, availability ignores Unknown."""
-import os, sys, tempfile, unittest, json
+import os, sys, tempfile, time, unittest, json
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
 from monitorbox_app.history import History, GAP_SECONDS
+from monitorbox_app import history
 
 D = 86400
 
@@ -101,6 +102,56 @@ class H(unittest.TestCase):
         tl = self.h.timeline("nope")
         self.assertEqual((tl["segments"], tl["availability"], tl["outages"]), ([], None, 0))
 
+
+    def test_the_one_pass_strip_gives_exactly_what_the_slice_by_slice_way_gave(self):
+        """The reference below is the original, straightforward way (every slice against every stretch); a random history must agree with it."""
+        import random
+        rnd = random.Random(7)
+        for trial in range(60):
+            clock = [1_000_000.0]
+            h = history.History(os.path.join(tempfile.mkdtemp(), "h.jsonl"), clock=lambda: clock[0])
+            names = [f"n{i}" for i in range(4)]
+            t = clock[0] - 3 * 86400
+            while t < clock[0]:
+                h.events.append((int(t), rnd.choice(names), rnd.choice(["healthy", "degraded", "failed", "unknown"])))
+                t += rnd.randint(1, 20000)
+            show = rnd.choice([None, ["failed"], ["degraded", "unknown"], []])
+            mins = rnd.choice([None, lambda n: 600])
+            hours, buckets = rnd.choice([(24, 24), (1, 6), (48, 10)])
+            got = h.strip(names[:3], hours=hours, buckets=buckets, show=show, min_seconds=mins)["buckets"]
+            now = int(clock[0]); span = hours * 3600; start = now - span; step = span / buckets
+            shown = {"failed", "degraded", "unknown"} if show is None else set(show)
+            per = {}
+            for tt, n, st in sorted(e for e in h.events if e[1] in names[:3]):
+                per.setdefault(n, []).append((tt, st))
+            rank = {"failed": 3, "degraded": 2, "healthy": 1, "unknown": 0}
+            want = []
+            for i in range(buckets):
+                a, b = start + i * step, start + (i + 1) * step
+                best = None
+                for n, rows in per.items():
+                    for j, (tt, st) in enumerate(rows):
+                        end = rows[j + 1][0] if j + 1 < len(rows) else now
+                        if st in ("failed", "degraded") and (st not in shown or history._brief(mins, n, tt, end, st)):
+                            st = "healthy"
+                        elif st == "unknown" and st not in shown:
+                            continue
+                        if tt < b and end > a and (best is None or rank[st] > rank[best]):
+                            best = st
+                want.append(best)
+            self.assertEqual(got, want, f"trial {trial}")
+
+    def test_a_card_bar_over_a_month_of_busy_history_is_quick(self):
+        import random
+        rnd = random.Random(3)
+        h = history.History(os.path.join(tempfile.mkdtemp(), "h.jsonl"))
+        now = time.time(); nodes = [f"n{i}" for i in range(200)]
+        for n in nodes:
+            t = now - 30 * 86400
+            while t < now:
+                h.events.append((int(t), n, rnd.choice(["healthy", "degraded", "failed", "unknown"]))); t += rnd.randint(600, 6 * 3600)
+        t0 = time.time(); h.strip(nodes)
+        self.assertLess(time.time() - t0, 0.15, "it took 0.26 s here before (seconds on a Pi, #card-bars)")
 
     def test_a_group_strip_shows_the_worst_state_hour_by_hour(self):
         h, c = self.h, self.clk; t0 = c.t
