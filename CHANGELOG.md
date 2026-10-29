@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.7.4** Making a backup now shows up in the list as soon as it is done. Before, a slow backup (a full one) could leave the old list on screen until you refreshed the page.
 - **1.7.3** The Hello sample module is for the dev channel only. A box on beta or stable now removes it by itself (at start and when you change channel). It does not come back by itself; on dev you can install it by hand.
 - **1.7.2** An installed module that is idle (not running yet, such as Hello) now has an Uninstall button on the Updates page. Before, the button only appeared while a module was running, so an idle one could not be removed.
 - **1.7.1** (#317) Temperatures and drives are tidier and adjustable. On a card, three or more UniFi temperature checks fold into one line ("UniFi temperatures · 3 temperatures · all good") that opens on tap, and by itself when one is hot, the same as the cameras and VPN tunnels. Protect drives fold the same way once there are three. Each device's or drive's warning limit can now be changed: open it, tap Edit monitoring, and set "Warn when hotter than (°C)". Empty uses the built-in limit (80 °C for a switch or gateway, 55 °C for a drive).

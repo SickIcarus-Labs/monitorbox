@@ -467,6 +467,24 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_a_slow_backup_shows_up_in_the_list_when_it_finishes(self):
+        """Regression: Settings kept the old backup list for 20 s, and a read that finished while a slow backup ran put the old list back."""
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 900})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".head em")
+            pg.evaluate("location.hash='#/settings/backups'"); pg.wait_for_selector("text=Back up settings now")
+            self.assertEqual(pg.locator("a:has-text('Download')").count(), 0)
+            pg.evaluate("""()=>{const f=window.fetch;window.fetch=async(u,o)=>{if(o&&o.method==='POST'&&/backups$/.test(String(u))){await new Promise(r=>setTimeout(r,800))}return f(u,o)}}""")
+            pg.click("text=Back up settings now")
+            pg.wait_for_timeout(200)
+            pg.evaluate("settingsData(true)")                    # a read made while the backup is still being made: it holds the old list
+            pg.wait_for_selector("a:has-text('Download')", timeout=8000)
+            self.assertEqual(pg.locator("a:has-text('Download')").count(), 1)
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_site_tabs_scroll_sideways_when_they_do_not_fit(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:
