@@ -48,7 +48,49 @@ def handle(req):
     raise ValueError(f"unknown method {m}")
 
 
+PER_DEVICE = 2                     # calls in flight at once for one device; a hung device must not take every worker from the others
+_busy, _busy_lock = {}, threading.Lock()
+
+
+def _device(req):
+    c = (req.get("params") or {}).get("connection") or {}
+    return (str(c.get("host") or ""), c.get("port", 161)) if c.get("host") else None
+
+
+def _enter(dev):
+    if dev is None:
+        return True
+    with _busy_lock:
+        if _busy.get(dev, 0) >= PER_DEVICE:
+            return False
+        _busy[dev] = _busy.get(dev, 0) + 1
+        return True
+
+
+def _leave(dev):
+    if dev is None:
+        return
+    with _busy_lock:
+        _busy[dev] = max(0, _busy.get(dev, 1) - 1)
+        if not _busy[dev]:
+            _busy.pop(dev, None)
+
+
 def serve(req):
+    dev = _device(req)
+    if not _enter(dev):                # answer at once instead of waiting for a worker behind a device that is not answering
+        msg = "SNMP: that device is still busy with earlier requests (it is slow or not answering)"
+        out = {"id": req["id"], "result": {"state": "unknown", "detail": msg}} if req.get("method") == "check" else {"id": req["id"], "error": msg}
+        with OUT:
+            print(json.dumps(out), flush=True)
+        return
+    try:
+        _serve(req)
+    finally:
+        _leave(dev)
+
+
+def _serve(req):
     try:
         out = {"id": req["id"], "result": handle(req)}
     except L.SnmpError as e:
