@@ -226,6 +226,7 @@ class Exchange(unittest.TestCase):
             time.sleep(0.1)
         self.assertEqual(main.get("/api/sites")["sites"][0]["wan"], THEIRS, "the managing box learned the site's address from its hello")
         self.assertEqual(tb.get("/api/sites")["managers"][0]["wan"], MINE, "the managed box learned the manager's address from its poll")
+        self.assertTrue(tb.get("/api/sites")["managers"][0]["addr"], "the managed box also knows what address the manager's calls come from")
         again = peer.Peer(main.app.peer.path, 1, "x", lambda: "1")
         self.assertEqual(again.get()["sites"][0]["wan"], THEIRS, "kept on disk with the pairing, so a restart while the link is down still knows it")
 
