@@ -550,6 +550,49 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_temperatures_and_drives_fold_under_one_line_each_once_there_are_three(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 900})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".head em")
+            got = pg.evaluate("""()=>{const mk=(id,target)=>({id,name:id,group:'Network',state:'healthy',checks:[{type:'unifi-network',target}]});
+              const mp=(id)=>({id,name:id,group:'Cameras',state:'healthy',checks:[{type:'unifi-protect',target:'drive'}]});
+              const o=snap;snap={cards:[],nodes:{a:mk('a','temperature'),b:mk('b','temperature'),c:mk('c','temperature'),d:mk('d','device'),e:mp('e'),f:mp('f')}};
+              const r=cardRows({nodes:['a','b','c','d','e','f']});snap=o;
+              return {sections:r.sections.map(s=>[s.name,s.unit,s.nodes.length]),loose:r.loose.map(n=>n.id)}}""")
+            self.assertEqual(got["sections"], [["UniFi temperatures", "temperatures", 3]], "three temperatures fold into one line")
+            self.assertEqual(sorted(got["loose"]), ["d", "e", "f"], "a device check and two drives (fewer than three) stay as their own lines")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_edit_monitoring_has_a_warning_limit_for_temperature_checks_only(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 900})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".head em")
+            pg.evaluate("""()=>{window._calls=[];const mk=(id,check,params)=>({id,name:id,group:'g',checks:[{type:'module',check,params}]});
+              const mon={confirm:{},nodes:[mk('drv','drive',{slot:1,max_c:50}),mk('tmp','temperature',{name:'A'}),mk('dev','device',{name:'A'})]};
+              const o=api;api=(p,b)=>p==='config/monitoring'?Promise.resolve({monitoring:mon,revision:1}):(p==='confirm'||p==='limit')?(window._calls.push([p,b]),Promise.resolve({})):o(p,b)}""")
+            pg.evaluate("editMonitoring('dev')"); pg.wait_for_selector("#medit")
+            self.assertEqual(pg.locator("#me-t").count(), 0, "a plain device check has no temperature limit")
+            pg.click("#me-no")
+            pg.evaluate("editMonitoring('tmp')"); pg.wait_for_selector("#me-t")
+            self.assertEqual(pg.get_attribute("#me-t", "placeholder"), "80", "a device temperature uses 80 unless set")
+            pg.click("#me-no")
+            pg.evaluate("editMonitoring('drv')"); pg.wait_for_selector("#me-t")
+            self.assertEqual((pg.get_attribute("#me-t", "placeholder"), pg.input_value("#me-t")), ("55", "50"), "a drive uses 55 unless set; its own limit is shown")
+            pg.fill("#me-t", "58"); pg.click("#me-ok"); pg.wait_for_selector("#medit", state="detached")
+            self.assertIn(["limit", {"id": "drv", "max_c": 58}], pg.evaluate("window._calls"))
+            b.close()
+
+    def test_the_limit_route_refuses_nonsense_and_an_unknown_item(self):
+        c = self.start(); self.configure(c, [], [])
+        for body in ({"id": "nope", "max_c": 70}, {"id": "", "max_c": 70}, {"id": "nope", "max_c": 5}):
+            self.assertEqual(c.post("/api/limit", body).get("_status"), 400, body)
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_tapping_a_bar_slice_says_what_was_not_healthy_in_that_hour(self):
         c = self.start(); self.configure(c, [], [])
         r = c.get("/api/history?trouble=nobody&from=0&to=3600")

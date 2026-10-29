@@ -39,6 +39,46 @@ class ModuleChecks(unittest.TestCase):
             self.assertIn(text, " ".join(monconfig.validate(m, {"ups-1"})[1]), bad)
 
 
+class HeatLimit(unittest.TestCase):
+    """#317: a device's or drive's temperature check has its own warning limit; empty means the built-in one."""
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="mb-heat-")
+        self.paths = Paths(self.d)
+        monconfig.save_connections(self.paths, [{"id": "unifi-1", "module": "unifi-network", "host": "192.0.2.7", "username": "fake-user-4", "password": "fake-pass-5"},
+                                                {"id": "prot-1", "module": "unifi-protect", "host": "192.0.2.8", "username": "fake-user-6", "password": "fake-pass-7"}], 0)
+        mc = lambda i, conn, check, params: {"id": i, "type": "module", "module": "unifi-network" if conn == "unifi-1" else "unifi-protect", "connection": conn, "check": check, "params": params}
+        nodes = [{"id": "t1", "name": "UniFi Core temperature", "group": "Network", "checks": [mc("c1", "unifi-1", "temperature", {"name": "Core"})]},
+                 {"id": "d1", "name": "Protect drive A", "group": "Cameras", "checks": [mc("c2", "prot-1", "drive", {"slot": 1})]},
+                 {"id": "dev", "name": "UniFi Core", "group": "Network", "checks": [mc("c3", "unifi-1", "device", {"name": "Core"})]},
+                 {"id": "pi", "name": "Pi", "group": "Servers", "checks": [{"type": "ping", "target": "192.0.2.9"}]}]
+        monconfig.save_monitoring(self.paths, {"builtinInternet": True, "nodes": nodes}, monconfig.get_monitoring(self.paths)["revision"])
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def params(self, nid):
+        n = next(x for x in monconfig.get_monitoring(self.paths)["monitoring"]["nodes"] if x["id"] == nid)
+        return n["checks"][0]["params"]
+
+    def test_a_limit_is_set_changed_and_cleared_and_the_other_params_stay(self):
+        monconfig.set_limit(self.paths, "t1", 72)
+        self.assertEqual(self.params("t1"), {"name": "Core", "max_c": 72})
+        monconfig.set_limit(self.paths, "d1", 50.5)
+        self.assertEqual(self.params("d1"), {"slot": 1, "max_c": 50.5})
+        monconfig.set_limit(self.paths, "t1", None)
+        self.assertEqual(self.params("t1"), {"name": "Core"})
+        self.assertEqual(self.params("d1")["max_c"], 50.5, "each item has its own limit")
+
+    def test_bad_limits_and_nodes_without_a_temperature_check_are_refused_and_leave_nothing_behind(self):
+        for bad in (19, 151, "70", True, -5):
+            with self.assertRaises(monconfig.Invalid, msg=str(bad)):
+                monconfig.set_limit(self.paths, "t1", bad)
+        for nid in ("dev", "pi", "nope"):
+            with self.assertRaises(monconfig.Invalid, msg=nid):
+                monconfig.set_limit(self.paths, nid, 70)
+        self.assertEqual(self.params("t1"), {"name": "Core"})
+
+
 class Connections(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="mb-conn-")
