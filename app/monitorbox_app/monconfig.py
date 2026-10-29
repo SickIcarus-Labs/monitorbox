@@ -865,6 +865,31 @@ def set_confirm(paths, nid, failures, seconds):
     return {"revision": save_monitoring(paths, mon, cur["revision"])}
 
 
+HEAT_CHECKS = {"temperature": 80, "drive": 55}      # the module checks that have a temperature limit, and the limit used when none is set (degrees C)
+
+
+def set_limit(paths, nid, max_c):
+    """Give one device's or drive's temperature check its own warning limit in degrees C, or None to use the built-in one again."""
+    import copy
+    cur = get_monitoring(paths)
+    mon = copy.deepcopy(cur["monitoring"])
+    node = next((n for n in mon.get("nodes", []) if n.get("id") == nid and n.get("kind") != "aggregate"), None)
+    checks = [c for c in (node or {}).get("checks", []) if c.get("type") == "module" and c.get("check") in HEAT_CHECKS]
+    if not checks:
+        raise Invalid([f"'{nid}' has no temperature check to set a limit on."])
+    if max_c is not None:
+        if isinstance(max_c, bool) or not isinstance(max_c, (int, float)) or not 20 <= max_c <= 150:
+            raise Invalid(["The limit must be a number of degrees between 20 and 150, or empty for the built-in one."])
+    for c in checks:
+        params = dict(c.get("params") or {})
+        if max_c is None:
+            params.pop("max_c", None)
+        else:
+            params["max_c"] = max_c
+        c["params"] = params
+    return {"revision": save_monitoring(paths, mon, cur["revision"])}
+
+
 def set_expected(paths, nid, on):
     """Mark a system as down on purpose (or clear it). Only alerts and the banner care; what is observed is unchanged."""
     import copy
