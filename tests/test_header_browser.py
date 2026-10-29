@@ -485,6 +485,20 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_the_bell_does_not_offer_a_module_that_was_uninstalled_on_purpose(self):
+        """Regression: hello, uninstalled by the owner, showed in the bell as "1 module ready to install" on dev."""
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 900})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".head em")
+            got = pg.evaluate("""()=>{const base={needsApply:true,target:'1.0.0',failed:[]};const t=o=>modWaiting(Object.assign({},base,o));
+              return {running:t({running:'0.9.0'}),installed:t({installed:true}),newFromDefault:t({fromDefault:true,declined:false}),
+                declined:t({fromDefault:true,declined:true,installed:false}),otherRepo:t({fromDefault:false}),failed:t({running:'0.9.0',failed:['1.0.0']}),upToDate:t({running:'1.0.0',needsApply:false})}}""")
+            self.assertEqual(got, {"running": True, "installed": True, "newFromDefault": False, "declined": False, "otherRepo": False, "failed": False, "upToDate": False})
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_site_tabs_scroll_sideways_when_they_do_not_fit(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:

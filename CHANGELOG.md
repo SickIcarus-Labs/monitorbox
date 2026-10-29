@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.7.5** (#98) A module is installed only when it is needed. A new box starts with Wake-on-LAN only (nothing can detect that you want it); a module such as UniFi, Portainer, Scrypted, SNMP or UPS (NUT) installs itself the first time you add or test a device of its kind, and a restored backup fetches the modules its connections use. The bell, the Update counts, Update all and automatic updating cover only modules you already have, so Hello on dev (or a module for equipment you do not own) no longer shows up as "ready to install". Boxes that already have modules keep them, and installing by hand from the Updates page still works.
 - **1.7.4** Making a backup now shows up in the list as soon as it is done. Before, a slow backup (a full one) could leave the old list on screen until you refreshed the page.
 - **1.7.3** The Hello sample module is for the dev channel only. A box on beta or stable now removes it by itself (at start and when you change channel). It does not come back by itself; on dev you can install it by hand.
 - **1.7.2** An installed module that is idle (not running yet, such as Hello) now has an Uninstall button on the Updates page. Before, the button only appeared while a module was running, so an idle one could not be removed.

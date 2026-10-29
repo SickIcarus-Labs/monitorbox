@@ -12,6 +12,13 @@ from . import perfstats
 from .store import read_json, write_json
 
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
+ALWAYS = ("wol",)                          # installed on a new box: nothing can detect that someone wants Wake-on-LAN, so it is assumed. Every other module is installed when its need shows up.
+def always():
+    """The modules a new box installs at once. MB_ALWAYS_MODULES (for the end-to-end tests, which want every module on a new box) is "*" for all, or a comma list."""
+    v = os.environ.get("MB_ALWAYS_MODULES")
+    return None if v == "*" else (tuple(x for x in v.split(",") if x) if v is not None else ALWAYS)
+
+
 DEV_ONLY = ("hello",)                      # sample modules: only the dev channel offers them, and a box on beta or stable has none installed
 RETIRED = {"unifi": "unifi-network"}      # renamed modules: the old one is no longer started
 
@@ -119,6 +126,7 @@ STARTUP_HOLD = 90        # seconds after the app starts during which a module th
 
 
 class Modules:
+    on_need = None                    # (module id) -> installs it; set by the App
     def __init__(self, paths, installer):
         self.paths = paths
         self.install_archive = installer  # (url, sha256, dest) -> dest
@@ -130,6 +138,7 @@ class Modules:
         self.wanted = lambda: None        # () -> set of module ids some connection uses, or None for "all"
         self.starting = set()             # modules the app is bringing up right now: a check for one of them waits instead of reporting "not running"
         self.boot = time.monotonic()
+        self.install_tried = {}           # module id -> when an install for a need was last tried
 
     def state(self):
         return read_json(self.paths.modules_state, {})
@@ -257,7 +266,9 @@ class Modules:
         return out
 
     def call(self, mid, method, params, timeout=10):
-        """Ask a running module to do something. Raises RuntimeError with a plain message if it cannot."""
+        """Ask a running module to do something. Raises RuntimeError with a plain message if it cannot.
+        A module that is not installed yet is installed first (see `on_need`): a device that needs it is the need."""
+        self._ensure(mid)
         p = self.running.get(mid)
         if not p or not p.alive():
             p = self._revive(mid)
@@ -273,7 +284,20 @@ class Modules:
                 c = (params or {}).get("connection") if isinstance(params, dict) else None
                 perfstats.slow(f"{mid}.{method}" + (f" for {c.get('name') or c.get('id')}" if isinstance(c, dict) else ""), ms)
 
+    def _ensure(self, mid):
+        """Install a module that something now needs (a connection to a device of its kind). `on_need` is set by the App; it says
+        why it will not, and tries a failed install again only after a while."""
+        if not hasattr(self, "install_tried"):
+            self.install_tried = {}
+        if self.on_need and mid not in self.state() and mid not in RETIRED and time.monotonic() - self.install_tried.get(mid, -1e9) > 60:
+            self.install_tried[mid] = time.monotonic()
+            try:
+                self.on_need(mid)
+            except Exception:
+                pass
+
     def listen(self, mid, session, cb):
+        self._ensure(mid)
         p = self.running.get(mid)
         if not p or not p.alive():
             p = self._revive(mid)

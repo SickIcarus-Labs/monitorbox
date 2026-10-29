@@ -4,7 +4,7 @@ from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 
-from .modules import current as modules_current, DEV_ONLY
+from .modules import current as modules_current, DEV_ONLY, always
 from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
 from . import sitesupdate
@@ -56,6 +56,7 @@ class App:
         self.security = security.Security(self.paths)
         self.passkeys = passkeys.Passkeys(self.paths)
         self.modules = Modules(self.paths, updates.install_archive)
+        self.modules.on_need = self.install_needed
         self.modules.wanted = self.used_modules
         self.exit_code = None
         self.wipe = False
@@ -701,7 +702,7 @@ class App:
         v = self.view()
         done, failed = [], []
         for mid, c in sorted(v["modules"].items()):
-            if c.get("needsApply") and c.get("target") and c["target"] not in c.get("failed", []) and (c.get("running") or (c.get("fromDefault") and not c.get("declined"))):
+            if c.get("needsApply") and c.get("target") and c["target"] not in c.get("failed", []) and (c.get("running") or c.get("installed")):
                 try:
                     self.apply("module", mid)
                     done.append(f"{mid} {c['target']}")
@@ -755,8 +756,8 @@ class App:
             if cfg["auto_update"] and self.infos:
                 v = self.view()
                 for mid, c in v["modules"].items():
-                    # a module from another repository is never installed unasked; once the owner has installed it, it follows its updates
-                    if c["pin"] == "latest" and c["needsApply"] and c["target"] not in c["failed"] and (c.get("running") or (c.get("fromDefault") and not c.get("declined"))):
+                    # only a module that is already installed follows its updates; a module is never installed unasked
+                    if c["pin"] == "latest" and c["needsApply"] and c["target"] not in c["failed"] and (c.get("running") or c.get("installed")):
                         before = c.get("running")
                         self.apply("module", mid)
                         self.note_update("module", mid, before, c["target"])        # only here, the automatic path: an update started by hand does not say so
@@ -1870,6 +1871,17 @@ class App:
                 os.unlink(p)
         shutil.rmtree(self.paths.module_releases, ignore_errors=True)     # installed modules: first_run_sync fetches the channel's again
 
+    def install_needed(self, mid):
+        """Something needs this module (a connection to a device of its kind, a Test connection): install it from the repository that offers it.
+        The owner's choice to uninstall it earlier does not stand in the way: adding a device of that kind is asking for it again."""
+        if mid in DEV_ONLY and self.cfg()["channel"] != "dev":
+            return
+        if mid in self.modules.state():
+            return
+        if not any((self.infos.get(r["id"]) or {}).get("pointer") for r in self.repos() if r["enabled"]):
+            self.refresh()
+        self.apply("module", mid)
+
     def drop_dev_only(self):
         """A box that is not on dev has no dev-only modules (the sample module): uninstall any that are there. Like any uninstall it is
         remembered as declined, so moving back to dev does not put it back; it can be installed by hand there."""
@@ -1883,7 +1895,7 @@ class App:
         return gone
 
     def first_run_sync(self):
-        """Install the modules the channel names that we have never had (hello runs on first start)."""
+        """Install the modules a new box always has (Wake-on-LAN); every other module installs when it is needed (install_needed)."""
         try:
             self.drop_dev_only()
             self.refresh()
@@ -1894,8 +1906,9 @@ class App:
                 if not r["enabled"]:
                     continue
                 for mid, ent in ((self.infos.get(r["id"]) or {}).get("pointer") or {}).get("modules", {}).items():
-                    # the default repository's modules are all installed on a new box; another repository's only if this box (restored from a backup) used it
-                    if mid not in st and mid not in self.cfg()["uninstalled"] and mid in modules_current([mid]) and (r["id"] == d and sources.get(mid, d) == d or sources.get(mid) == r["id"]):
+                    # a new box gets only the modules nothing can detect a need for (ALWAYS); the others install when a device of their kind is added.
+                    # A repository other than the default: only what this box (restored from a backup) used from it.
+                    if (always() is None or mid in always() or r["id"] != d) and mid not in st and mid not in self.cfg()["uninstalled"] and mid in modules_current([mid]) and (r["id"] == d and sources.get(mid, d) == d or sources.get(mid) == r["id"]):
                         self.modules.apply_one(mid, ent)
         except Exception:
             pass
