@@ -5,7 +5,10 @@ import io, json, os, sys, tarfile, tempfile, threading, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "app")); sys.path.insert(0, os.path.join(ROOT, "launcher"))
 from monitorbox_app import backups  # noqa: E402
-from monitorbox_launcher import backup as launcher_backup  # noqa: E402
+import importlib.util  # noqa: E402
+# the launcher's own file, loaded fresh: the App now swaps a faster listing into the shared module, and these tests compare against the original
+_spec = importlib.util.spec_from_file_location("launcher_backup_original", os.path.join(ROOT, "launcher", "monitorbox_launcher", "backup.py"))
+launcher_backup = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(launcher_backup)
 
 
 def make(path, created, kind="config", label="manual", ver="9.9.9", payload=b"x" * 1000):

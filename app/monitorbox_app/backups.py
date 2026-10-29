@@ -12,9 +12,16 @@ def lib():
         sys.path.append(path)
     try:
         from monitorbox_launcher import backup
-        return backup
     except ImportError:
         raise ValueError(OLD_IMAGE)
+    if not getattr(backup.list_backups, "fast", False):
+        # The launcher's own list_backups looks each archive's manifest up by name, which reads the whole archive first. Making a backup lists every
+        # older backup to prune the old ones, so a 50 KB settings backup took 17 s on a Pi that held a few full backups. The image cannot change
+        # without asking every owner to re-pull it, so the App swaps in its own listing (same fields, same order, each archive read once).
+        fast = lambda root: listing(root)
+        fast.fast = True
+        backup.list_backups = fast
+    return backup
 
 
 _cache = {"sig": None, "list": None}
