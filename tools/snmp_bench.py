@@ -27,6 +27,11 @@ Options: --only 1,2   run only these tests;   --seconds 20   length of the overl
 import argparse, os, statistics, sys, threading, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REF = os.environ.get("SNMP_REF")                                       # a branch or commit to measure (default: main); always fetched fresh
+if REF and not os.path.exists(os.path.join(HERE, "..", "modules", "snmp", "snmplib.py")):
+    for name in ("snmplib.py", "checks.py"):
+        with urllib.request.urlopen(f"https://raw.githubusercontent.com/SickIcarus-Labs/monitorbox/{REF}/modules/snmp/{name}", timeout=20) as r, open(os.path.join(HERE, name), "wb") as f:
+            f.write(r.read())
 for cand in (os.path.join(HERE, "..", "modules", "snmp"), HERE):
     if os.path.exists(os.path.join(cand, "snmplib.py")):
         sys.path.insert(0, cand)
@@ -267,7 +272,8 @@ def t_what(s):
     groups = {}
     for idx, nm in names.items():
         t = types.get(idx)
-        key = (TYPES.get(t, f"type {t}"), "up" if oper.get(idx) == 1 else "down" if oper.get(idx) == 2 else "other")
+        o = oper.get(idx)
+        key = (TYPES.get(t, f"type {t}"), "up" if o == 1 else "down" if o == 2 else f"state {o}")      # the raw number: 3 testing, 4 unknown, 5 dormant, 6 notPresent, 7 lowerLayerDown
         groups.setdefault(key, []).append(nm)
     print(f"  {len(names)} interfaces")
     for (t, st), lst in sorted(groups.items(), key=lambda kv: -len(kv[1])):
