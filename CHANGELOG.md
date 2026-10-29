@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.7.7** While a backup is being made, the Backups page shows a moving bar and a line saying so ("Making the backup… This takes a few seconds.", or for a full backup "…can take about half a minute."), and the backup buttons are switched off until it finishes. Before, the buttons looked dead for the whole wait.
 - **1.7.6** Making a backup is fast again. A settings backup of 51 KB took about 17 seconds on a Raspberry Pi, because making any backup also scanned every older backup from start to end to decide which to delete, and full backups are large. Each old backup is now read once (just its label) and remembered.
 - **1.7.5** (#98) A module is installed only when it is needed. A new box starts with Wake-on-LAN only (nothing can detect that you want it); a module such as UniFi, Portainer, Scrypted, SNMP or UPS (NUT) installs itself the first time you add or test a device of its kind, and a restored backup fetches the modules its connections use. The bell, the Update counts, Update all and automatic updating cover only modules you already have, so Hello on dev (or a module for equipment you do not own) no longer shows up as "ready to install". Boxes that already have modules keep them, and installing by hand from the Updates page still works.
 - **1.7.4** Making a backup now shows up in the list as soon as it is done. Before, a slow backup (a full one) could leave the old list on screen until you refreshed the page.
