@@ -281,3 +281,69 @@ class OtherSiteDoesNotChangeThisSite(unittest.TestCase):
         from monitorbox_app import engine
         out = engine.evaluate([leaf("nas", "NAS", critical=True), leaf("site-aa11", "Elsewhere link", group="Sites")], R(nas=False, **{"site-aa11": True}))
         self.assertNotEqual(out["banner"]["status"], "green")
+
+
+class GatewayVerdict(Verdict):
+    """With the other site's gateway known (and known to answer pings), a silent link says which part is down."""
+    GW = "10.77.0.1"
+    OWN_GW = "10.55.0.1"
+
+    def setUp(self):
+        super().setUp()
+        self.p.gateway = lambda: self.OWN_GW
+
+    def silent_with_gateway(self, learned=True):
+        c = self.p._cfg()
+        c["sites"] = [{"id": "tb", "name": "Turnberry", "address": "192.0.2.5:8443", "mid": "m1", "key": "00" * 32, "since": 1, "wan": THEIRS, "gw": self.GW, "gwok": learned}]
+        self.p._write(c)
+        self.p._note("tb", "unknown", "Turnberry could not be reached (OSError)")
+        return self.p.link_check("tb")
+
+    def test_internet_up_but_gateway_silent_means_the_vpn_is_down(self):
+        self.replies[THEIRS] = True
+        ok, detail, _, extra = self.silent_with_gateway()
+        self.assertEqual((ok, extra), (True, {"warn": True}))
+        self.assertIn("VPN between the sites is down", detail); self.assertIn(self.GW, detail)
+
+    def test_internet_and_gateway_up_means_monitorbox_there_is_down(self):
+        self.replies[THEIRS] = True; self.replies[self.GW] = True
+        ok, detail, _, extra = self.silent_with_gateway()
+        self.assertEqual((ok, extra), (True, {"warn": True}))
+        self.assertIn("MonitorBox on that site may be down", detail)
+
+    def test_a_gateway_that_never_answered_is_ignored_and_the_old_wording_stays(self):
+        self.replies[THEIRS] = True
+        ok, detail, _, _ = self.silent_with_gateway(learned=False)
+        self.assertIn("The link, or MonitorBox there, may be down", detail)
+        self.assertNotIn(self.GW, self.asked)
+
+    def test_internet_down_is_still_site_down_whatever_the_gateway_says(self):
+        self.replies["8.8.8.8"] = True
+        self.assertIs(self.silent_with_gateway()[0], False)
+        self.assertNotIn(self.GW, self.asked)
+
+    def test_it_learns_once_that_the_gateway_answers_while_the_link_works(self):
+        self.silent_with_gateway(learned=False)
+        self.p._note("tb", "linked", "", version="1.7.9")
+        self.replies[self.GW] = True
+        self.p.link_check("tb")
+        self.assertTrue(next(s for s in self.p._cfg()["sites"] if s["id"] == "tb")["gwok"])
+        self.asked.clear(); self.p.link_check("tb")
+        self.assertEqual(self.asked, [], "learned once, not pinged every time")
+
+    def test_an_address_that_is_the_same_on_both_sides_proves_nothing(self):
+        self.silent_with_gateway(learned=False)
+        self.p._remember_gw("sites", "tb", self.OWN_GW)
+        self.assertEqual(next(s for s in self.p._cfg()["sites"] if s["id"] == "tb")["gw"], self.GW)
+
+    def test_only_private_addresses_are_kept_as_a_gateway(self):
+        self.silent_with_gateway(learned=False)
+        self.p._remember_gw("sites", "tb", THEIRS)
+        self.assertEqual(next(s for s in self.p._cfg()["sites"] if s["id"] == "tb")["gw"], self.GW)
+
+    def test_the_default_gateway_is_read_from_the_network_table(self):
+        f = os.path.join(self.d.name, "route")
+        with open(f, "w") as h:
+            h.write("Iface\tDestination\tGateway\tFlags\n" "eth0\t00000000\t0100370A\t0003\n" "eth0\t0000370A\t00000000\t0001\n")
+        self.assertEqual(wanaddr.default_gateway(f), "10.55.0.1")
+        self.assertIsNone(wanaddr.default_gateway(os.path.join(self.d.name, "none")))

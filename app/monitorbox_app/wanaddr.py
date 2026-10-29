@@ -85,3 +85,30 @@ class Own:
         if ip and classify(ip) == "public":
             return {"ip": ip, "state": "ok", "source": "reflector", "why": ""}, TTL_REFLECTOR
         return {"ip": None, "state": "unknown", "source": "reflector", "why": "this box could not work out its public address"}, TTL_PRIVATE
+
+
+LAN = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")]
+
+
+def is_lan(ip):
+    """True for an address on a private network (the ranges routers hand out), which is where a gateway lives."""
+    try:
+        a = ipaddress.ip_address(str(ip).strip())
+    except ValueError:
+        return False
+    return any(a in n for n in LAN)
+
+
+def default_gateway(path="/proc/net/route"):
+    """This box's default gateway (a private address on the local network), or None. Read from the network table, nothing is sent."""
+    try:
+        with open(path) as f:
+            for line in f.read().splitlines()[1:]:
+                p = line.split()
+                if len(p) > 3 and p[1] == "00000000" and int(p[3], 16) & 2:
+                    b = bytes.fromhex(p[2])[::-1]
+                    ip = ".".join(str(x) for x in b)
+                    return ip if is_lan(ip) else None
+    except Exception:
+        pass
+    return None

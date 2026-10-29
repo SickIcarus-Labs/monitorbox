@@ -367,6 +367,7 @@ function siteInfo(n){const c=siCfg;if(!c||!/^(site|managed-by)-/.test(n.id))retu
  const wan=(s||m).wan||'',via=s?String(s.address||''):'',host=via.replace(/:\d+$/,''),lines=[];
  if(wan&&host&&wan===host)lines.push(['Internet address',wan+' (this box connects here too)']);
  else{lines.push(['Internet address',wan||'not shared yet']);if(via)lines.push(['Connects to',via])}
+ if((s||m).gw)lines.push(['Gateway',(s||m).gw]);
  return {name:s?s.name:n.name,lines}}
 function siteFold(n,i,d,inf){const st=ds(n,n.state),open=openN.has(n.id)||st==='failed'||st==='degraded',dt=n.detail||'',two=inf.name.length+dt.length>34;
  const inner=inf.lines.map(l=>line('void(0)','expected',l[0],l[1],d+1)).join('')+line(`openDrawer(${i},'${esc(n.id)}')`,'expected','Details','',d+1);
