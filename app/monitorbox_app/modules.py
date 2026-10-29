@@ -12,6 +12,7 @@ from . import perfstats
 from .store import read_json, write_json
 
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
+DEV_ONLY = ("hello",)                      # sample modules: only the dev channel offers them, and a box on beta or stable has none installed
 RETIRED = {"unifi": "unifi-network"}      # renamed modules: the old one is no longer started
 
 

@@ -160,3 +160,36 @@ class Uninstall(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DevOnly(unittest.TestCase):
+    """The sample module belongs to the dev channel only: leaving dev removes it, and going back to dev brings it back (not "declined")."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mb-dev-")
+        self.main = os.path.join(self.tmp, "main")
+        R.release_repo(self.main, {"alpha": [("0.1.0", R.SHA["a"])], "hello": [("0.3.0", R.SHA["c"])]})
+        self.app = server.App(os.path.join(self.tmp, "box"), f"file://{self.main}", "dev", 0)
+        self.app.reload_monitoring = lambda: None
+        for mid, ver, sha in (("hello", "0.3.0", R.SHA["c"]), ("alpha", "0.1.0", R.SHA["a"])):
+            st = self.app.modules.state()
+            st[mid] = {"active": ver, "failed": [], "sha256": sha}
+            self.app.modules._save(st)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_dev_keeps_hello(self):
+        self.assertEqual(self.app.drop_dev_only(), [])
+        self.assertIn("hello", self.app.modules.state())
+
+    def test_beta_and_stable_remove_hello_only_and_do_not_mark_it_declined(self):
+        for ch in ("beta", "stable"):
+            st = self.app.modules.state()
+            st["hello"] = {"active": "0.3.0", "failed": [], "sha256": R.SHA["c"]}
+            self.app.modules._save(st)
+            updates.set_update_cfg(self.app.paths, channel=ch)
+            self.assertEqual(self.app.drop_dev_only(), ["hello"], ch)
+            self.assertNotIn("hello", self.app.modules.state())
+            self.assertIn("alpha", self.app.modules.state())
+            self.assertEqual(self.app.cfg()["uninstalled"], [], ch)
+            self.assertEqual(self.app.drop_dev_only(), [], ch)               # nothing left to remove
