@@ -18,11 +18,12 @@ managed box's own API as if its owner were signed in. Not passed on: signing in/
 (so a main box cannot pair the box it manages to a third one, and control cannot loop back), and the main screen's status stream (it polls instead).
 The live-camera setup channel (a server-sent event stream) and its calls are passed, so the main box can start a view on a managed box's cameras.
 """
-import urllib.parse, http.client, json, os, re, secrets, socket, ssl, threading, time
+import ipaddress, urllib.parse, http.client, json, os, re, secrets, socket, ssl, threading, time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from . import wanaddr
 from .store import read_json, write_json
 
 DEFAULT_PORT = 8443
@@ -196,6 +197,8 @@ class _Handler(BaseHTTPRequestHandler):
             if ident.startswith("m:") and owner.is_manager(ident[2:]):
                 owner.seen[ident[2:]] = owner.clock()
                 owner.manager_named(ident[2:], self.headers.get("X-MB-Name"))
+                owner.manager_wan_in(ident[2:], self.headers.get("X-MB-Wan"))
+                owner._remember_gw("managers", ident[2:], urllib.parse.unquote(self.headers.get("X-MB-Gw") or ""))
                 if path == "/peer/set-name" and method == "POST":
                     try:
                         body = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
@@ -229,6 +232,12 @@ class Peer:
         self.relay_lookup = None                    # set by the app: live view id -> its media pipe
         self.on_change = None                       # set by the app: called (off to the side) when a pairing is made or ended
         self.seen = {}                              # managing box id -> when it last spoke to this box
+        self.wan_info = None                        # set by the app: () -> {"ip", "state", ...}, this box's own public address (see wanaddr.py)
+        self.on_relink = None                       # set by the app: called when a silent link answers again (the line was down, so the address may have changed)
+        self.wan_peek = None                        # set by the app: () -> what is known of this box's own address without looking it up, or None
+        self.gateway = wanaddr.default_gateway     # () -> this box's own default gateway, told to the other site (see _verdict)
+        self.ping = None                            # set by the app: (host) -> (ok, detail, ms); ok None means ping is not possible here
+        self.control = ("1.1.1.1", "8.8.8.8")       # public addresses used to tell "that site is down" from "this box's own internet is down"
 
     # -- stored settings -----------------------------------------------------
     def _cfg(self):
@@ -252,11 +261,15 @@ class Peer:
         with self.lock:
             p = self.pairing if self.pairing and self.pairing["expires"] > self.clock() else None
             links = dict(self.links)
+        try:
+            own = self.wan_peek() if self.wan_peek else None
+        except Exception:
+            own = None
         return {"name": c["name"], "nameDefault": str(self.hostname() or "MonitorBox"), "listen": c["listen"],
-                "listening": bool(self.srv),
+                "listening": bool(self.srv), "ownWan": own,
                 "pairing": ({"code": p["code"], "expiresIn": int(p["expires"] - self.clock())} if p else None),
-                "managers": [{"id": m["id"], "name": m.get("name", ""), "since": m.get("since")} for m in c["managers"]],
-                "sites": [{"id": s["id"], "name": s.get("name", ""), "address": s["address"], "since": s.get("since"), "link": links.get(s["id"])} for s in c["sites"]]}
+                "managers": [{"id": m["id"], "name": m.get("name", ""), "since": m.get("since"), "wan": m.get("wan"), "gw": m.get("gw")} for m in c["managers"]],
+                "sites": [{"id": s["id"], "name": s.get("name", ""), "address": s["address"], "since": s.get("since"), "link": links.get(s["id"]), "wan": s.get("wan"), "gw": s.get("gw")} for s in c["sites"]]}
 
     def set_name(self, name):
         c = self._cfg()
@@ -383,11 +396,13 @@ class Peer:
             link = dict(self.links.get(sid) or {})
         st = link.get("state")
         if st == "linked":
-            return True, f"answering from here{' · version ' + str(link['version']) if link.get('version') else ''}", None
+            self._learn_gw("sites", s)
+            return True, f"answering from here{' · version ' + str(link['version']) if link.get('version') else ''}{' · internet address ' + s['wan'] if s.get('wan') else ''}", None
         if st == "refused":
             return None, f"{who} no longer accepts this box's key. Pair the sites again.", None
         if st == "unknown":
-            return None, link.get("error") or f"{who} is not answering from here", None
+            v = self._verdict(who, s.get("wan"), s)
+            return v if v else (None, link.get("error") or f"{who} is not answering from here", None)
         return None, f"{who} has not been checked yet", None
 
     def manager_check(self, mid):
@@ -401,8 +416,10 @@ class Peer:
             return None, f"{who} has not been in touch since this box started", None
         ago = self.clock() - t
         if ago <= MANAGER_QUIET:
+            self._learn_gw("managers", m)
             return True, f"in touch ({int(ago)} s ago)", None
-        return None, f"{who} has not been in touch for {int(ago // 60)} min {int(ago % 60)} s", None
+        v = self._verdict(who, m.get("wan"), m)
+        return v if v else (None, f"{who} has not been in touch for {int(ago // 60)} min {int(ago % 60)} s", None)
 
     def is_manager(self, mid):
         return any(m["id"] == mid for m in self._cfg()["managers"])
@@ -431,7 +448,94 @@ class Peer:
         return self.get()
 
     def hello(self):
-        return {"app": "monitorbox", "name": self.name(), "version": self.version(), "nameSet": bool(self._cfg()["name"])}
+        return {"app": "monitorbox", "name": self.name(), "version": self.version(), "nameSet": bool(self._cfg()["name"]), "wan": self._own_wan(), "gateway": self._own_gateway()}
+
+    def _own_wan(self):
+        """What this box tells the other site about its public address: {"ip": address or None, "state": "ok" | "private" | "unknown"}. Never anything private."""
+        try:
+            w = self.wan_info() if self.wan_info else None
+        except Exception:
+            w = None
+        if not isinstance(w, dict):
+            return {"ip": None, "state": "unknown"}
+        ok = w.get("state") == "ok" and wanaddr.classify(w.get("ip") or "") == "public"
+        return {"ip": w["ip"] if ok else None, "state": w.get("state") if w.get("state") in ("ok", "private", "unknown") else "unknown"}
+
+    def _own_gateway(self):
+        try:
+            return self.gateway() if self.gateway else None
+        except Exception:
+            return None
+
+    def _remember_gw(self, kind, ident, gw, replied=False):
+        """Keep the other site's gateway address, and whether it has ever answered a ping from here (a gateway that never does cannot be used to tell a VPN outage)."""
+        try:
+            ip = ipaddress.ip_address(str(gw or "").strip())
+        except ValueError:
+            return
+        if not wanaddr.is_lan(ip) or str(ip) == self._own_gateway():           # an address that means something different on this side proves nothing
+            return
+        c = self._cfg()
+        row = next((x for x in c[kind] if x["id"] == ident), None)
+        if row is None:
+            return
+        changed = False
+        if row.get("gw") != str(ip):
+            row["gw"], row["gwok"], changed = str(ip), False, True
+        if replied and not row.get("gwok"):
+            row["gwok"], changed = True, True
+        if changed:
+            self._write(c)
+
+    def _learn_gw(self, kind, row):
+        """While the link works, find out once whether the other site's gateway answers a ping from here."""
+        if row.get("gw") and not row.get("gwok") and self.ping:
+            try:
+                if self.ping(row["gw"])[0] is True:
+                    self._remember_gw(kind, row["id"], row["gw"], True)
+            except Exception:
+                pass
+
+    def _remember_wan(self, kind, ident, ip):
+        """Keep the other side's last public address with its pairing, so it is still known after a restart while the link is down."""
+        if wanaddr.classify(ip or "") != "public":
+            return
+        c = self._cfg()
+        row = next((x for x in c[kind] if x["id"] == ident), None)
+        if row is not None and row.get("wan") != ip:
+            row["wan"] = ip
+            self._write(c)
+
+    def manager_wan_in(self, mid, raw):
+        """The managing box says (in a header of its poll) what its public address is."""
+        try:
+            ip = urllib.parse.unquote(raw or "").strip()
+        except Exception:
+            return
+        if ip:
+            self._remember_wan("managers", mid, ip)
+
+    def _verdict(self, who, ip, row=None):
+        """The link is silent: is the site down, or only the link? Judged by pinging the site's public address from outside the tunnel, and, when that is silent, a
+        control pair of well-known addresses so a loss of this box's own internet is never blamed on the other site. (ok, detail, ms, extra), or None when it cannot say."""
+        if wanaddr.classify(ip or "") != "public" or self.ping is None:
+            return None
+        ok, detail, _ms = self.ping(ip)
+        if ok is True:
+            gw = (row or {}).get("gw") if (row or {}).get("gwok") else None          # only a gateway that has answered before can speak for the VPN
+            if gw:
+                g = self.ping(gw)[0]
+                if g is False:
+                    return False, f"{who}: its internet is up ({ip} replies) but its gateway {gw} does not. The VPN between the sites is down.", None, {}
+                if g is True:
+                    return True, f"{who}: its internet and gateway answer, but MonitorBox there does not. MonitorBox on that site may be down.", None, {"warn": True}
+            return True, f"{who} does not answer over the link, but its internet is up ({ip} replies). The link, or MonitorBox there, may be down.", None, {"warn": True}
+        if ok is None:
+            return None
+        for host in self.control:
+            if self.ping(host)[0] is True:
+                return False, f"{who} is down: no reply from its address {ip}, and this box's own internet is fine.", None, {}
+        return None, f"{who} does not answer and this box's own internet is down too, so it cannot tell which side lost the line.", None, {}
 
     def set_name_if_unset(self, name):
         """A main box that manages this one offers it a name, and only if it has none of its own: a name the owner chose here is never changed from outside."""
@@ -591,24 +695,32 @@ class Peer:
     def _note(self, sid, state, error="", **extra):
         with self.lock:
             old = self.links.get(sid) or {}
+            came_back = state == "linked" and old.get("state") not in (None, "linked")
             self.links[sid] = {"state": state, "error": error, "lastSeen": self.clock() if state == "linked" else old.get("lastSeen"),
                                "version": extra.get("version", old.get("version")), "banner": extra.get("banner", old.get("banner")),
                                "attention": extra.get("attention", old.get("attention")), "nameSet": extra.get("nameSet", old.get("nameSet"))}
+        if came_back and self.on_relink:
+            try:
+                self.on_relink()
+            except Exception:
+                pass
 
     def poll_once(self):
         for s in self._cfg()["sites"]:
             who = s.get("name") or "That site"
             try:
                 key = bytes.fromhex(s["key"])
-                st, hello = call_json(s["address"], "m:" + s["mid"], key, "GET", "/peer/hello", timeout=5, who=who,
-                                       headers={"X-MB-Name": urllib.parse.quote(self.name())})
+                hdrs = {"X-MB-Name": urllib.parse.quote(self.name()), "X-MB-Wan": urllib.parse.quote(self._own_wan().get("ip") or ""), "X-MB-Gw": urllib.parse.quote(self._own_gateway() or "")}
+                st, hello = call_json(s["address"], "m:" + s["mid"], key, "GET", "/peer/hello", timeout=5, who=who, headers=hdrs)
                 if st != 200 or not isinstance(hello, dict):
                     raise PeerError(f"{who} answered, but not like a MonitorBox")
-                st, snap = call_json(s["address"], "m:" + s["mid"], key, "GET", "/peer/api/status", timeout=8, who=who,
-                                       headers={"X-MB-Name": urllib.parse.quote(self.name())})
+                st, snap = call_json(s["address"], "m:" + s["mid"], key, "GET", "/peer/api/status", timeout=8, who=who, headers=hdrs)       # the managed side reads the name and address from this one (hello is answered before it knows who asks)
                 snap = snap if st == 200 and isinstance(snap, dict) else {}
                 self._note(s["id"], "linked", "", version=hello.get("version"), banner=snap.get("banner"), attention=len(snap.get("attention") or []),
                            nameSet=hello.get("nameSet"))
+                theirs = hello.get("wan") if isinstance(hello.get("wan"), dict) else {}
+                self._remember_wan("sites", s["id"], theirs.get("ip"))
+                self._remember_gw("sites", s["id"], hello.get("gateway"))
             except PeerError as e:
                 self._note(s["id"], e.kind, str(e))
             except Exception as e:

@@ -155,7 +155,11 @@ const SDOT={green:'#34d399',yellow:'#fbbf24',red:'#f87171',blue:'#60a5fa',unknow
 function siteTabs(){const c=siCfg;if(!c||!c.sites.length)return[];
  const here=(SITE===''&&snap&&snap.banner)||locBanner;
  return [{id:'',name:c.name||c.nameDefault,st:here?here.status:'unknown',head:here?here.headline:'checking…'}].concat(c.sites.map(s=>{const l=s.link||{};
-  return l.state==='linked'&&l.banner?{id:s.id,name:s.name,st:l.banner.status,head:l.banner.headline}:{id:s.id,name:s.name,st:'unknown',head:'Unknown'+(l.lastSeen?' · last heard '+siAgo(l.lastSeen):''),unk:1}}))}
+  const cn=snap&&snap.nodes&&snap.nodes['site-'+s.id],cs=cn?ds(cn,cn.state):'';
+  if(cs==='failed')return {id:s.id,name:s.name,st:'red',head:'Down'};  /* this box's own check says that site is down: that wins over its last report */
+  const w=cs==='degraded'?{st:'yellow',head:'Link trouble'}:null;
+  if(l.state==='linked'&&l.banner){const r={red:3,yellow:2,blue:1,green:0};return w&&(r[l.banner.status]||0)<2?{id:s.id,name:s.name,st:w.st,head:w.head}:{id:s.id,name:s.name,st:l.banner.status,head:l.banner.headline}}
+  return {id:s.id,name:s.name,st:'unknown',head:'Unknown'+(l.lastSeen?' · last heard '+siAgo(l.lastSeen):''),unk:1}}))}
 function renderTabs(){renderHeader()}
 /* ---------- the header: on every page once signed in. Mark (home), site tabs that swipe, the bell, the version, Settings ---------- */
 let SXC=null,rsTok=0,UPDCHK=0,LASTV='';
@@ -217,6 +221,8 @@ const HI={bell:'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10.3 21a1.9 1.9 0 0 0
 const hico=d=>`<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2 stroke-linecap=round stroke-linejoin=round aria-hidden=true><path d="${d}"/></svg>`;
 /* what the bell lists: new things found on the network, and an update that is ready. Each says where tapping it goes. */
 function hdrItems(){const o=[],multi=!!(siCfg&&siCfg.sites.length);
+ for(const s of (siCfg?siCfg.sites:[])){const n=snap&&snap.nodes&&snap.nodes['site-'+s.id],st=n?ds(n,n.state):'';  /* a paired site that is down or not answering */
+  if(st==='failed'||st==='degraded')o.push({id:'sitedown'+s.id,site:s.id,icon:HI.bell,tint:st==='failed'?'rgba(248,113,113,.18)':'rgba(251,191,36,.18)',ink:st==='failed'?'#FCA5A5':'#FCD34D',title:s.name+(st==='failed'?' is down':' has link trouble'),sub:n.detail||'',cta:'Look',go:'#/'})}
  for(const t of (siteTabs().length?siteTabs():[{id:'',name:''}])){const d=hdrSites[t.id];if(!d||t.unk)continue; /* a site that is not answering adds nothing: silence stays Unknown */
   const pre=multi?t.name+': ':'',fu=d.fu,p=d.pend,nf=fu.reduce((a,x)=>a+(x.labels?x.labels.length:1),0); /* things, not offers: three containers from one machine are 3 */
   if(fu.length)o.push({id:'fu'+t.id,site:t.id,icon:HI.box,tint:'rgba(52,211,153,.18)',ink:'#6EE7B7',title:pre+(nf===1?'1 new thing found':nf+' new things found'),sub:[...new Set(fu.map(x=>x.on?'On '+x.on:x.title))].slice(0,3).join(', ')+(fu.length>3?' and '+(fu.length-3)+' more':''),cta:'Set up',go:'#/settings/servers'});
@@ -354,8 +360,21 @@ function fold(key,st,name,states,inner,d,bold,unit){
  const roll=bad?`${good} of ${states.length} good · ${bad} need a look`:`${states.length} ${unit||'checks'} · all good`;
  const nm=bold?`<b>${esc(name)}</b>`:esc(name),two=name.length+roll.length>34;      // a long name gets its own line so it is not cut off
  return `<button class="rw${two?' two':''}${d?' sub1':''}" aria-expanded=${open}${padOf(d)} onclick="toggleN('${esc(key)}')">${dotc(st)}${two?`<span class=tx><span class=nm>${nm}</span><span class=dt>${esc(roll)}</span></span>`:`<span class=nm>${nm}</span><span class=dt>${esc(roll)}</span>`}<span class=cv aria-hidden=true>›</span></button>${open?inner():''}`}
+/* A paired site on the main screen: one line with its name and how the link is; tapping it shows the site's internet address and the address this box connects to
+   (one line when they are the same, as when the site's router forwards the port or the line is double NAT). */
+function siteInfo(n){const c=siCfg;if(!c||!/^(site|managed-by)-/.test(n.id))return null;
+ const s=(c.sites||[]).find(x=>'site-'+x.id===n.id),m=s?null:(c.managers||[]).find(x=>'managed-by-'+x.id===n.id);if(!s&&!m)return null;
+ const wan=(s||m).wan||'',via=s?String(s.address||''):'',host=via.replace(/:\d+$/,''),lines=[];
+ if(wan&&host&&wan===host)lines.push(['Internet address',wan+' (this box connects here too)']);
+ else{lines.push(['Internet address',wan||'not shared yet']);if(via)lines.push(['Connects to',via])}
+ if((s||m).gw)lines.push(['Gateway',(s||m).gw]);
+ return {name:s?s.name:n.name,lines}}
+function siteFold(n,i,d,inf){const st=ds(n,n.state),open=openN.has(n.id)||st==='failed'||st==='degraded',dt=n.detail||'',two=inf.name.length+dt.length>34;
+ const inner=inf.lines.map(l=>line('void(0)','expected',l[0],l[1],d+1)).join('')+line(`openDrawer(${i},'${esc(n.id)}')`,'expected','Details','',d+1);
+ return `<button class="rw${two?' two':''}${d?' sub1':''}" aria-expanded=${open}${padOf(d)} onclick="toggleN('${esc(n.id)}')">${dotc(st)}${two?`<span class=tx><span class=nm>${esc(inf.name)}</span><span class=dt>${esc(dt)}</span></span>`:`<span class=nm>${esc(inf.name)}</span><span class=dt>${esc(dt)}</span>`}<span class=cv aria-hidden=true>›</span></button>${open?inner:''}`}
 function rowsOf(n,i,d){d=d||0;
  const go=`openDrawer(${i},'${esc(n.id)}')`, cs=n.checks||[];
+ {const inf=siteInfo(n);if(inf)return siteFold(n,i,d,inf)}
  if(n.kind==='aggregate'){const kids=membersOf(n);
   if(kids.length>1)return fold(n.id,ds(n,n.state),n.name,kids.map(k=>ds(k,k.state)),()=>kids.map(k=>rowsOf(k,i,d+1)).join(''),d,true)}
  if(cs.length<2)return line(go,ds(n,n.state),n.name,n.detail||(cs[0]&&cs[0].detail)||n.label,d,n.notice&&ds(n,n.state)==='healthy');
@@ -610,14 +629,15 @@ async function siteSettings(){const o=$('#siset');if(!o)return;await loadSiteCfg
  o.innerHTML=`<h3 style="margin:0 0 .3rem">Name of this site</h3>
   <p class=sub style="margin:0 0 .4rem">Shown on the site tabs, for example <b>Bay Harbor</b> or <b>Tidewater</b>. Give each site a short name before pairing${c.name?'':'. Until you do, the tabs show the computer name ('+esc(c.nameDefault)+')'}.</p>
   <div class=row><input id=si-name value="${esc(c.name)}" placeholder="Name this site" maxlength=60 ${inp}><button class="btn" onclick="siName()">Save</button><span id=si-nm></span></div>
+  ${(c.sites.length||c.managers.length)?(c.ownWan&&c.ownWan.state==='ok'?`<p class=sub style="margin:.5rem 0 0">This site's internet address: <b>${esc(c.ownWan.ip)}</b> (${c.ownWan.source==='unifi'?'from the UniFi gateway':'from a public address page'}). It is shared with the paired sites so they can tell whether this site's internet is down.</p>`:c.ownWan?`<p class=sub style="margin:.5rem 0 0"><b>This site's internet address is not shared.</b> ${esc(c.ownWan.why)}. It is looked at again every minute.</p>`:''):''}
   <h3 style="margin:1.2rem 0 .3rem">Sites managed from here</h3>
   ${c.sites.length?c.sites.map(s=>{const l=s.link||{};const st=l.state==='linked'?`<span class=sub>Reachable · running MonitorBox ${esc(l.version||'')}</span>`:l.state==='refused'?`<b>${esc(l.error)}</b>`:`<span class=sub>Can\'t reach it right now · ${esc(l.error||'checking…')}${l.lastSeen?' · last heard '+siAgo(l.lastSeen):''}</span>`;
-   return `<div class=row><span><b>${esc(s.name)}</b> <small class=sub>${esc(s.address)}</small><br>${st}${l.state==='linked'&&l.nameSet===false?`<br><b>Remote site does not have its sitename set.</b> <button class="btn sm" onclick="siRemoteName('${esc(s.id)}')">Set it now</button> <small class=sub>It will be called ${esc(s.name)}.</small>`:''}</span><button class="btn sm" onclick="siRename('${esc(s.id)}','${esc(s.name).replace(/'/g,'')}')">Rename</button><button class="btn sm" onclick="siRemove('${esc(s.id)}')">Remove</button></div>`}).join(''):'<p class=sub>No other sites yet.</p>'}
+   return `<div class=row><span><b>${esc(s.name)}</b> <small class=sub>${esc(s.address)}</small><br>${st}<br><small class=sub>Internet address: ${s.wan?esc(s.wan):'not shared yet'}</small>${l.state==='linked'&&l.nameSet===false?`<br><b>Remote site does not have its sitename set.</b> <button class="btn sm" onclick="siRemoteName('${esc(s.id)}')">Set it now</button> <small class=sub>It will be called ${esc(s.name)}.</small>`:''}</span><button class="btn sm" onclick="siRename('${esc(s.id)}','${esc(s.name).replace(/'/g,'')}')">Rename</button><button class="btn sm" onclick="siRemove('${esc(s.id)}')">Remove</button></div>`}).join(''):'<p class=sub>No other sites yet.</p>'}
   <h3 style="margin:1rem 0 .3rem">Add a site</h3>
   <p class=sub style="margin-top:0">On the other MonitorBox, open Settings → Sites and press <b>Let a main MonitorBox manage this one</b>. It shows a code. Enter that site's address and the code here. The address is either its internet address with the site port (this box uses ${c.listen.port}; use the number set on that one), or its address on your own network.</p>
   <div class=row><input id=si-addr placeholder="tidewater.example.com:${c.listen.port}" ${inp} style="flex:1 1 14rem"><input id=si-code placeholder="ABCDE-ABCDE-ABCDE-ABCDE-ABCDE" ${inp} style="flex:2 1 16rem"><button class="btn pri" onclick="siAdd()">Add site</button></div><p id=si-msg class=sub></p>
   <h3 style="margin:1.2rem 0 .3rem">Let a main MonitorBox manage this one</h3>
-  ${c.managers.length?c.managers.map(m=>`<div class=row><span><b>Managed by ${esc(m.name)}</b></span><button class="btn sm" onclick="siCut('${esc(m.id)}')">Stop being managed by it</button></div>`).join(''):'<p class=sub style="margin-top:0">No main MonitorBox manages this one.</p>'}
+  ${c.managers.length?c.managers.map(m=>`<div class=row><span><b>Managed by ${esc(m.name)}</b><br><small class=sub>Internet address: ${m.wan?esc(m.wan):'not shared yet'}</small></span><button class="btn sm" onclick="siCut('${esc(m.id)}')">Stop being managed by it</button></div>`).join(''):'<p class=sub style="margin-top:0">No main MonitorBox manages this one.</p>'}
   <p class=sub>This opens a separate <b>site port</b> on this box (port <b>${c.listen.port}</b>). If the main MonitorBox is at another site, forward only port ${c.listen.port} on your router. Everything on it is encrypted and needs the key created when you pair, so nothing is shown without it.</p>
   <div class=row><label>Site port <input id=si-port type=number min=1024 max=65535 value="${c.listen.port}" style="width:6.5rem"></label><label class=row><input type=checkbox id=si-on ${c.listen.enabled?'checked':''} onchange="siListen()"> Site port on</label>${c.listen.enabled&&!c.listening?'<b>Port ${c.listen.port} couldn\'t be opened. Pick another one.</b>':''}</div>
   ${c.pairing?`<div class=box style="margin:.6rem 0"><p style="margin:0 0 .3rem">Enter this code on the main MonitorBox. It works once and expires in about ${Math.ceil(c.pairing.expiresIn/60)} minutes.</p><p style="margin:0;font-size:1.3rem;font-family:monospace;overflow-wrap:anywhere">${esc(c.pairing.code)}</p><button class="btn sm" style="margin-top:.5rem" onclick="siPair(false)">Cancel</button></div>`
