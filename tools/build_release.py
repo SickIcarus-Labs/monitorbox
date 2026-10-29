@@ -16,7 +16,23 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP = {"__pycache__"}
 
 
-def changes_for(root, version):
+HIGHLIGHT = re.compile(r"^\[highlight:\s*(.+?)\s*\]\s*")
+
+
+def parse_changes(root, version):
+    """(lines, highlights) for one app version. A line the author wants in the short version of a long update starts, after the ticket number, with
+    [highlight: the short sentence]; the tag is taken off the full line and the short sentence goes into highlights."""
+    out, marks = [], []
+    for ln in changes_for(root, version, raw=True):
+        m = HIGHLIGHT.match(ln)
+        if m:
+            marks.append(m.group(1))
+            ln = ln[m.end():]
+        out.append(ln)
+    return out, marks
+
+
+def changes_for(root, version, raw=False):
     """The plain-words lines CHANGELOG.md has for one app version ("- **1.6.33** (#313) Text ..."), without the version and the ticket number.
     They go into the catalog entry, so the box can show "What changed" for an update it has not installed yet."""
     try:
@@ -29,7 +45,16 @@ def changes_for(root, version):
         m = re.match(r"^- \*\*" + re.escape(version) + r"\*\*\s*(?:\(#\d+(?:,\s*#\d+)*\)\s*)?(.*\S)\s*$", ln)
         if m:
             out.append(m.group(1))
-    return out
+    return out if raw else [HIGHLIGHT.sub("", x) for x in out]
+
+
+def backfill_highlights(entries, root):
+    """Notes only, never the archive: highlights marked in CHANGELOG.md after a version was published reach its catalog entry on the next build."""
+    for e in entries:
+        if not e.get("highlights"):
+            marks = parse_changes(root, e["version"])[1]
+            if marks:
+                e["highlights"] = marks
 
 
 def make_tgz(src_dir, arc_prefix=""):
@@ -92,7 +117,7 @@ def main(argv=None):
     assets, changed = [], False
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    def publish(entries, slot_set, name, version, data, changes=None):
+    def publish(entries, slot_set, name, version, data, changes=None, highlights=None):
         nonlocal changed
         fname = f"{name}-{version}.tar.gz"
         sha = hashlib.sha256(data).hexdigest()
@@ -107,7 +132,8 @@ def main(argv=None):
         entry = {"version": version,
                  "url": a.url_template.format(tag=fname[:-7], file=fname),
                  "sha256": sha, "signature": None}
-        entries.insert(0, {**entry, "published": now, "channels": ["dev"], **({"changes": changes} if changes else {})})
+        entries.insert(0, {**entry, "published": now, "channels": ["dev"], **({"changes": changes} if changes else {}),
+                          **({"highlights": highlights} if highlights else {})})
         slot_set(entry)
         changed = True
 
@@ -116,7 +142,8 @@ def main(argv=None):
     with open(os.path.join(appdir, "VERSION")) as f:
         ver = f.read().strip()
     publish(cat.setdefault("app", []), lambda v: ptr.__setitem__("app", v), "app", ver,
-            make_tgz(appdir, "monitorbox_app"), changes_for(a.root, ver))
+            make_tgz(appdir, "monitorbox_app"), *parse_changes(a.root, ver))
+    backfill_highlights(cat["app"], a.root)
 
     # Modules: archive holds manifest.json and code at its top level
     moddir = os.path.join(a.root, "modules")
