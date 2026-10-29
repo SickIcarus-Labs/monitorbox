@@ -227,6 +227,11 @@ class Exchange(unittest.TestCase):
         self.assertEqual(main.get("/api/sites")["sites"][0]["wan"], THEIRS, "the managing box learned the site's address from its hello")
         self.assertEqual(tb.get("/api/sites")["managers"][0]["wan"], MINE, "the managed box learned the manager's address from its poll")
         self.assertTrue(tb.get("/api/sites")["managers"][0]["addr"], "the managed box also knows what address the manager's calls come from")
+        sid = main.get("/api/sites")["sites"][0]["id"]
+        links = main.get(f"/api/site/{sid}/site-links")           # what the remote site's tab asks, through the managed-box filter
+        self.assertEqual(links["managers"][0]["name"], "Bay Harbor")
+        self.assertEqual(links["managers"][0]["wan"], MINE)
+        self.assertTrue(links["managers"][0]["addr"])
         again = peer.Peer(main.app.peer.path, 1, "x", lambda: "1")
         self.assertEqual(again.get()["sites"][0]["wan"], THEIRS, "kept on disk with the pairing, so a restart while the link is down still knows it")
 
