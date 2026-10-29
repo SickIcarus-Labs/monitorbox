@@ -126,6 +126,7 @@ STARTUP_HOLD = 90        # seconds after the app starts during which a module th
 
 
 class Modules:
+    on_need = None                    # (module id) -> installs it; set by the App
     def __init__(self, paths, installer):
         self.paths = paths
         self.install_archive = installer  # (url, sha256, dest) -> dest
@@ -137,7 +138,6 @@ class Modules:
         self.wanted = lambda: None        # () -> set of module ids some connection uses, or None for "all"
         self.starting = set()             # modules the app is bringing up right now: a check for one of them waits instead of reporting "not running"
         self.boot = time.monotonic()
-        self.on_need = None               # (module id) -> installs it; set by the App
         self.install_tried = {}           # module id -> when an install for a need was last tried
 
     def state(self):
@@ -287,6 +287,8 @@ class Modules:
     def _ensure(self, mid):
         """Install a module that something now needs (a connection to a device of its kind). `on_need` is set by the App; it says
         why it will not, and tries a failed install again only after a while."""
+        if not hasattr(self, "install_tried"):
+            self.install_tried = {}
         if self.on_need and mid not in self.state() and mid not in RETIRED and time.monotonic() - self.install_tried.get(mid, -1e9) > 60:
             self.install_tried[mid] = time.monotonic()
             try:
