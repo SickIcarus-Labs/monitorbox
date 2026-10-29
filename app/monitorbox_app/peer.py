@@ -197,6 +197,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(200, out) if out else self._json(403, {"error": "pairing is not open"})
             if ident.startswith("m:") and owner.is_manager(ident[2:]):
                 owner.seen[ident[2:]] = owner.clock()
+                owner.addr[ident[2:]] = self.client_address[0]
                 owner.manager_named(ident[2:], self.headers.get("X-MB-Name"))
                 owner.manager_wan_in(ident[2:], self.headers.get("X-MB-Wan"))
                 owner._remember_gw("managers", ident[2:], urllib.parse.unquote(self.headers.get("X-MB-Gw") or ""))
@@ -232,6 +233,7 @@ class Peer:
         self.poll_thread = None
         self.relay_lookup = None                    # set by the app: live view id -> its media pipe
         self.on_change = None                       # set by the app: called (off to the side) when a pairing is made or ended
+        self.addr = {}                              # managing box id -> the address its calls come from (what this box sees of it)
         self.seen = {}                              # managing box id -> when it last spoke to this box
         self.wan_info = None                        # set by the app: () -> {"ip", "state", ...}, this box's own public address (see wanaddr.py)
         self.on_relink = None                       # set by the app: called when a silent link answers again (the line was down, so the address may have changed)
@@ -270,7 +272,7 @@ class Peer:
         return {"name": c["name"], "nameDefault": str(self.hostname() or "MonitorBox"), "listen": c["listen"],
                 "listening": bool(self.srv), "ownWan": own,
                 "pairing": ({"code": p["code"], "expiresIn": int(p["expires"] - self.clock())} if p else None),
-                "managers": [{"id": m["id"], "name": m.get("name", ""), "since": m.get("since"), "wan": m.get("wan"), "gw": m.get("gw"), "probe": self.probes.get(("managers", m["id"]))} for m in c["managers"]],
+                "managers": [{"id": m["id"], "name": m.get("name", ""), "since": m.get("since"), "wan": m.get("wan"), "gw": m.get("gw"), "addr": self.addr.get(m["id"]), "probe": self.probes.get(("managers", m["id"]))} for m in c["managers"]],
                 "sites": [{"id": s["id"], "name": s.get("name", ""), "address": s["address"], "since": s.get("since"), "link": links.get(s["id"]), "wan": s.get("wan"), "gw": s.get("gw"), "probe": self.probes.get(("sites", s["id"]))} for s in c["sites"]]}
 
     def set_name(self, name):
