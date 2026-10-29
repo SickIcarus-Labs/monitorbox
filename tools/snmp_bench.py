@@ -18,6 +18,8 @@ Tests (each says what it tells you):
                   session: if the light reads are slow only when they share, calls are queueing behind each other; if both are slow the
                   device is the bottleneck
   6 cpu           how much of a request is this computer working (SNMP v3 encryption is done in Python) instead of waiting for the device
+  7 functions     MonitorBox's own readings, run exactly as the box runs them: the first counters reading (walks the layout), the next
+                  one (just the counters), the LAN report and Re-detect: how long each takes and how many requests it makes
 
 Options: --only 1,2   run only these tests;   --seconds 20   length of the overlap test (default 20)
 """
@@ -29,11 +31,16 @@ for cand in (os.path.join(HERE, "..", "modules", "snmp"), HERE):
         sys.path.insert(0, cand)
         break
 else:                                                                   # run on its own: fetch the library it measures
-    url = "https://raw.githubusercontent.com/SickIcarus-Labs/monitorbox/main/modules/snmp/snmplib.py"
-    with urllib.request.urlopen(url, timeout=20) as r, open(os.path.join(HERE, "snmplib.py"), "wb") as f:
-        f.write(r.read())
+    for name in ("snmplib.py", "checks.py"):
+        url = "https://raw.githubusercontent.com/SickIcarus-Labs/monitorbox/main/modules/snmp/" + name
+        with urllib.request.urlopen(url, timeout=20) as r, open(os.path.join(HERE, name), "wb") as f:
+            f.write(r.read())
     sys.path.insert(0, HERE)
 import snmplib as L  # noqa: E402
+try:
+    import checks as C  # noqa: E402
+except Exception:       # an older copy without it: the other tests still run
+    C = None
 
 UPTIME = "1.3.6.1.2.1.1.3.0"
 IF_NAME = "1.3.6.1.2.1.31.1.1.1.1"
@@ -210,9 +217,36 @@ def t_cpu(s, m):
     print(f"  {len(recs)} requests: {w:.1f} s on the wire and waiting, {c:.1f} s of this computer's own work ({c / len(recs) * 1000:.1f} ms per request, {c / max(w, 1e-9) * 100:.0f}% of the time)")
 
 
+def t_functions():
+    print("7 functions: MonitorBox's own readings, run as the box runs them (a fresh session, nothing remembered)")
+    if C is None:
+        print("  (checks.py not available)")
+        return
+    e = os.environ
+    conn = {"host": e["SNMP_HOST"], "port": int(e.get("SNMP_PORT", 161)), "version": e.get("SNMP_VERSION", "3"), "community": e.get("SNMP_COMMUNITY", "public"),
+            "user": e.get("SNMP_USER"), "auth": e.get("SNMP_AUTH"), "authPassword": e.get("SNMP_AUTH_PW"), "priv": e.get("SNMP_PRIV"), "privPassword": e.get("SNMP_PRIV_PW")}
+    s = C.session(conn)
+    m = Meter(s)
+    for label, fn in (("counters, first reading (learns the layout)", lambda: C.counters(conn)),
+                      ("counters, next reading", lambda: C.counters(conn)),
+                      ("LAN report (no second reading)", lambda: C.lan_report(conn, wait=0)),
+                      ("Re-detect (discover)", lambda: C.discover(conn, {}))):
+        mk, t0 = m.mark(), time.perf_counter()
+        try:
+            r = fn()
+            note = ""
+            if isinstance(r, dict) and "ports" in r:
+                note = f"{len(r['ports'])} ports"
+        except Exception as err:
+            note = f"failed: {err}"
+        recs = m.since(mk)
+        print(f"  {label:<44} {time.perf_counter() - t0:6.2f} s   {len(recs):>4} requests   {note}")
+        time.sleep(1)
+
+
 def main():
     ap = argparse.ArgumentParser(description="SNMP speed test (read-only)")
-    ap.add_argument("--only", default="1,2,3,4,5,6")
+    ap.add_argument("--only", default="1,2,3,4,6,7,5")
     ap.add_argument("--seconds", type=int, default=20)
     a = ap.parse_args()
     want = {x.strip() for x in a.only.split(",")}
@@ -237,6 +271,8 @@ def main():
         t_tables(s, m)
     if "6" in want:
         t_cpu(s, m)
+    if "7" in want:
+        t_functions()
     if "5" in want:
         t_overlap(a.seconds)
     print("done")
