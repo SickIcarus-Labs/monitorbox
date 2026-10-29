@@ -243,8 +243,8 @@ addEventListener('pointerdown',e=>{if(bellOpen&&!e.target.closest('#bell,#bellbt
 addEventListener('keydown',e=>{if(e.key==='Escape'&&bellOpen){bellOpen=false;renderHeader();const b=$('#bellbtn');if(b)b.focus()}});
 addEventListener('hashchange',()=>{if(bellOpen){bellOpen=false;renderHeader()}});
 /* the version and the two things the bell can list; the versions page is already cached on the box, so asking is cheap */
-/* a module is waiting for the owner when it has a newer version and is installed, or is new from the built-in repository and was not uninstalled on purpose (the same rule the box uses to update by itself) */
-const modWaiting=c=>!!(c.needsApply&&c.target&&!(c.failed||[]).includes(c.target)&&(c.running||c.installed||(c.fromDefault&&!c.declined)));
+/* a module is waiting for the owner only when it is already installed and has a newer version (the same rule the box uses to update by itself); a module that is not installed is never offered here */
+const modWaiting=c=>!!(c.needsApply&&c.target&&!(c.failed||[]).includes(c.target)&&(c.running||c.installed));
 async function hdrOne(id){const pre='/api/'+(id?'site/'+id+'/':'');
  const g=async p=>{const r=await fetch(pre+p);if(!r.ok)throw new Error(r.status);return r.json()};
  const [v,f]=await Promise.all([g('versions'),g('followups').catch(()=>({suggestions:[]}))]);

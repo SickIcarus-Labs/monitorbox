@@ -495,7 +495,7 @@ class Header(T.SnmpE2E):
             got = pg.evaluate("""()=>{const base={needsApply:true,target:'1.0.0',failed:[]};const t=o=>modWaiting(Object.assign({},base,o));
               return {running:t({running:'0.9.0'}),installed:t({installed:true}),newFromDefault:t({fromDefault:true,declined:false}),
                 declined:t({fromDefault:true,declined:true,installed:false}),otherRepo:t({fromDefault:false}),failed:t({running:'0.9.0',failed:['1.0.0']}),upToDate:t({running:'1.0.0',needsApply:false})}}""")
-            self.assertEqual(got, {"running": True, "installed": True, "newFromDefault": True, "declined": False, "otherRepo": False, "failed": False, "upToDate": False})
+            self.assertEqual(got, {"running": True, "installed": True, "newFromDefault": False, "declined": False, "otherRepo": False, "failed": False, "upToDate": False})
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")

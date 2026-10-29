@@ -701,7 +701,7 @@ class App:
         v = self.view()
         done, failed = [], []
         for mid, c in sorted(v["modules"].items()):
-            if c.get("needsApply") and c.get("target") and c["target"] not in c.get("failed", []) and (c.get("running") or (c.get("fromDefault") and not c.get("declined"))):
+            if c.get("needsApply") and c.get("target") and c["target"] not in c.get("failed", []) and (c.get("running") or c.get("installed")):
                 try:
                     self.apply("module", mid)
                     done.append(f"{mid} {c['target']}")
@@ -755,8 +755,8 @@ class App:
             if cfg["auto_update"] and self.infos:
                 v = self.view()
                 for mid, c in v["modules"].items():
-                    # a module from another repository is never installed unasked; once the owner has installed it, it follows its updates
-                    if c["pin"] == "latest" and c["needsApply"] and c["target"] not in c["failed"] and (c.get("running") or (c.get("fromDefault") and not c.get("declined"))):
+                    # only a module that is already installed follows its updates; a module is never installed unasked
+                    if c["pin"] == "latest" and c["needsApply"] and c["target"] not in c["failed"] and (c.get("running") or c.get("installed")):
                         before = c.get("running")
                         self.apply("module", mid)
                         self.note_update("module", mid, before, c["target"])        # only here, the automatic path: an update started by hand does not say so

@@ -142,7 +142,7 @@ class Uninstall(unittest.TestCase):
         self.app.auto_step()
         self.app.apply_all()
         self.assertNotIn("alpha", applied)
-        self.assertIn("bravo", applied)                               # others still come as before
+        self.assertEqual(applied, [])                                 # and nothing else is installed unasked either (changed in 1.7.5: bravo used to come)
         installed = []
         self.app.modules.apply_one = lambda mid, ent: installed.append(mid) or "updated"
         self.app.refresh = real_refresh

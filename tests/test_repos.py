@@ -229,7 +229,7 @@ class Repos(unittest.TestCase):
         self.assertEqual(self.app.cfg()["module_sources"]["alpha"], "default")
 
     # -- nothing installs itself from a stranger ---------------------------
-    def test_automatic_updating_and_update_all_do_not_install_a_new_module_from_another_repo(self):
+    def test_automatic_updating_and_update_all_do_not_install_a_new_module_from_any_repo(self):
         rid = self.add_test_repo()
         self.app.refresh()
         installed = []
@@ -238,7 +238,7 @@ class Repos(unittest.TestCase):
         self.app.refresh = lambda: None
         self.app.auto_step()
         self.assertNotIn("hello-world", installed)
-        self.assertEqual(sorted(installed), ["alpha", "bravo"])      # the default repo's behave as before
+        self.assertEqual(installed, [])      # nor does the default repo's: only a module the box already has follows its updates (changed in 1.7.5; it used to install new default modules)
         installed.clear()
         self.app.apply_all()
         self.assertNotIn("hello-world", installed)
