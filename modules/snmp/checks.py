@@ -264,6 +264,23 @@ GET_AT_ONCE = 30            # object ids per request on the quick path
 _layouts = {}               # connection settings -> {"at": time, "wide": bool, "ifs": {index: (name, speedMbps or None, label)}}
 
 
+BIG_DEVICE = 64             # a device with more interfaces than this is checked for ones that are not really there (empty stack slots, tunnels)
+NOT_PRESENT = 6             # ifOperStatus "notPresent": a slot with no port in it
+NOT_LAN_TYPES = (24, 131, 135, 136)   # ifType: software loopback, tunnel, VLAN interface (layer 2 and 3): not ports on the LAN
+
+
+def _absent(s, names, everything=False):
+    """({index of an interface that is not a real port}, {index: ifOperStatus}). Only for a big device (hundreds of interfaces make every full read slow),
+    and only on clear signals: the device says the port is not present, or says it is a tunnel, loopback or VLAN. A down port is never hidden (it is a real
+    port with nothing plugged in), a link aggregation is never hidden, and a device that gives no type or state hides nothing. If that would hide
+    everything, nothing is hidden."""
+    if everything or len(names) <= BIG_DEVICE:
+        return set(), {}
+    types, opers = _safe(s, IF_TYPE), _safe(s, IF_OPER)
+    gone = {i for i in names if clean(opers.get(i)) == NOT_PRESENT or clean(types.get(i)) in NOT_LAN_TYPES}
+    return (gone if len(gone) < len(names) else set()), opers
+
+
 def counters(conn, only=None):
     """Raw octet counters for every real interface. The App turns two readings into rates and keeps the history.
     {"ports": {name: {"in", "out", "bits", "speedMbps"?, "label"?, "rxErr"?, "txErr"?, "rxDrop"?, "txDrop"?}}} (the last four are the interface's
@@ -318,6 +335,12 @@ def _get_many(s, oids):
                 except L.SnmpError:
                     pass
     return got
+
+
+def _get_by_index(s, oid, idxs):
+    """{index: value} for one column, asking for just these interfaces. An object the device does not have is left out, as a walk would leave it."""
+    got = _get_many(s, [f"{oid}.{i}" for i in idxs])
+    return {i: v for i in idxs for v in [got.get(f"{oid}.{i}")] if v is not None and not isinstance(v, L.NoSuch)}
 
 
 def _read(s, idxs, wide, alias=False, counters_only=False):
@@ -383,7 +406,8 @@ def _full(s, ut=None):
     """The first reading: one walk of the interface names, then the counters of just the real interfaces by index (a server can have hundreds of container
     interfaces; walking every column across all of them is what made this slow)."""
     names = s.column(IF_NAME) or s.column(IF_DESCR)
-    real = {idx: L.text(n) for idx, n in names.items() if L.text(n) and not L.text(n).startswith(VIRTUAL_IF)}
+    gone, _ = _absent(s, names)
+    real = {idx: L.text(n) for idx, n in names.items() if L.text(n) and not L.text(n).startswith(VIRTUAL_IF) and idx not in gone}
     out, ifs, wide = {}, {}, True
     for wide in (True, False):                                           # 64-bit counters first, then the 32-bit pair
         first = _read(s, list(real), wide, counters_only=True)
@@ -423,12 +447,15 @@ def discover(conn, params=None):
     out = {"interfaces": [], "volumes": [], "tables": {}, "suggest": [{"label": "Reachable (uptime)", "check": "uptime", "params": {}, "batch": "Device"}]}
     out["sysName"] = L.text(s.get([SYS_NAME]).get(SYS_NAME) or b"")
     names = s.column(IF_NAME) or s.column(IF_DESCR)
-    oper, speed = s.column(IF_OPER), s.column(IF_HIGHSPEED)
+    gone, opers = _absent(s, names, bool((params or {}).get("everything")))
+    oper = opers or s.column(IF_OPER)
+    speed = s.column(IF_HIGHSPEED) if not gone else _get_by_index(s, IF_HIGHSPEED, [i for i in names if i not in gone])
     states = {1: "up", 2: "down"}
+    out["hiddenInterfaces"] = len(gone)
     for i, n in sorted(names.items(), key=lambda kv: int(kv[0].split(".")[0])):
         nm = L.text(n)
-        if nm.startswith(VIRTUAL_IF):
-            continue          # virtual interfaces (containers, loopback) are noise
+        if nm.startswith(VIRTUAL_IF) or i in gone:
+            continue          # virtual interfaces (containers, loopback) and slots with no port in them are noise
         out["interfaces"].append({"index": i, "name": nm, "status": states.get(oper.get(i), str(oper.get(i))), "speedMbps": speed.get(i)})
         out["suggest"].append({"label": f"Interface {nm}", "check": "interface", "params": {"name": nm}, "batch": "Network interfaces"})
     descr, units, total, used, typ = (s.column(c) for c in (HR_DESCR, HR_UNITS, HR_SIZE, HR_USED, HR_TYPE))
@@ -498,7 +525,7 @@ def probe(conn):
         return {"ok": False, "error": str(e)[:120]}
 
 
-def lan_report(conn, wait=1.0):
+def lan_report(conn, wait=1.0, everything=False):
     """What one device (usually a switch) reports about its ports: name, label, state, speed, traffic rate (two counter readings `wait` seconds apart),
     errors and discards, how many addresses it has learned behind each port, and the neighbour LLDP says is on the other end. Each part is optional:
     what the device does not offer is named in `notes`, not an error. No addresses are shown in full."""
@@ -508,11 +535,21 @@ def lan_report(conn, wait=1.0):
     names = s.column(IF_NAME) or s.column(IF_DESCR)
     if not names:
         raise L.SnmpError("the device lists no interfaces")
-    oper, speed, alias, phys = s.column(IF_OPER), s.column(IF_HIGHSPEED), _safe(s, IF_ALIAS), _safe(s, IF_PHYS)
-    errs = {k: _safe(s, c) for k, c in (("inErrors", IF_IN_ERR), ("outErrors", IF_OUT_ERR), ("inDiscards", IF_IN_DISC), ("outDiscards", IF_OUT_DISC))}
+    gone, opers = _absent(s, names, everything)
+    keep = [i for i in names if i not in gone]
+    if gone:
+        notes.append(f"{len(gone)} interfaces that are not present, or are tunnels or VLANs, were not read")
+
+    def col(oid, safe=True):
+        """One column. On a big device with empty slots, just the interfaces that are really there (asked by index) instead of the whole table."""
+        if gone:
+            return _get_by_index(s, oid, keep)
+        return _safe(s, oid) if safe else s.column(oid)
+    oper, speed, alias, phys = opers or s.column(IF_OPER), col(IF_HIGHSPEED, False), col(IF_ALIAS), col(IF_PHYS)
+    errs = {k: col(c) for k, c in (("inErrors", IF_IN_ERR), ("outErrors", IF_OUT_ERR), ("inDiscards", IF_IN_DISC), ("outDiscards", IF_OUT_DISC))}
 
     def counters():
-        return {k: s.column(c) for k, c in (("in", IF_HC_IN), ("out", IF_HC_OUT))}
+        return {k: col(c, False) for k, c in (("in", IF_HC_IN), ("out", IF_HC_OUT))}
     c1 = counters(); t1 = time.time()
     if wait > 0:
         time.sleep(wait)
@@ -547,6 +584,8 @@ def lan_report(conn, wait=1.0):
         notes.append(f"LLDP: {e}")
     ports, down, virtual = [], 0, 0
     for idx, nm in sorted(names.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0):
+        if idx in gone:
+            continue                                                   # not a port: counted in hiddenPorts, never read
         if L.text(nm).startswith(VIRTUAL_IF):
             virtual += 1                                               # container and tunnel interfaces are not the LAN
             continue
@@ -575,7 +614,7 @@ def lan_report(conn, wait=1.0):
         if idx in lldp:
             row["lldp"] = lldp[idx]
         ports.append(row)
-    return {"sysName": L.text(sysr.get(SYS_NAME) or b""), "sysDescr": L.text(sysr.get(SYS_DESCR) or b"")[:120], "ports": ports, "downPorts": down, "virtualPorts": virtual, "notes": notes}
+    return {"sysName": L.text(sysr.get(SYS_NAME) or b""), "sysDescr": L.text(sysr.get(SYS_DESCR) or b"")[:120], "ports": ports, "downPorts": down, "virtualPorts": virtual, "hiddenPorts": len(gone), "notes": notes}
 
 
 def _safe(sess, col):
