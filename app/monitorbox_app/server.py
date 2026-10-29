@@ -4,7 +4,7 @@ from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 
-from .modules import current as modules_current, DEV_ONLY, ALWAYS
+from .modules import current as modules_current, DEV_ONLY, always
 from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
 from . import sitesupdate
@@ -1908,7 +1908,7 @@ class App:
                 for mid, ent in ((self.infos.get(r["id"]) or {}).get("pointer") or {}).get("modules", {}).items():
                     # a new box gets only the modules nothing can detect a need for (ALWAYS); the others install when a device of their kind is added.
                     # A repository other than the default: only what this box (restored from a backup) used from it.
-                    if (mid in ALWAYS or r["id"] != d) and mid not in st and mid not in self.cfg()["uninstalled"] and mid in modules_current([mid]) and (r["id"] == d and sources.get(mid, d) == d or sources.get(mid) == r["id"]):
+                    if (always() is None or mid in always() or r["id"] != d) and mid not in st and mid not in self.cfg()["uninstalled"] and mid in modules_current([mid]) and (r["id"] == d and sources.get(mid, d) == d or sources.get(mid) == r["id"]):
                         self.modules.apply_one(mid, ent)
         except Exception:
             pass

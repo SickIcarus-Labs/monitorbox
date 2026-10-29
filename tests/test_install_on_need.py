@@ -27,6 +27,10 @@ class InstallOnNeed(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def test_the_default_is_wake_on_lan_only(self):
+        os.environ.pop("MB_ALWAYS_MODULES", None)
+        self.assertEqual(modules.always(), ("wol",))
+
     def test_a_new_box_installs_only_the_modules_nothing_can_detect(self):
         self.app.first_run_sync()
         self.assertEqual(sorted(self.app.modules.state()), ["wol"])

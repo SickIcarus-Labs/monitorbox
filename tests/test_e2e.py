@@ -119,7 +119,7 @@ class E2E(unittest.TestCase):
 
     def start_launcher(self, **extra):
         env = dict(os.environ, MB_CONFIG=self.cfg, MB_RELEASES_URL=f"file://{self.rel}", MB_CHANNEL="dev",
-                   MB_PORT=str(self.port), MB_HEALTH_TIMEOUT="15", MB_CHECK_SECONDS="2",
+                   MB_PORT=str(self.port), MB_HEALTH_TIMEOUT="15", MB_CHECK_SECONDS="2", MB_ALWAYS_MODULES="*",   # these tests are about the launcher and the App, and want every module on a new box
                    PYTHONPATH=os.path.join(REPO, "launcher"), **extra)
         self.proc = subprocess.Popen([sys.executable, "-m", "monitorbox_launcher"], env=env,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

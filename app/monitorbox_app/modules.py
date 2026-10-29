@@ -13,6 +13,12 @@ from .store import read_json, write_json
 
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 ALWAYS = ("wol",)                          # installed on a new box: nothing can detect that someone wants Wake-on-LAN, so it is assumed. Every other module is installed when its need shows up.
+def always():
+    """The modules a new box installs at once. MB_ALWAYS_MODULES (for the end-to-end tests, which want every module on a new box) is "*" for all, or a comma list."""
+    v = os.environ.get("MB_ALWAYS_MODULES")
+    return None if v == "*" else (tuple(x for x in v.split(",") if x) if v is not None else ALWAYS)
+
+
 DEV_ONLY = ("hello",)                      # sample modules: only the dev channel offers them, and a box on beta or stable has none installed
 RETIRED = {"unifi": "unifi-network"}      # renamed modules: the old one is no longer started
 
