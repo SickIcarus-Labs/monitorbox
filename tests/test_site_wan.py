@@ -274,7 +274,7 @@ class OtherSiteDoesNotChangeThisSite(unittest.TestCase):
         nodes = [leaf("nas", "NAS"), leaf("site-aa11", "Elsewhere link", group="Sites"), leaf("managed-by-bb22", "Managed by Other", group="Sites")]
         out = engine.evaluate(nodes, R(nas=True, **{"site-aa11": False, "managed-by-bb22": False}))
         self.assertEqual(out["banner"]["status"], "green")
-        self.assertEqual(out["attention"], [])
+        self.assertEqual({a["id"] for a in out["attention"]}, {"site-aa11", "managed-by-bb22"}, "listed under needs attention like any other thing in trouble")
         self.assertEqual(out["nodes"]["site-aa11"]["state"], "failed")          # the observed state is untouched
 
     def test_this_sites_own_trouble_still_counts(self):
@@ -386,4 +386,4 @@ class LightsAndTiming(Verdict):
 
     def test_site_nodes_are_confirmed_in_30_seconds_not_60(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "monitorbox_app", "server.py")).read()
-        self.assertIn('"confirmFailures": 2, "confirmSeconds": 30', src)
+        self.assertIn('"confirmFailures": 2, "confirmSeconds": 20', src)

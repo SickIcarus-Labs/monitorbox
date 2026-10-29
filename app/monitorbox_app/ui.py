@@ -482,7 +482,7 @@ function tick(){const u=$('#upd');if(!u)return;
 function mpage(){if(drawer||svcOpen||(($('#dr')||{}).firstChild))closeDrawer();return $('#m')}
 /* the last word of the headline takes the state colour: 'Everything is <fine>' */
 function headHtml(t){t=String(t||'');const i=t.trimEnd().lastIndexOf(' ');return i<0?'<em>'+esc(t)+'</em>':esc(t.slice(0,i+1))+'<em>'+esc(t.slice(i+1))+'</em>'}
-function tilesHtml(){const ns=Object.values(snap.nodes||{}).filter(n=>n.kind!=='aggregate'&&!n.muted),ok=ns.filter(n=>n.state==='healthy').length,bad=snap.attention.length,sites=1+(siCfg?siCfg.sites.length:0);
+function tilesHtml(){const ns=Object.values(snap.nodes||{}).filter(n=>n.kind!=='aggregate'&&!n.muted),ok=ns.filter(n=>n.state==='healthy').length,bad=snap.attention.filter(a=>!/^(site|managed-by)-/.test(a.id)).length,sites=1+(siCfg?siCfg.sites.length:0);
  if(!ns.length)return '';const t=(n,l,c)=>`<div class=tile><b style="color:${c}">${n}</b><span>${l}</span></div>`;
  return `<div class=tiles>${t(ok,ok===1?'check healthy':'checks healthy','#34D399')}${t(bad,bad===1?'thing needs attention':'things need attention',bad?'var(--acc)':'var(--sub)')}${t(sites,sites===1?'site watched':'sites watched','var(--ink)')}</div>`}
 function render(){if(!SITE&&snap&&snap.banner){locBanner=snap.banner}renderHeader();
