@@ -1,5 +1,5 @@
 """tools/build_release.py --skip: a module published elsewhere is left out of the catalog and the pointer (hello moved to the test repo, #264)."""
-import json, os, subprocess, sys, tempfile, unittest
+import json, os, shutil, subprocess, sys, tempfile, unittest
 
 BUILD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "build_release.py")
 
@@ -59,6 +59,33 @@ class Skip(unittest.TestCase):
         self.assertNotIn("changes", cat["app"][0])
         ptr, cat, out = self.build()
         self.assertNotIn("changes", cat["app"][0])
+
+    def test_a_highlight_tag_is_taken_off_the_line_and_its_short_sentence_goes_in_highlights(self):
+        log = ("# Changelog\n\n- **1.0.0** (#7) [highlight: The short sentence.] The long full sentence, in plain words.\n"
+               "- **1.0.0** An unmarked line.\n")
+        ptr, cat, out = self.build(changelog=log)
+        self.assertEqual(cat["app"][0]["changes"], ["The long full sentence, in plain words.", "An unmarked line."])
+        self.assertEqual(cat["app"][0]["highlights"], ["The short sentence."])
+
+    def test_no_highlight_means_no_highlights_field(self):
+        ptr, cat, out = self.build(changelog="# Changelog\n\n- **1.0.0** Plain.\n")
+        self.assertNotIn("highlights", cat["app"][0])
+
+    def test_highlights_marked_later_reach_an_already_published_entry_and_nothing_else_changes(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("br", BUILD)
+        br = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(br)
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        with open(os.path.join(root, "CHANGELOG.md"), "w") as f:
+            f.write("- **1.0.0** [highlight: Short.] Long.\n- **0.9.0** Old, unmarked.\n")
+        old = {"version": "1.0.0", "url": "u", "sha256": "fake-sha-1", "changes": ["Long."]}
+        keep = {"version": "0.9.0", "url": "v", "sha256": "fake-sha-2", "changes": ["Old, unmarked."]}
+        entries = [old, keep]
+        br.backfill_highlights(entries, root)
+        self.assertEqual(old, {"version": "1.0.0", "url": "u", "sha256": "fake-sha-1", "changes": ["Long."], "highlights": ["Short."]})
+        self.assertEqual(keep, {"version": "0.9.0", "url": "v", "sha256": "fake-sha-2", "changes": ["Old, unmarked."]})
 
 
 if __name__ == "__main__":

@@ -204,6 +204,29 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_a_big_jump_shows_the_highlights_first_and_everything_on_request(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+            pg.evaluate("""()=>{const f=window.fetch;window.fetch=(u,o)=>String(u).endsWith('/api/versions')?f(u,o).then(async r=>{const j=await r.json();
+              j.app.changed=[{version:'9.2.0',changes:['Full note for 9.2.0 <b>x</b>.']},{version:'9.1.5',changes:['Full note for 9.1.5.']}];
+              j.app.highlights=[{version:'9.2.0',text:'Short note for 9.2.0.'}];return new Response(JSON.stringify(j))}):f(u,o);route()}""")
+            pg.wait_for_selector("[data-sw=app] details summary")
+            pg.click("[data-sw=app] details summary")
+            outer = pg.locator("[data-sw=app] details").first
+            self.assertIn("Highlights from 2 versions", outer.inner_text())
+            self.assertIn("Short note for 9.2.0.", outer.inner_text())
+            self.assertFalse(pg.locator("[data-sw=app] details details").first.evaluate("e=>e.open"), "everything stays folded until asked")
+            self.assertFalse(pg.get_by_text("Full note for 9.1.5.").is_visible())
+            pg.click("[data-sw=app] details details summary")
+            self.assertTrue(pg.get_by_text("Full note for 9.1.5.").is_visible())
+            self.assertIn("Full note for 9.2.0 <b>x</b>.", outer.inner_text(), "shown as text, never as markup")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_bell_says_when_the_container_image_needs_re_pulling_and_the_updates_page_explains(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:

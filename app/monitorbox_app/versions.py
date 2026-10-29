@@ -58,3 +58,16 @@ def whats_changed(entries, running, target):
         return []
     keep = sorted(keep, key=lambda e: vkey(e["version"]), reverse=True)
     return [{"version": e["version"], "changes": [str(c) for c in e["changes"]][:20]} for e in keep if isinstance(e.get("changes"), list) and e["changes"]][:200]
+
+
+BIG_JUMP = 10         # more versions with notes than this and the update gets a short version first
+
+
+def highlights(entries, running, target):
+    """The short version of a long update: the one-sentence highlights the authors marked, newest first, as [{"version", "text"}]. Empty unless the jump
+    is big (more than BIG_JUMP versions with notes) and at least one version has a highlight; then the page offers this first and everything on request."""
+    full = whats_changed(entries, running, target)
+    if len(full) <= BIG_JUMP:
+        return []
+    have = {e["version"]: e.get("highlights") for e in entries if isinstance(e, dict) and "version" in e}
+    return [{"version": g["version"], "text": str(t)} for g in full if isinstance(have.get(g["version"]), list) for t in have[g["version"]][:5]][:60]

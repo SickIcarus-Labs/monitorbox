@@ -635,6 +635,7 @@ class App:
         out["autoNotes"] = autonotes.current(self.paths, version(), time.time())
         if out["app"] is not None:
             out["app"]["changed"] = versions.whats_changed(dinfo["catalog"].get("app", []), version(), out["app"].get("target"))
+            out["app"]["highlights"] = versions.highlights(dinfo["catalog"].get("app", []), version(), out["app"].get("target"))
         out["imageVersion"] = self.launcher_state().get("launcher_version")
         out["image"] = versions.image(self.launcher_state().get("launcher_version"),
                                       ((dinfo or {}).get("pointer") or {}).get("launcher", {}).get("version") if isinstance(((dinfo or {}).get("pointer") or {}).get("launcher"), dict) else None)

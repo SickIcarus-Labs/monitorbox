@@ -110,6 +110,29 @@ class WhatChanged(unittest.TestCase):
         self.assertEqual(versions.whats_changed([], None, None), [])
 
 
+class Highlights(unittest.TestCase):
+    """The short version of a long update (#320). Made-up notes."""
+
+    def log(self, n, marked):
+        return [{"version": f"1.0.{i}", "channels": ["dev"], "changes": [f"full {i}"], **({"highlights": [f"short {i}"]} if i in marked else {})} for i in range(n + 1)]
+
+    def test_a_big_jump_gets_only_the_marked_sentences_newest_first(self):
+        got = versions.highlights(self.log(30, {3, 12, 25}), "1.0.0", "1.0.30")
+        self.assertEqual(got, [{"version": "1.0.25", "text": "short 25"}, {"version": "1.0.12", "text": "short 12"}, {"version": "1.0.3", "text": "short 3"}])
+
+    def test_a_small_jump_has_no_short_version(self):
+        self.assertEqual(versions.highlights(self.log(5, {2}), "1.0.0", "1.0.5"), [])
+        self.assertEqual(versions.highlights(self.log(versions.BIG_JUMP, {2}), "1.0.0", f"1.0.{versions.BIG_JUMP}"), [], "exactly the limit is still small")
+        self.assertEqual(len(versions.highlights(self.log(versions.BIG_JUMP + 1, {2}), "1.0.0", f"1.0.{versions.BIG_JUMP + 1}")), 1)
+
+    def test_a_big_jump_with_nothing_marked_shows_everything_as_before(self):
+        self.assertEqual(versions.highlights(self.log(30, set()), "1.0.0", "1.0.30"), [])
+
+    def test_bad_input_gives_nothing(self):
+        self.assertEqual(versions.highlights([{"version": "x"}], "1.0.0", "1.0.30"), [])
+        self.assertEqual(versions.highlights([], None, None), [])
+
+
 class WhatChangedAcrossABigJump(unittest.TestCase):
     """A simulated release log: someone on stable jumps many versions at once (1.4.2 to 1.8.3). Made-up notes."""
 
