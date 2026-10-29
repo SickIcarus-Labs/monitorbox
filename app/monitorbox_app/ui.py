@@ -138,8 +138,8 @@ const $=s=>document.querySelector(s);
 let SITE=(()=>{try{return localStorage.getItem('mb-site')||''}catch(e){return ''}})(),siCfg=null,siTimer=null,siPoll=null,locBanner=null;
 const LOCAL_API=/^(health|state|display|sites|login|logout|setup)(\/|\?|$)/;
 const apiPath=p=>SITE&&!LOCAL_API.test(p)?'site/'+SITE+'/'+p:p, U=p=>'/api/'+apiPath(p);
-async function api(path,body){if(body!==undefined)SXC=null;const r=await fetch(U(path),body===undefined?{}:{method:'POST',
- headers:{'Content-Type':'application/json','X-MB':'1'},body:JSON.stringify(body)});
+async function api(path,body){if(body!==undefined)SXC=null;let r;try{r=await fetch(U(path),body===undefined?{}:{method:'POST',
+ headers:{'Content-Type':'application/json','X-MB':'1'},body:JSON.stringify(body)})}finally{if(body!==undefined)SXC=null}   /* cleared again once the change is done: a read that started while a slow change ran (a full backup) must not leave the old answer behind */
  let j={};try{j=await r.json()}catch(e){} if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}
 /* a read that must not hang: Settings asks for nine things at once and waits for all of them, so one request stuck on a dead connection (after the box restarted, or behind a proxy)
    held the page for as long as the browser cared to wait. It gives up after APIQ_MS and asks once more, on a fresh connection. Only for plain reads, never for a change. */
