@@ -526,7 +526,7 @@ class Peer:
             if gw:
                 g = self.ping(gw)[0]
                 if g is False:
-                    return True, f"{who}: its internet is up ({ip} replies) but its gateway {gw} does not. The VPN between the sites is down.", None, {"warn": True}
+                    return False, f"{who}: its internet is up ({ip} replies) but its gateway {gw} does not. The VPN between the sites is down.", None, {}
                 if g is True:
                     return True, f"{who}: its internet and gateway answer, but MonitorBox there does not. MonitorBox on that site may be down.", None, {"warn": True}
             return True, f"{who} does not answer over the link, but its internet is up ({ip} replies). The link, or MonitorBox there, may be down.", None, {"warn": True}

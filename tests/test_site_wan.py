@@ -302,7 +302,7 @@ class GatewayVerdict(Verdict):
     def test_internet_up_but_gateway_silent_means_the_vpn_is_down(self):
         self.replies[THEIRS] = True
         ok, detail, _, extra = self.silent_with_gateway()
-        self.assertEqual((ok, extra), (True, {"warn": True}))
+        self.assertEqual((ok, extra), (False, {}))                 # a broken tunnel is a real outage: red
         self.assertIn("VPN between the sites is down", detail); self.assertIn(self.GW, detail)
 
     def test_internet_and_gateway_up_means_monitorbox_there_is_down(self):
