@@ -249,13 +249,17 @@ async function hdrOne(id){const pre='/api/'+(id?'site/'+id+'/':'');
  const mods=Object.entries(v.modules||{}).filter(([k,c])=>c.needsApply&&c.target&&!(c.failed||[]).includes(c.target)),appUp=v.app&&v.app.needsApply&&v.app.target&&!(v.app.failed||[]).includes(v.app.target);
  return {ver:v.version||'',auto:(v.autoNotes||[]).map(x=>({id:x.id,text:x.text})),img:!!(v.image&&v.image.outdated),fu:(f.suggestions||[]).map(x=>({title:x.title,on:x.on,labels:x.labels})),pend:(appUp||mods.length)?{target:appUp?v.app.target:'',what:appUp?'MonitorBox itself'+(mods.length?' and '+mods.length+' module'+(mods.length==1?'':'s'):''):mods.length+' module'+(mods.length==1?'':'s')+' ready to install'}:null}}
 /* the bell covers every site: ask this box and each linked site (through the pass-through) once a minute. A site that fails to answer keeps its last answer out of the bell; it is simply left out. */
-async function hdrPoll(){if(($('#hdr')||{}).hidden)return;
+let hdrBusy=false;
+async function hdrPoll(){if(($('#hdr')||{}).hidden||hdrBusy)return;hdrBusy=true;try{await hdrPollNow()}finally{hdrBusy=false}}
+async function hdrPollNow(){
  const ids=[''].concat(((siCfg&&siCfg.sites)||[]).filter(s=>(s.link||{}).state==='linked').map(s=>s.id));
  const res=await Promise.all(ids.map(id=>hdrOne(id).then(d=>[id,d],()=>[id,null])));
  const next={};for(const [id,d] of res)if(d)next[id]=d;
  hdrSites=next;const cur=next[SITE];if(cur){hdrInfo={ver:cur.ver};fuN=cur.fu.length}
  renderHeader()}
-setInterval(hdrPoll,60000);
+/* every 15 seconds while the page is in front, and at once when it comes back to the front; a page nobody is looking at asks nothing. A round that is still waiting on a slow site is not started twice. */
+setInterval(()=>{if(!document.hidden)hdrPoll()},15000);
+addEventListener('visibilitychange',()=>{if(!document.hidden)hdrPoll()});
 async function refreshSites(){try{siCfg=await api('sites')}catch(e){siCfg=null}
  if(siCfg&&SITE&&!siCfg.sites.some(s=>s.id===SITE)){SITE='';try{localStorage.removeItem('mb-site')}catch(e){};closeStream();route()}
  if(siCfg){try{const r=await fetch('/api/status');if(r.ok)locBanner=(await r.json()).banner}catch(e){}}
