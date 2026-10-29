@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.7.21** (#324) The other site's tab now shows its "(managed by)" line expanded the first time it is opened. Before, it appeared only after tapping away and back, because the page asked the other site for its pairings at the next 10-second round.
 - **1.7.20** (#327) The brief "SNMP: that device is still busy" Unknown that appeared on a switch or the NAS since 1.7.12 is gone. A slow switch normally has a report, a counter read and a check going at once, and the limit of two let the check be turned away. The limit is now four, which still stops a device that has really hung from using every worker.
 - **1.7.19** (#324) The other site's tab now really shows its "(managed by)" line expanded. In 1.7.17 and 1.7.18 the page asked the other site for its pairings through the Sites screen's address, which a managed site refuses to pass on (on purpose: a main box must not manage another box's pairings), so the line stayed plain. It now uses a read-only view that holds only names, addresses and link state.
 - **1.7.18** (#324) Wording on the other site's tab: the line reads "Broad Leaf (managed by)" and its rows are the same as on the main site: Internet address, Connects to, Gateway.

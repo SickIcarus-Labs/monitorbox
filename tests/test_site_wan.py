@@ -1,6 +1,6 @@
 """#324: a silent site link is judged from outside the tunnel, with the other site's public address told over the link.
 Addresses here are from the documentation ranges (203.0.113.0/24, 198.51.100.0/24), each different so a mix-up shows."""
-import ipaddress, os, sys, tempfile, time, unittest
+import re, ipaddress, os, sys, tempfile, time, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
@@ -401,6 +401,13 @@ class SiteLinksView(unittest.TestCase):
         blocked = lambda first: any(first == b.rstrip("/") or first.startswith(b) for b in peer.BLOCKED)
         self.assertTrue(blocked("sites"))
         self.assertFalse(blocked("site-links"))
+
+    def test_opening_a_remote_tab_fetches_its_pairings_at_once(self):
+        """First-open wart (#324): the card was drawn before the other site's pairings arrived and waited for the next 10 s round."""
+        from monitorbox_app import ui
+        src = ui.PAGE if hasattr(ui, "PAGE") else "".join(v for v in vars(ui).values() if isinstance(v, str))
+        m = re.search(r"function setSite\(id\)\{.*?\nfunction |function setSite\(id\)\{.*?\n\n", src, re.S)
+        self.assertTrue(m and "refreshSites()" in m.group(0))
 
     def test_it_holds_no_key_and_no_pairing_code(self):
         d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
