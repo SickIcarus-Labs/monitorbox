@@ -186,6 +186,32 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_update_all_sites_appears_after_check_all_sites_and_when_a_site_gets_an_update_with_no_tab_switch(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+            pg.evaluate("""()=>{window._there=false;const f=window.fetch;
+              window.fetch=(u,o)=>{u=String(u);
+                if(u.endsWith('/api/sites')&&!(o&&o.method))return f(u,o).then(async r=>{const j=await r.json();j.sites=[{id:'tb',name:'Cabin',address:'x',link:{state:'linked'}}];return new Response(JSON.stringify(j))});
+                if(u.endsWith('/api/site/tb/versions'))return Promise.resolve(new Response(JSON.stringify({version:'1.0.0',app:{needsApply:!!window._there,target:'9.9.9',failed:[]},modules:{}})));
+                if(u.endsWith('/api/site/tb/check'))return Promise.resolve(new Response('{}'));
+                return f(u,o)};
+              window.go=async()=>{hdrSites={};await loadSiteCfg();await hdrPoll();route();await new Promise(r=>setTimeout(r,800))}}""")
+            pg.evaluate("go()")
+            pg.wait_for_selector("#chkall")
+            self.assertEqual(pg.locator("#upsites").count(), 0, "the site has nothing waiting")
+            pg.evaluate("window._there=true")                                     # the site now has an update, and the person taps Check all sites
+            pg.click("#chkall")
+            pg.wait_for_selector("#upsites", timeout=5000)                         # the same page, no tab switch
+            pg.evaluate("window._there=false")
+            pg.evaluate("hdrPoll()")
+            pg.wait_for_function("document.querySelector('#upsites')===null", timeout=5000)    # and it goes again by itself when the update is gone
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_updates_page_offers_what_changed_for_the_app(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:
@@ -237,10 +263,11 @@ class Header(T.SnmpE2E):
             self.assertIn(15000, pg.evaluate("window._ivs"))
             self.assertNotIn(60000, pg.evaluate("window._ivs"), "the old once-a-minute check is gone")
             pg.evaluate("""()=>{window._n=0;let rel;const f=window.fetch;window.fetch=(u,o)=>{if(String(u).endsWith('/api/versions')){window._n++;return new Promise(r=>{window._rel=()=>r(f(u,o))})}return f(u,o)}}""")
-            pg.evaluate("hdrBusy=false;hdrPoll();hdrPoll();hdrPoll()")
+            pg.evaluate("hdrPoll();hdrPoll();hdrPoll()")
             self.assertEqual(pg.evaluate("window._n"), 1, "a round still waiting is not started again")
             pg.evaluate("window._rel()")
-            pg.wait_for_function("hdrBusy===false")
+            pg.wait_for_timeout(200); pg.evaluate("window._rel&&window._rel()")           # the one extra round the repeated asks queued
+            pg.wait_for_function("hdrRun===null")
             pg.evaluate("""()=>{window._n=0;window.fetch=(u,o)=>{if(String(u).endsWith('/api/versions'))window._n++;return Promise.reject(new Error('x'))};
               Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'))}""")
             pg.wait_for_timeout(300)
@@ -500,6 +527,26 @@ class Header(T.SnmpE2E):
             pg.evaluate("snap.cards.forEach(c=>{strips[sk(c)]={at:Date.now()+1e9,d:{buckets:Array.from({length:24},(_,k)=>k==5?'failed':'healthy')}}});lastJson='';render()")
             self.assertEqual(pg.locator(".card .strip").first.locator("i").count(), 24)
             self.assertGreaterEqual(pg.locator(".card .strip i.failed").count(), 1)
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_a_card_bar_that_failed_to_load_comes_back_within_seconds_and_a_drawn_bar_is_never_lost_to_a_failure(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 900})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".head em")
+            c.post("/api/demo", {"scenario": "yellow"}); pg.wait_for_selector("#m .card .strip", state="attached")
+            pg.evaluate("""()=>{window._fail=true;const o=api;api=(p,b)=>p.startsWith('history?strip')?(window._fail?Promise.reject(new Error('dropped')):Promise.resolve({buckets:Array.from({length:24},(_,k)=>k==5?'failed':'healthy')})):o(p,b);
+              for(const k in strips)delete strips[k];lastJson='';render()}""")
+            pg.wait_for_timeout(500)
+            self.assertEqual(pg.locator(".card .strip i").count(), 0, "the request was dropped: no bar yet")
+            pg.evaluate("window._fail=false")
+            pg.wait_for_function("document.querySelectorAll('.card .strip i').length>=24", timeout=15000)       # asked again by itself, no refresh
+            n = pg.locator(".card .strip i").count()
+            pg.evaluate("window._fail=true;for(const k in strips)strips[k].at=0;loadStrips()")                    # a later request fails: what is drawn stays
+            pg.wait_for_timeout(500)
+            self.assertEqual(pg.locator(".card .strip i").count(), n)
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")

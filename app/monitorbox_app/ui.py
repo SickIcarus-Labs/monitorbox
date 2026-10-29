@@ -249,16 +249,20 @@ async function hdrOne(id){const pre='/api/'+(id?'site/'+id+'/':'');
  const mods=Object.entries(v.modules||{}).filter(([k,c])=>c.needsApply&&c.target&&!(c.failed||[]).includes(c.target)),appUp=v.app&&v.app.needsApply&&v.app.target&&!(v.app.failed||[]).includes(v.app.target);
  return {ver:v.version||'',auto:(v.autoNotes||[]).map(x=>({id:x.id,text:x.text})),img:!!(v.image&&v.image.outdated),fu:(f.suggestions||[]).map(x=>({title:x.title,on:x.on,labels:x.labels})),pend:(appUp||mods.length)?{target:appUp?v.app.target:'',what:appUp?'MonitorBox itself'+(mods.length?' and '+mods.length+' module'+(mods.length==1?'':'s'):''):mods.length+' module'+(mods.length==1?'':'s')+' ready to install'}:null}}
 /* the bell covers every site: ask this box and each linked site (through the pass-through) once a minute. A site that fails to answer keeps its last answer out of the bell; it is simply left out. */
-let hdrBusy=false;
-async function hdrPoll(){if(($('#hdr')||{}).hidden||hdrBusy)return;hdrBusy=true;try{await hdrPollNow()}finally{hdrBusy=false}}
+let hdrRun=null,hdrAgain=false,rowSig='';
+/* One round at a time. Asked again while one is running, it runs one more round straight after (what was asked for may have changed since the running one began) and the caller waits for that. */
+function hdrPoll(){if(($('#hdr')||{}).hidden)return Promise.resolve();if(hdrRun){hdrAgain=true;return hdrRun}
+ hdrRun=(async()=>{try{do{hdrAgain=false;await hdrPollNow()}while(hdrAgain)}finally{hdrRun=null}})();return hdrRun}
+const remoteWaitingNow=()=>((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'&&hdrSites[x.id]&&hdrSites[x.id].pend).map(x=>x.id).join();
 async function hdrPollNow(){
  const ids=[''].concat(((siCfg&&siCfg.sites)||[]).filter(s=>(s.link||{}).state==='linked').map(s=>s.id));
  const res=await Promise.all(ids.map(id=>hdrOne(id).then(d=>[id,d],()=>[id,null])));
  const next={};for(const [id,d] of res)if(d)next[id]=d;
  hdrSites=next;const cur=next[SITE];if(cur){hdrInfo={ver:cur.ver};fuN=cur.fu.length}
- renderHeader()}
+ renderHeader();
+ if(location.hash.startsWith('#/settings/updates')&&rowSig!==''&&rowSig!==remoteWaitingNow())renderSettings().catch(()=>{})}   /* the buttons on the Updates page follow what the sites say, without a tab switch */
 /* every 15 seconds while the page is in front, and at once when it comes back to the front; a page nobody is looking at asks nothing. A round that is still waiting on a slow site is not started twice. */
-setInterval(()=>{if(!document.hidden)hdrPoll()},15000);
+setInterval(()=>{if(!document.hidden&&!hdrRun)hdrPoll()},15000);
 addEventListener('visibilitychange',()=>{if(!document.hidden)hdrPoll()});
 async function refreshSites(){try{siCfg=await api('sites')}catch(e){siCfg=null}
  if(siCfg&&SITE&&!siCfg.sites.some(s=>s.id===SITE)){SITE='';try{localStorage.removeItem('mb-site')}catch(e){};closeStream();route()}
@@ -400,9 +404,10 @@ const strips={},sk=c=>SITE+'|'+c.name;   /* kept per site: the same card name on
 function stripHtml(c){const d=strips[sk(c)]&&strips[sk(c)].d;if(!BARSHOW.length||!d||!d.buckets.some(x=>x))return '';
  return d.buckets.map((x,k)=>`<i class="${x||'none'}" title="${x?esc(LABELS[x]||x):'No record yet'}, ${24-k} h ago"></i>`).join('')}
 const LABELS={healthy:'Healthy',degraded:'Degraded',failed:'Down',unknown:'Unknown'};
+/* A bar that could not be fetched is asked for again within a few seconds (it used to wait the full minute, so one dropped request left a card bare), and what was drawn stays until a good answer replaces it. */
 function loadStrips(){if(!snap)return;const now=Date.now();
- snap.cards.forEach(c=>{const k=sk(c),o=strips[k];if(o&&now-o.at<60000)return;strips[k]={at:now,d:o&&o.d};
-  api('history?strip='+encodeURIComponent((c.nodes||[]).join(','))).then(d=>{strips[k]={at:Date.now(),d};document.querySelectorAll('.strip').forEach(e=>{if(e.dataset.c===k){const h=stripHtml(c);if(e.innerHTML!==h)e.innerHTML=h}})}).catch(()=>{})})}
+ snap.cards.forEach(c=>{const k=sk(c),o=strips[k],ids=c.nodes||[];if(!ids.length||(o&&now-o.at<(o.bad?4000:60000)))return;strips[k]={at:now,d:o&&o.d,bad:o&&o.bad};
+  api('history?strip='+encodeURIComponent(ids.join(','))).then(d=>{if(!d||!Array.isArray(d.buckets))throw new Error('no bar');strips[k]={at:Date.now(),d};document.querySelectorAll('.strip').forEach(e=>{if(e.dataset.c===k){const h=stripHtml(c);if(e.innerHTML!==h)e.innerHTML=h}})}).catch(()=>{const cur=strips[k];strips[k]={at:Date.now(),d:cur&&cur.d,bad:1}})})}
 /* tap a slice of a card's bar: what was not healthy in that hour (when each thing changed; the box does not record why) */
 let tsOpen=false;
 const TST={failed:'Down',degraded:'Degraded',unknown:'Could not be checked'};
@@ -1416,7 +1421,7 @@ async function renderSettings(){
  const img=v.image&&v.image.outdated?`<div class=box><b>The container image needs updating.</b> This box is running image ${esc(v.image.have)}; this release was built for ${esc(v.image.wants)}. Everything keeps working, but some updates may not install until the image is re-pulled. Pull the new image and restart the container; your settings and data are kept.</div>`:'';
  const last=v.last&&v.last.result!='ok'?`<div class=box>Last install: ${esc(v.last.version)} — ${esc(v.last.result)}</div>`:'';
  const nPending=((v.app&&v.app.needsApply&&v.app.target&&!v.app.failed.includes(v.app.target))?1:0)+Object.values(v.modules||{}).filter(c=>c.needsApply&&c.target&&!c.failed.includes(c.target)).length;
- const linked=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'),remoteWaiting=linked.some(x=>hdrSites[x.id]&&hdrSites[x.id].pend);
+ const linked=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'),remoteWaiting=linked.some(x=>hdrSites[x.id]&&hdrSites[x.id].pend);rowSig=remoteWaitingNow();
  const checkSites=(SITE===''&&linked.length)?`<button class=btn id=chkall onclick="checkAllSites(this)">Check all sites</button>`:'';
  const updBtn=nPending>0?`<button class="btn pri" id=upall onclick="updateAll(this)">Update</button>`:'';        /* this box has something waiting */
  const sitesBtn=(SITE===''&&linked.length&&remoteWaiting)?`<button class="btn pri" id=upsites onclick="updateSites(this)">Update all sites</button>`:'';        /* a linked site has something waiting */
@@ -1774,7 +1779,7 @@ async function checkUpdates(b){b.disabled=true;$('#chk').textContent='Checking�
   await renderSettings();$('#chk').textContent=v.checkError?v.checkError:(n?n+' update'+(n>1?'s':'')+' available':'Checked just now: everything is up to date')}
  catch(e){$('#chk').textContent=e.message;b.disabled=false}}
 async function checkAllSites(b){b.disabled=true;const ids=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked');$('#chk').textContent='Checking…';
- const rs=await Promise.allSettled([api('check',{})].concat(ids.map(x=>api('site/'+x.id+'/check',{}))));hdrPoll();
+ const rs=await Promise.allSettled([api('check',{})].concat(ids.map(x=>api('site/'+x.id+'/check',{}))));await hdrPoll();
  try{await renderSettings()}catch(e){}
  const bad=ids.filter((x,i)=>rs[i+1].status==='rejected').map(x=>x.name||'A site'),c=$('#chk');
  if(c)c.textContent=rs[0].status==='rejected'?String(rs[0].reason&&rs[0].reason.message||'Could not check'):bad.length?'Checked just now. No answer from '+bad.join(', '):'Checked just now'}

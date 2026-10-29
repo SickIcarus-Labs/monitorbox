@@ -219,25 +219,30 @@ class History:
         now = int(self.clock()); span = hours * 3600; start = now - span; step = span / buckets
         want = set(nodes)
         with self.lock:
-            ev = sorted((t, n, s) for t, n, s in self.events if n in want)
+            ev = [(t, n, s) for t, n, s in self.events if n in want]
+        ev.sort()
         per = {}
         for t, n, s in ev:
             per.setdefault(n, []).append((t, s))
         rank = {"failed": 3, "degraded": 2, "healthy": 1, "unknown": 0}
-        out = []
-        for i in range(buckets):
-            a, b = start + i * step, start + (i + 1) * step
-            best = None
-            for n, rows in per.items():
-                for j, (t, st) in enumerate(rows):
-                    end = rows[j + 1][0] if j + 1 < len(rows) else now
-                    if st in ("failed", "degraded") and (st not in show or _brief(min_seconds, n, t, end, st)):
-                        st = "healthy"
-                    elif st == "unknown" and st not in show:
-                        continue
-                    if t < b and end > a and (best is None or rank[st] > rank[best]):
-                        best = st
-            out.append(best)
+        best = [None] * buckets
+        # one pass over each stretch, marking only the slices it touches (the straightforward way, every slice against every stretch, took seconds on a Pi)
+        for n, rows in per.items():
+            for j, (t, st) in enumerate(rows):
+                end = rows[j + 1][0] if j + 1 < len(rows) else now
+                if end <= start or t >= now:
+                    continue
+                if st in ("failed", "degraded") and (st not in show or _brief(min_seconds, n, t, end, st)):
+                    st = "healthy"
+                elif st == "unknown" and st not in show:
+                    continue
+                lo = max(0, int((t - start) // step) - 1)
+                hi = min(buckets - 1, int((end - start) // step) + 1)
+                for i in range(lo, hi + 1):
+                    a, b = start + i * step, start + (i + 1) * step
+                    if t < b and end > a and (best[i] is None or rank[st] > rank[best[i]]):
+                        best[i] = st
+        out = best
         return {"since": start, "now": now, "hours": hours, "buckets": out}
 
     def trouble(self, nodes, a, b, limit=300, show=None, newest_first=False, min_seconds=None, brief=False):
