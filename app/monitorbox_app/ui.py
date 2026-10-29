@@ -369,10 +369,10 @@ function siteInfo(n){const c=SITE?siRemote:siCfg;if(!c||!/^(site|managed-by)-/.t
  const s=(c.sites||[]).find(x=>'site-'+x.id===n.id),m=s?null:(c.managers||[]).find(x=>'managed-by-'+x.id===n.id);if(!s&&!m)return null;
  const wan=(s||m).wan||'',via=s?String(s.address||''):String(m.addr||''),host=via.replace(/:\d+$/,''),lines=[];
  const pr=(s||m).probe||{},lt=v=>v===true?'healthy':v===false?'failed':'expected',cs=s?(s.link&&s.link.state?(s.link.state==='linked'?'healthy':'failed'):'expected'):(n.state==='healthy'?'healthy':n.state==='failed'?'failed':'expected');   /* each light: that address answers a ping from here (the box itself: the link) */
- if(wan&&host&&wan===host)lines.push(['Internet address',wan+(s?' (this box connects here too)':' (it connects from here too)'),cs]);
- else{lines.push(['Internet address',wan||'not shared yet',lt(pr.wan)]);if(via)lines.push([s?'Connects to':'Connects from',via,cs])}
+ if(wan&&host&&wan===host)lines.push(['Internet address',wan+' (this box connects here too)',cs]);
+ else{lines.push(['Internet address',wan||'not shared yet',lt(pr.wan)]);if(via)lines.push(['Connects to',via,cs])}
  if((s||m).gw)lines.push(['Gateway',(s||m).gw,lt(pr.gw)]);
- return {name:s?s.name:n.name,lines}}
+ return {name:s?s.name:(m.name||'Other site')+' (managed by)',lines}}
 function siteFold(n,i,d,inf){const st=ds(n,n.state),open=openN.has(n.id)||st==='failed'||st==='degraded',dt=n.detail||'',two=inf.name.length+dt.length>34;
  const inner=inf.lines.map(l=>line('void(0)',l[2],l[0],l[1],d+1)).join('');
  return `<button class="rw${two?' two':''}${d?' sub1':''}" aria-expanded=${open}${padOf(d)} onclick="toggleN('${esc(n.id)}')">${dotc(st)}${two?`<span class=tx><span class=nm>${esc(inf.name)}</span><span class=dt>${esc(dt)}</span></span>`:`<span class=nm>${esc(inf.name)}</span><span class=dt>${esc(dt)}</span>`}<span class=cv aria-hidden=true>›</span></button>${open?inner:''}`}
