@@ -2754,6 +2754,7 @@ class App:
                         if body.get("kind") not in lib.TARGETS:
                             raise ValueError("Choose a config or full backup.")
                         lib.create(app.paths.root, body["kind"], "manual", app_version=version())
+                        backups.note_timing()
                         return self.send(200, app.backup_list())
                     if path == "/api/backups/delete":
                         lib = backups.lib()

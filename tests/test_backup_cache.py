@@ -60,7 +60,8 @@ class Cache(unittest.TestCase):
         p = os.path.join(self.dir, "monitorbox-full-1.tgz")
         with open(p, "r+b") as f:
             f.truncate(os.path.getsize(p) - 30_000)         # the tail is gone: reading the whole archive to find the manifest fails, reading its start does not
-        self.assertEqual(launcher_backup.list_backups(self.root), [], "the launcher's reader needs the whole archive")
+        self.assertEqual([b["name"] for b in launcher_backup.list_backups(self.root)], ["monitorbox-full-1.tgz"],
+                         "the launcher's reader reads the start too since 1.7.8 (it used to need the whole archive); the App's patch still covers older images")
         self.assertEqual([b["name"] for b in backups.listing(self.root)], ["monitorbox-full-1.tgz"])
 
     def test_several_requests_at_once_read_each_archive_once(self):

@@ -2,7 +2,7 @@
 launcher (to restore, so it works with the App down).  Standard library only.
 
 An archive is a .tgz holding manifest.json plus the files, paths relative to /config:
-  kind "config": config/ and data/app/auth.json            (small, nightly)
+  kind "config": config/ (without history.jsonl) and data/app/auth.json   (small, nightly; settings only)
   kind "full"  : config/, data/app/, releases/ + link names (everything, so a restore needs no network)
 
 Restore is staged and reversible: validate everything, extract to restore/new, move the current
@@ -13,6 +13,8 @@ import datetime, hashlib, io, json, os, re, shutil, tarfile, tempfile, time
 
 SCHEMA = 1
 TARGETS = {"config": ["config", "data/app/auth.json"], "full": ["config", "data/app", "releases"]}
+HISTORY = "config/history.jsonl"      # the history of every item: part of a full backup, not of a settings backup
+LAST_TIMING = {}                      # how long the last backup's steps took, for the App's performance report
 LINKS = ("current", "previous")
 MAX_BYTES = 1024 * 1024 * 1024
 MAX_FILES = 50000
@@ -26,6 +28,16 @@ class BackupError(ValueError):
 
 def backups_dir(root):
     return os.path.join(root, "backups")
+
+
+def _copy_sha(src, dst):
+    """Copy a file and hash it in the same pass (the checksum is of the copy, which is what goes into the archive)."""
+    h = hashlib.sha256()
+    with open(src, "rb") as f, open(dst, "wb") as out:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+            out.write(chunk)
+    return h.hexdigest()
 
 
 def _sha(path):
@@ -77,6 +89,7 @@ def create(root, kind="config", label="manual", app_version=None, now=None):
     """Write a new backup into /config/backups and return its file name."""
     if kind not in TARGETS:
         raise BackupError("Unknown backup kind.")
+    t0 = time.monotonic()
     files = {}
     for t in TARGETS[kind]:
         base = os.path.join(root, t)
@@ -87,7 +100,10 @@ def create(root, kind="config", label="manual", app_version=None, now=None):
             for n in names:
                 full = os.path.join(d, n)
                 if os.path.isfile(full) and not os.path.islink(full) and not n.startswith(".tmp-"):
-                    files[os.path.relpath(full, root)] = full
+                    rel = os.path.relpath(full, root)
+                    if kind == "config" and rel == HISTORY:
+                        continue                                            # settings only: the history belongs to the full backup
+                    files[rel] = full
     links = {}
     if kind == "full":
         for ln in LINKS:
@@ -105,17 +121,19 @@ def create(root, kind="config", label="manual", app_version=None, now=None):
     fd, tmp = tempfile.mkstemp(dir=backups_dir(root), prefix=".tmp-")
     os.close(fd)
     try:
+        t1 = time.monotonic()
         copies, shas = {}, {}
         for i, (rel, p) in enumerate(sorted(files.items())):
             dst = os.path.join(snap, str(i))
-            try: shutil.copyfile(p, dst)
+            try: shas[rel] = _copy_sha(p, dst)
             except FileNotFoundError: continue                              # replaced by an update while we were looking: leave it out
-            copies[rel] = (p, dst); shas[rel] = _sha(dst)
+            copies[rel] = (p, dst)
+        t2 = time.monotonic()
         manifest = {"schema": SCHEMA, "kind": kind, "label": label, "site": site, "appVersion": app_version, "links": links,
                     "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                     "files": shas}
         os.chmod(tmp, 0o600)  # the archive holds passwords and tokens
-        with tarfile.open(tmp, "w:gz") as tf:
+        with tarfile.open(tmp, "w:gz", compresslevel=6) as tf:
             data = json.dumps(manifest, indent=1, sort_keys=True).encode()
             ti = tarfile.TarInfo("manifest.json")
             ti.size, ti.mtime, ti.mode = len(data), int(now or time.time()), 0o600
@@ -132,6 +150,7 @@ def create(root, kind="config", label="manual", app_version=None, now=None):
             n += 1
             final = os.path.join(backups_dir(root), name[:-4] + f"-{n}.tgz")
         os.replace(tmp, final)
+        t3 = time.monotonic()
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -139,6 +158,11 @@ def create(root, kind="config", label="manual", app_version=None, now=None):
     finally:
         shutil.rmtree(snap, ignore_errors=True)
     prune(root)
+    t4 = time.monotonic()
+    LAST_TIMING.clear()
+    LAST_TIMING.update(kind=kind, files=len(copies),
+                       find=round(t1 - t0, 2), copy=round(t2 - t1, 2), archive=round(t3 - t2, 2), prune=round(t4 - t3, 2), total=round(t4 - t0, 2),
+                       archiveMb=round(os.path.getsize(final) / 1e6, 1))
     return os.path.basename(final)
 
 
@@ -164,12 +188,16 @@ def list_backups(root):
         p = os.path.join(d, name)
         try:
             with tarfile.open(p, "r:gz") as tf:
-                m = json.load(tf.extractfile("manifest.json"))
+                first = tf.next()                        # the manifest is always the first member: reading it by name would read the whole archive
+                m = json.load(tf.extractfile(first if first is not None and first.name == "manifest.json" else "manifest.json"))
             out.append({"name": name, "kind": m["kind"], "label": m.get("label", ""), "created": m["created"],
                         "appVersion": m.get("appVersion"), "size": os.path.getsize(p)})
         except Exception:
             continue
     return sorted(out, key=lambda b: (b["created"], b["name"]), reverse=True)
+
+
+list_backups.fast = True
 
 
 def path_of(root, name):
@@ -287,6 +315,15 @@ def swap(root, man):
         if os.path.lexists(new):
             os.makedirs(os.path.dirname(cur), exist_ok=True)
             os.rename(new, cur)
+    if kind == "config":
+        # a settings backup holds no history: keep the box's own (a copy, so undo() still finds the original in `old`)
+        mine, kept = os.path.join(old, HISTORY), os.path.join(root, HISTORY)
+        if os.path.isfile(mine) and not os.path.lexists(kept):
+            os.makedirs(os.path.dirname(kept), exist_ok=True)
+            try:
+                os.link(mine, kept)
+            except OSError:
+                shutil.copyfile(mine, kept)
     for ln, rel in man.get("links", {}).items():
         if os.path.isdir(os.path.join(root, rel)):
             _point(root, ln, rel)
