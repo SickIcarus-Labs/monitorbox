@@ -130,6 +130,9 @@ small,.sub{color:var(--sub)}
 .err{padding:12px 16px;border-radius:14px;background:rgba(248,113,113,.15);margin-top:20px}
 .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
 #alset code{overflow-wrap:anywhere;word-break:break-all}
+.busybar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:.5rem}.busybar i{display:block;height:100%;width:35%;border-radius:3px;background:var(--accent,#2dd4a8);animation:busyslide 1.2s ease-in-out infinite}
+@keyframes busyslide{0%{margin-left:-35%}100%{margin-left:100%}}
+@media (prefers-reduced-motion:reduce){.busybar i{animation:none;width:100%;opacity:.5}}
 .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1rem;margin:.75rem 0}
 textarea{width:100%;min-height:260px;font:13px/1.4 ui-monospace,Menlo,monospace}
 </style><body><header id=hdr hidden></header><main id=m>Loading…</main><div id=dr></div><script>
@@ -1557,7 +1560,12 @@ async function saveConfirm(){const m=$('#cf-msg');if(!cfMon){m.textContent='Not 
 async function saveMon(){const m=$('#monmsg');let obj;try{obj=JSON.parse($('#cfg').value)}catch(e){m.textContent='That isn\'t valid JSON: '+e.message;return}
  try{const r=await api('config/monitoring',{revision:+$('#rev').textContent,monitoring:obj});setRev(r.revision);m.textContent='Saved. Revision '+r.revision+'.'}
  catch(e){m.innerHTML=esc(e.message)+((e.data&&e.data.errors)?'<ul>'+e.data.errors.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'')}}
-async function backupNow(kind){try{await api('backups',{kind});renderSettings()}catch(e){$('#msg').textContent=e.message}}
+/* a backup runs in one piece on the box, so there is no honest percentage: a moving bar and a plain line say that something is happening */
+async function backupNow(kind){const row=document.querySelector('button[onclick^="backupNow("]'),bar=row&&row.parentNode,btns=bar?[...bar.querySelectorAll('button,label')]:[];
+ btns.forEach(b=>{b.disabled=true;b.style.opacity='.5';b.style.pointerEvents='none'});
+ let note=null;if(bar){note=document.createElement('div');note.id='bkbusy';note.className='box';note.setAttribute('role','status');
+  note.innerHTML='<div>Making the backup… '+(kind==='full'?'A full backup can take about half a minute.':'This takes a few seconds.')+'</div><div class=busybar><i></i></div>';bar.parentNode.insertBefore(note,bar.nextSibling)}
+ try{await api('backups',{kind});renderSettings()}catch(e){if(note)note.remove();btns.forEach(b=>{b.disabled=false;b.style.opacity='';b.style.pointerEvents=''});const m=$('#msg');if(m)m.textContent=e.message;else alert(e.message)}}
 async function delBk(name){if(!await askYes('Delete this backup? This cannot be undone.'))return;try{await api('backups/delete',{name});renderSettings()}catch(e){$('#msg').textContent=e.message}}
 async function restoreBk(name){if(!await askYes('Replace your current settings with this backup? A copy of what you have now is saved first, so you can go back.'))return;await act('restore',{name})}
 async function uploadBk(inp){const f=inp.files[0];if(!f)return;$('#msg').textContent='Uploading the backup…';
