@@ -144,6 +144,62 @@ def check_storage(params, boot, now=None):
     return {"state": "healthy", "detail": " · ".join(bits)}
 
 
+HOT_DRIVE_C = 55          # degrees C; editable per check (max_c). A recording drive runs warmer than a switch chip's limit allows no slack for.
+
+
+def drives(nvr):
+    d = ((nvr.get("systemInfo") or {}).get("ustorage") or {}).get("disks")
+    return [x for x in d if isinstance(x, dict)] if isinstance(d, list) else []
+
+
+def drive_name(d):
+    return f"{d.get('model') or 'drive'} (slot {d.get('slot')})" if d.get("slot") is not None else str(d.get("model") or "drive")
+
+
+def number(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+SECTORS_SEEN = {}         # (model, serial, slot) -> the bad-sector count first seen while this module has been running
+
+
+def check_drive(params, boot, now=None):
+    """One recording drive: its temperature and the drive's own verdict. 'hddNotCompatible' (a model Ubiquiti does not list) is not read at all:
+    Protect's own screen shows such a drive green."""
+    nvr = boot.get("nvr") or {}
+    if params.get("slot") is None and not params.get("model"):
+        return {"state": "unknown", "detail": "this check needs a drive 'slot'. Use Re-detect."}
+    mine = [d for d in drives(nvr) if (params.get("slot") is None or d.get("slot") == params.get("slot")) and (not params.get("model") or d.get("model") == params.get("model"))]
+    if not mine:
+        return {"state": "unknown", "detail": "UniFi Protect does not list that drive (it may be out, or the console did not report its drives)"}
+    d = mine[0]
+    limit = params.get("max_c") or HOT_DRIVE_C
+    temp = number(d.get("temperature"))
+    bits, problem = [], []
+    if temp is not None:
+        bits.append(f"{temp:g} °C")
+        if temp >= limit:
+            problem.append(f"hot, limit {limit:g} °C")
+    sectors = number(d.get("bad_sector"))
+    if sectors is not None:       # only growth is news: a drive that has always had a few is not warned about every time
+        key = (d.get("model"), d.get("serial"), d.get("slot"))
+        first = SECTORS_SEEN.get(key)
+        if first is None or sectors < first:        # first look, or a counter that went down (a drive swapped in)
+            first = SECTORS_SEEN[key] = sectors
+        if sectors > first:
+            problem.append(f"bad sectors up from {first:g} to {sectors:g}")
+    if d.get("healthy") not in (None, "good", True):
+        problem.append(f"drive health: {d.get('healthy')}")
+    if d.get("state") not in (None, "normal"):
+        problem.append(f"drive state: {d.get('state')}")
+    if d.get("reason"):
+        reason = d["reason"]
+        problem.append("drive reports: " + (", ".join(map(str, reason)) if isinstance(reason, list) else str(reason)))
+    if temp is None and not problem and d.get("healthy") is None:
+        return {"state": "unknown", "detail": "UniFi Protect reports nothing about this drive"}
+    return {"state": "degraded" if problem else "healthy", "detail": " · ".join(bits + problem or ["healthy"])}
+
+
 def camera_list(boot, now=None):
     """The source-neutral camera shape the App's Cameras view reads (any camera source can return the same fields):
     id, name, model, state, detail, recording, lastSeen, motion, source, snapshot (and, when the source knows, mac and host)."""
@@ -159,12 +215,16 @@ def camera_list(boot, now=None):
     return out
 
 
-def discover(boot, now=None):
+def discover(boot, now=None, nvr=None):
     cams = camera_list(boot, now)
     sug = [{"label": "Protect recorder", "check": "nvr", "params": {}, "batch": "Overview", "node": "UniFi Protect", "rule": "primary"},       # "is it there" comes first
            {"label": "Protect storage", "check": "storage", "params": {}, "batch": "Overview", "node": "UniFi Protect", "rule": "primary"}]
     for c in cams:      # every camera is its own item, so one that is off shows as Down by name (the all-cameras summary check is no longer offered: it would repeat what they say)
         sug.append({"label": f"Camera {c['name']}", "check": "camera", "params": {"name": c["name"]}, "batch": "Cameras", "node": f"Camera {c['name']}", "rule": "primary"})
+    for d in drives(nvr or boot.get("nvr") or {}):     # each drive is its own item, so a hot one shows by name
+        if d.get("slot") is not None and (number(d.get("temperature")) is not None or d.get("healthy") is not None):
+            sug.append({"label": f"Protect drive {drive_name(d)}", "check": "drive", "params": {"slot": d["slot"]}, "batch": "Drives",
+                        "node": f"Protect drive {drive_name(d)}", "rule": "primary"})
     for s in sug:
         s["group"] = "Cameras"
     return {"cameras": cams, "suggest": sug}
