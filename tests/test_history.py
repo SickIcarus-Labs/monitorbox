@@ -124,7 +124,7 @@ class H(unittest.TestCase):
             per = {}
             for tt, n, st in sorted(e for e in h.events if e[1] in names[:3]):
                 per.setdefault(n, []).append((tt, st))
-            rank = {"failed": 3, "degraded": 2, "healthy": 1, "unknown": 0}
+            rank = {"failed": 4, "degraded": 3, "unknown": 2, "healthy": 1}      # #325: a long Unknown beats healthy time in a slice; a short one (under the confirmation window) counts as healthy
             want = []
             for i in range(buckets):
                 a, b = start + i * step, start + (i + 1) * step
@@ -134,12 +134,58 @@ class H(unittest.TestCase):
                         end = rows[j + 1][0] if j + 1 < len(rows) else now
                         if st in ("failed", "degraded") and (st not in shown or history._brief(mins, n, tt, end, st)):
                             st = "healthy"
-                        elif st == "unknown" and st not in shown:
-                            continue
+                        elif st == "unknown":
+                            if st not in shown:
+                                continue
+                            if history._brief(mins, n, tt, end, st):
+                                st = "healthy"
                         if tt < b and end > a and (best is None or rank[st] > rank[best]):
                             best = st
                 want.append(best)
             self.assertEqual(got, want, f"trial {trial}")
+
+    def bar_for(self, stretches, min_seconds=60, show=None):
+        """stretches: [(minutes from the start, state)]; the window ends 24 h after the start. Returns the 24 hourly slices of the bar."""
+        h = history.History(os.path.join(tempfile.mkdtemp(), "h.jsonl"), clock=lambda: 1_000_000.0 + 86400)
+        for m, st in stretches:
+            h.events.append((1_000_000 + m * 60, "link", st))
+        return h.strip(["link"], hours=24, buckets=24, show=show, min_seconds=lambda n: min_seconds)["buckets"]
+
+    def test_an_unknown_longer_than_the_confirmation_window_shows_even_beside_healthy_time(self):
+        """#325: Turnberry's 2 min outage on 2026-10-28 was recorded, but Unknown ranked below Healthy, so its hour stayed green."""
+        bar = self.bar_for([(0, "healthy"), (600 + 39, "unknown"), (600 + 42, "healthy")])        # 3 min, from minute 639 (inside slice 10)
+        self.assertEqual(bar[10], "unknown")
+        self.assertEqual((bar[9], bar[11]), ("healthy", "healthy"))
+
+    def test_an_unknown_inside_the_confirmation_window_stays_hidden(self):
+        bar = self.bar_for([(0, "healthy"), (630, "unknown"), (630.5, "healthy")])                 # 30 s
+        self.assertEqual(set(bar), {"healthy"})
+
+    def test_the_window_decides_not_a_fixed_number(self):
+        two_min = [(0, "healthy"), (630, "unknown"), (632, "healthy")]
+        self.assertEqual(self.bar_for(two_min, min_seconds=60)[10], "unknown")
+        self.assertEqual(self.bar_for(two_min, min_seconds=300)[10], "healthy", "a 5 minute window makes 2 minutes a blip")
+
+    def test_a_45_minute_outage_across_two_slices_shows_in_both(self):
+        """#325, Broad Leaf's own outage seen from Turnberry: 45 minutes starting mid-slice leaves healthy time in each slice."""
+        bar = self.bar_for([(0, "healthy"), (7 * 60 + 40, "unknown"), (7 * 60 + 85, "healthy")])
+        self.assertEqual((bar[7], bar[8]), ("unknown", "unknown"))
+        self.assertEqual((bar[6], bar[9]), ("healthy", "healthy"))
+
+    def test_a_known_problem_still_beats_unknown_in_the_same_slice(self):
+        bar = self.bar_for([(0, "healthy"), (600, "unknown"), (610, "degraded"), (620, "healthy")])
+        self.assertEqual(bar[10], "degraded")
+        bar = self.bar_for([(0, "healthy"), (600, "unknown"), (610, "failed"), (620, "healthy")])
+        self.assertEqual(bar[10], "failed")
+
+    def test_the_list_agrees_with_the_bar_about_short_unknowns(self):
+        h = history.History(os.path.join(tempfile.mkdtemp(), "h.jsonl"), clock=lambda: 1_000_000.0 + 86400)
+        for m, st in [(0, "healthy"), (100, "unknown"), (100.5, "healthy"), (200, "unknown"), (203, "healthy")]:
+            h.events.append((int(1_000_000 + m * 60), "link", st))
+        got = h.trouble(["link"], 1_000_000, 1_000_000 + 86400, min_seconds=lambda n: 60)["items"]
+        self.assertEqual([(r["state"], r["to"] - r["from"]) for r in got], [("unknown", 180)], "the 30 s blip is left out, the 3 min stretch is listed")
+        with_brief = h.trouble(["link"], 1_000_000, 1_000_000 + 86400, min_seconds=lambda n: 60, brief=True)["items"]
+        self.assertEqual([bool(r.get("brief")) for r in with_brief], [True, False])
 
     def test_a_card_bar_over_a_month_of_busy_history_is_quick(self):
         import random

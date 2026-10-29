@@ -23,8 +23,8 @@ STATES = ("healthy", "degraded", "failed", "unknown")
 
 
 def _brief(min_seconds, node, start, end, state):
-    """A Down or Degraded stretch that ended (or has run so far) in less than the node's confirmation seconds."""
-    if not min_seconds or state not in ("failed", "degraded"):
+    """A Down, Degraded or Unknown stretch that ended (or has run so far) in less than the node's confirmation seconds."""
+    if not min_seconds or state not in ("failed", "degraded", "unknown"):
         return False
     return (end - start) < min_seconds(node)
 
@@ -224,7 +224,7 @@ class History:
         per = {}
         for t, n, s in ev:
             per.setdefault(n, []).append((t, s))
-        rank = {"failed": 3, "degraded": 2, "healthy": 1, "unknown": 0}
+        rank = {"failed": 4, "degraded": 3, "unknown": 2, "healthy": 1}      # an Unknown that lasted longer than the confirmation window beats healthy time in the same slice (#325)
         best = [None] * buckets
         # one pass over each stretch, marking only the slices it touches (the straightforward way, every slice against every stretch, took seconds on a Pi)
         for n, rows in per.items():
@@ -234,8 +234,11 @@ class History:
                     continue
                 if st in ("failed", "degraded") and (st not in show or _brief(min_seconds, n, t, end, st)):
                     st = "healthy"
-                elif st == "unknown" and st not in show:
-                    continue
+                elif st == "unknown":
+                    if st not in show:
+                        continue
+                    if _brief(min_seconds, n, t, end, st):
+                        st = "healthy"                                       # a blip shorter than the confirmation window, like a short Down
                 lo = max(0, int((t - start) // step) - 1)
                 hi = min(buckets - 1, int((end - start) // step) + 1)
                 for i in range(lo, hi + 1):
