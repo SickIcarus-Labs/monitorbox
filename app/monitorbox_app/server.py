@@ -1871,16 +1871,14 @@ class App:
         shutil.rmtree(self.paths.module_releases, ignore_errors=True)     # installed modules: first_run_sync fetches the channel's again
 
     def drop_dev_only(self):
-        """A box that is not on dev has no dev-only modules (the sample module): uninstall any that are there. It is not marked as declined,
-        so moving back to dev brings it back."""
+        """A box that is not on dev has no dev-only modules (the sample module): uninstall any that are there. Like any uninstall it is
+        remembered as declined, so moving back to dev does not put it back; it can be installed by hand there."""
         if self.cfg()["channel"] == "dev":
             return []
         gone = []
         for mid in DEV_ONLY:
             if mid in self.modules.state():
-                before = self.cfg()["uninstalled"]
                 self.uninstall(mid)
-                updates.set_update_cfg(self.paths, uninstalled=[m for m in before if m != mid])
                 gone.append(mid)
         return gone
 

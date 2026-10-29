@@ -163,7 +163,7 @@ if __name__ == "__main__":
 
 
 class DevOnly(unittest.TestCase):
-    """The sample module belongs to the dev channel only: leaving dev removes it, and going back to dev brings it back (not "declined")."""
+    """The sample module belongs to the dev channel only: leaving dev removes it, and it stays gone (it is hello-world; install it by hand on dev)."""
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="mb-dev-")
         self.main = os.path.join(self.tmp, "main")
@@ -182,7 +182,7 @@ class DevOnly(unittest.TestCase):
         self.assertEqual(self.app.drop_dev_only(), [])
         self.assertIn("hello", self.app.modules.state())
 
-    def test_beta_and_stable_remove_hello_only_and_do_not_mark_it_declined(self):
+    def test_beta_and_stable_remove_hello_only_and_it_stays_gone(self):
         for ch in ("beta", "stable"):
             st = self.app.modules.state()
             st["hello"] = {"active": "0.3.0", "failed": [], "sha256": R.SHA["c"]}
@@ -191,5 +191,5 @@ class DevOnly(unittest.TestCase):
             self.assertEqual(self.app.drop_dev_only(), ["hello"], ch)
             self.assertNotIn("hello", self.app.modules.state())
             self.assertIn("alpha", self.app.modules.state())
-            self.assertEqual(self.app.cfg()["uninstalled"], [], ch)
+            self.assertEqual(self.app.cfg()["uninstalled"], ["hello"], ch)
             self.assertEqual(self.app.drop_dev_only(), [], ch)               # nothing left to remove
