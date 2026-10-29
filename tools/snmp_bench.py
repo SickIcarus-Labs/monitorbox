@@ -39,8 +39,14 @@ else:                                                                   # run on
 import snmplib as L  # noqa: E402
 try:
     import checks as C  # noqa: E402
-except Exception:       # an older copy without it: the other tests still run
-    C = None
+except Exception:       # run on its own with only snmplib.py beside it (an earlier run fetched that): fetch the other file the same way
+    try:
+        url = "https://raw.githubusercontent.com/SickIcarus-Labs/monitorbox/main/modules/snmp/checks.py"
+        with urllib.request.urlopen(url, timeout=20) as r, open(os.path.join(HERE, "checks.py"), "wb") as f:
+            f.write(r.read())
+        import checks as C  # noqa: E402
+    except Exception:
+        C = None
 
 UPTIME = "1.3.6.1.2.1.1.3.0"
 IF_NAME = "1.3.6.1.2.1.31.1.1.1.1"
