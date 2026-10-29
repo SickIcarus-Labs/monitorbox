@@ -40,17 +40,21 @@ class PerDeviceCap(unittest.TestCase):
         return early, [json.loads(x) for x in buf.getvalue().splitlines()]
 
     def test_a_third_call_to_a_hung_device_is_answered_at_once_and_other_devices_are_untouched(self):
-        early, final = self.run_in_threads([req(1, "198.51.100.1"), req(2, "198.51.100.1"), req(3, "198.51.100.1"), req(4, "198.51.100.2")])
+        early, final = self.run_in_threads([req(i, "198.51.100.1") for i in range(1, 6)] + [req(6, "198.51.100.2")])
         by = {o["id"]: o for o in early}
-        self.assertEqual(set(by), {3, 4}, "only the rejected call and the other device's call answered while the hung ones were stuck")
-        self.assertEqual(by[3]["result"]["state"], "unknown")
-        self.assertIn("still busy", by[3]["result"]["detail"])
-        self.assertEqual(by[4]["result"]["state"], "healthy")
-        self.assertEqual(len(final), 4)
+        self.assertEqual(set(by), {5, 6}, "only the rejected call and the other device's call answered while the hung ones were stuck")
+        self.assertEqual(by[5]["result"]["state"], "unknown")
+        self.assertIn("still busy", by[5]["result"]["detail"])
+        self.assertEqual(by[6]["result"]["state"], "healthy")
+        self.assertEqual(len(final), 6)
 
     def test_a_rejected_non_check_call_is_an_error_not_a_result(self):
-        early, _ = self.run_in_threads([req(1, "198.51.100.1", "lan_report"), req(2, "198.51.100.1", "lan_report"), req(3, "198.51.100.1", "lan_report")])
-        self.assertIn("error", early[0]); self.assertEqual(early[0]["id"], 3)
+        early, _ = self.run_in_threads([req(i, "198.51.100.1", "lan_report") for i in range(1, 6)])
+        self.assertIn("error", early[0]); self.assertEqual(early[0]["id"], 5)
+
+    def test_a_slow_switch_with_a_report_a_counter_read_and_a_check_in_flight_is_not_rejected(self):
+        early, _ = self.run_in_threads([req(1, "198.51.100.1", "lan_report"), req(2, "198.51.100.1", "counters"), req(3, "198.51.100.1")])
+        self.assertEqual(early, [], "three overlapping calls to one slow device are normal and must all be accepted")
 
     def test_the_count_goes_back_to_zero_so_the_device_works_again(self):
         self.run_in_threads([req(1, "198.51.100.1"), req(2, "198.51.100.1")])

@@ -48,7 +48,7 @@ def handle(req):
     raise ValueError(f"unknown method {m}")
 
 
-PER_DEVICE = 2                     # calls in flight at once for one device; a hung device must not take every worker from the others
+PER_DEVICE = 4                     # calls in flight at once for one device; a hung device must not take every worker from the others
 _busy, _busy_lock = {}, threading.Lock()
 
 
