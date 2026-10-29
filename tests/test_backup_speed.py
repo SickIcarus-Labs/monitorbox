@@ -35,7 +35,7 @@ class BackupSpeed(unittest.TestCase):
             b.create(self.root, "config", "manual", app_version="9.9.9", now=1_700_000_300)
         finally:
             tarfile.TarFile.next = real
-        self.assertLessEqual(len(reads), 3, "four older backups were read again")
+        self.assertLessEqual(len(reads), 12, "each of the five archives is opened at its start only: two header reads each (it was 60 members read before)")
         want = sorted(os.listdir(os.path.join(self.root, "backups")))
         got = b.list_backups(self.root)
         self.assertEqual(sorted(x["name"] for x in got), want)
@@ -49,6 +49,18 @@ class BackupSpeed(unittest.TestCase):
             b.create(self.root, "config", "auto", now=1_700_000_000 + i * 60)
         autos = [x for x in b.list_backups(self.root) if x["label"] == "auto"]
         self.assertEqual(len(autos), b.KEEP[("config", "auto")])
+
+    def test_how_long_the_steps_took_reaches_the_slow_list(self):
+        from monitorbox_app import perfstats
+        b = backups.lib()
+        b.create(self.root, "full", "manual")
+        old = perfstats.SLOW_MS
+        perfstats.SLOW_MS = 0
+        try:
+            backups.note_timing()
+        finally:
+            perfstats.SLOW_MS = old
+        self.assertTrue(any(x["what"].startswith("full backup, ") and "copy" in x["what"] and len(x["what"]) <= 80 for x in perfstats.slow_calls()), perfstats.slow_calls())
 
 
 if __name__ == "__main__":

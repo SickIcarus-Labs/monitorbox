@@ -106,6 +106,17 @@ def configured(root):
         return False
 
 
+def note_timing():
+    """Put how long the last backup's steps took into the performance report's slow list (the launcher keeps them; an older image keeps none)."""
+    try:
+        from . import perfstats
+        t = dict(getattr(lib(), "LAST_TIMING", {}) or {})
+        if t:
+            perfstats.slow(f"{t['kind']} backup, {t['files']} files: find {t['find']} copy {t['copy']} zip {t['archive']} prune {t['prune']} s", t["total"] * 1000)
+    except Exception:
+        pass
+
+
 def run_auto(root, app_version):
     """Nightly config backup, weekly full backup. Returns the names made."""
     b = lib()
@@ -115,4 +126,5 @@ def run_auto(root, app_version):
     for kind, age in (("config", 86400), ("full", 7 * 86400)):
         if due(b.list_backups(root), kind, age):
             made.append(b.create(root, kind, "auto", app_version=app_version))
+            note_timing()
     return made

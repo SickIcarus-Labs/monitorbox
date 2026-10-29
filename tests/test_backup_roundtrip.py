@@ -285,9 +285,9 @@ class RoundTrip(unittest.TestCase):
                 cfg["connections"] = conns
                 write_json(self.w.paths.config, cfg)
 
-    def test_history_survives_every_kind_of_backup(self):
-        """The 30 days of history travel in config/ so both kinds carry it. Every event is different, and each one is
-        compared after the round trip."""
+    def test_history_travels_in_a_full_backup_and_not_in_a_settings_backup(self):
+        """Changed on purpose (#100, owner's decision): a settings backup holds settings only, so the history is in the full backup alone.
+        (It used to say both kinds carried it.) Every event is different, and each one is compared after the round trip."""
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
         from monitorbox_app.history import History
         now = 1_800_000_000
@@ -303,18 +303,19 @@ class RoundTrip(unittest.TestCase):
         with open(hpath) as f:
             want_text = f.read()
         self.assertEqual(len(want_text.splitlines()), 24)
-        for kind in ("config", "full"):
-            with self.subTest(kind=kind):
-                dl, _b, _l = self.back_up_and_wipe(kind)
-                self.restore(dl)
-                with open(hpath) as f:
-                    self.assertEqual(f.read(), want_text)
-                back = History(hpath, clock=lambda: later)
-                for n, t in want.items():
-                    self.assertEqual(back.timeline(n), t, n)
-                self.w.wipe(); self.w.build()
-                with open(hpath, "w") as f:
-                    f.write(want_text)
+        dl, _b, _l = self.back_up_and_wipe("config")
+        self.restore(dl)
+        self.assertFalse(os.path.exists(hpath), "a settings backup carries no history")
+        self.w.wipe(); self.w.build()
+        with open(hpath, "w") as f:
+            f.write(want_text)
+        dl, _b, _l = self.back_up_and_wipe("full")
+        self.restore(dl)
+        with open(hpath) as f:
+            self.assertEqual(f.read(), want_text)
+        back = History(hpath, clock=lambda: later)
+        for n, t in want.items():
+            self.assertEqual(back.timeline(n), t, n)
 
     def test_full_backup_brings_back_releases_and_links(self):
         dl, before, links = self.back_up_and_wipe("full")
@@ -337,22 +338,23 @@ class RoundTrip(unittest.TestCase):
 
     def test_a_file_rewritten_while_the_backup_runs_still_gives_a_valid_backup(self):
         """The App rewrites data/app/modules.json as modules update. A backup that hashed the live file and read it
-        again for the archive once came out with a checksum that did not match (restore refused it as damaged)."""
+        again for the archive once came out with a checksum that did not match (restore refused it as damaged). Since 1.7.8 the copy is hashed as it is
+        written (the hook moved from _sha to _copy_sha); the archive still comes from that same copy."""
         target = os.path.join(self.root, "data", "app", "modules.json")
         self.assertTrue(os.path.isfile(target))
         orig = open(target, "rb").read()
-        real, n = backup._sha, [0]
-        def sha_then_rewrite(path):
-            h = real(path)
-            if not n[0] and open(path, "rb").read() == orig:               # modules.json (or its snapshot) was just hashed: change the live file now
+        real, n = backup._copy_sha, [0]
+        def copy_then_rewrite(src, dst):
+            h = real(src, dst)
+            if not n[0] and open(dst, "rb").read() == orig:                # modules.json was just copied and hashed: change the live file now
                 n[0] = 1
                 with open(target, "w") as f: f.write('{"changed": "after it was hashed"}')
             return h
-        backup._sha = sha_then_rewrite
+        backup._copy_sha = copy_then_rewrite
         try:
             name = backup.create(self.root, "full", "manual")
         finally:
-            backup._sha = real
+            backup._copy_sha = real
         self.assertEqual(n[0], 1, "the test did not rewrite anything")
         backup.validate(os.path.join(backup.backups_dir(self.root), name))
         self.assertEqual([x for x in os.listdir(backup.backups_dir(self.root)) if x.startswith(".tmp-")], [], "snapshot left behind")
