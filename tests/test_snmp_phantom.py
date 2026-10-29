@@ -47,6 +47,18 @@ class Phantom(unittest.TestCase):
         asked = self.asked_indexes(a, {f"{X}.6", f"{X}.10"})
         self.assertTrue(asked and asked <= {1, 2, 3, 4}, f"counters were asked for {sorted(asked)}")
 
+    def test_the_first_reading_asks_for_addresses_only_of_real_ports_and_reads_the_types_once(self):
+        m = switch()
+        for i in range(1, 101):
+            m[f"{T}.6.{i}"] = bytes([0xaa, 0xbb, 0xcc, 0x00, 0x01, i])
+        a = self.agent(m)
+        r = C.counters(conn(a, "ph8"))
+        self.assertEqual(set(r["macs"]), {f"..:00:01:{i:02x}" for i in (1, 2, 3, 4)}, "the addresses of the four real interfaces, none from empty slots")
+        self.assertEqual(self.asked_indexes(a, {f"{T}.6"}), {1, 2, 3, 4})
+        walks = [oids[0] for t, oids in a.requests if t != L.GET]
+        first_type_walk = [i for i, w in enumerate(walks) if w == f"{T}.3"]
+        self.assertEqual(len(first_type_walk), 1, "the interface types were walked once, not again for the stack")
+
     def test_lan_report_reads_only_the_real_ports_by_index_and_says_how_many_it_left_out(self):
         a = self.agent(switch())
         r = C.lan_report(conn(a, "ph2"), wait=0)

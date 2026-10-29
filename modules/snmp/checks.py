@@ -270,15 +270,15 @@ NOT_LAN_TYPES = (24, 131, 135, 136)   # ifType: software loopback, tunnel, VLAN 
 
 
 def _absent(s, names, everything=False):
-    """({index of an interface that is not a real port}, {index: ifOperStatus}). Only for a big device (hundreds of interfaces make every full read slow),
+    """({index of an interface that is not a real port}, {index: ifOperStatus}, {index: ifType}). Only for a big device (hundreds of interfaces make every full read slow),
     and only on clear signals: the device says the port is not present, or says it is a tunnel, loopback or VLAN. A down port is never hidden (it is a real
     port with nothing plugged in), a link aggregation is never hidden, and a device that gives no type or state hides nothing. If that would hide
     everything, nothing is hidden."""
     if everything or len(names) <= BIG_DEVICE:
-        return set(), {}
+        return set(), {}, {}
     types, opers = _safe(s, IF_TYPE), _safe(s, IF_OPER)
     gone = {i for i in names if clean(opers.get(i)) == NOT_PRESENT or clean(types.get(i)) in NOT_LAN_TYPES}
-    return (gone if len(gone) < len(names) else set()), opers
+    return (gone if len(gone) < len(names) else set()), opers, types
 
 
 def counters(conn, only=None):
@@ -369,7 +369,7 @@ def _quick(s, lay, only=None, ut=None):
     return out
 
 
-def _stack(s, names):
+def _stack(s, names, types=None):
     """Which interfaces sit on top of which, from the standard stack table: {index: {"stacked": True}} for a bond, team or VLAN (it has interfaces beneath it, so it only repeats them),
     and {index: {"bond": ["bond0"]}} for a physical card that is a member of a link aggregation. Empty when the device has no such table."""
     lower, higher = {}, {}
@@ -381,10 +381,13 @@ def _stack(s, names):
                 higher.setdefault(lo, set()).add(hi)
     except L.SnmpError:
         return {}
-    try:
-        types = {i: clean(v) for i, v in s.column(IF_TYPE).items()}
-    except L.SnmpError:
-        types = {}
+    if types:
+        types = {i: clean(v) for i, v in types.items()}             # already read to find the interfaces that are not ports
+    else:
+        try:
+            types = {i: clean(v) for i, v in s.column(IF_TYPE).items()}
+        except L.SnmpError:
+            types = {}
     nm = lambda i: L.text(names.get(i) or b"")
 
     def is_lag(i):
@@ -406,7 +409,7 @@ def _full(s, ut=None):
     """The first reading: one walk of the interface names, then the counters of just the real interfaces by index (a server can have hundreds of container
     interfaces; walking every column across all of them is what made this slow)."""
     names = s.column(IF_NAME) or s.column(IF_DESCR)
-    gone, _ = _absent(s, names)
+    gone, _, types = _absent(s, names)
     real = {idx: L.text(n) for idx, n in names.items() if L.text(n) and not L.text(n).startswith(VIRTUAL_IF) and idx not in gone}
     out, ifs, wide = {}, {}, True
     for wide in (True, False):                                           # 64-bit counters first, then the 32-bit pair
@@ -415,7 +418,7 @@ def _full(s, ut=None):
         if have:
             break
     vals = _read(s, have, wide, alias=True) if have else {}               # the rest only for interfaces that have counters at all (a switch can list hundreds that do not)
-    stack = _stack(s, names) if have else {}
+    stack = _stack(s, names, types) if have else {}
     for idx, nm in real.items():
         v = vals.get(idx)
         if not v or not isinstance(v["in"], int) or not isinstance(v["out"], int):
@@ -428,7 +431,7 @@ def _full(s, ut=None):
     except L.SnmpError:
         sysname = ""
     try:
-        macs = sorted({_mac_text(m) for m in s.column(IF_PHYS).values() if isinstance(m, (bytes, bytearray)) and len(m) == 6 and any(m)})[:1000]     # every interface's address, shortened: the App matches them to a UniFi device's address
+        macs = sorted({_mac_text(m) for m in (_get_by_index(s, IF_PHYS, [i for i in names if i not in gone]) if gone else s.column(IF_PHYS)).values() if isinstance(m, (bytes, bytearray)) and len(m) == 6 and any(m)})[:1000]     # every interface's address, shortened: the App matches them to a UniFi device's address
     except L.SnmpError:
         macs = []
     return out, {"wide": wide, "ifs": ifs, "sys": sysname, "macs": macs, "stack": stack}
@@ -447,7 +450,7 @@ def discover(conn, params=None):
     out = {"interfaces": [], "volumes": [], "tables": {}, "suggest": [{"label": "Reachable (uptime)", "check": "uptime", "params": {}, "batch": "Device"}]}
     out["sysName"] = L.text(s.get([SYS_NAME]).get(SYS_NAME) or b"")
     names = s.column(IF_NAME) or s.column(IF_DESCR)
-    gone, opers = _absent(s, names, bool((params or {}).get("everything")))
+    gone, opers, _ = _absent(s, names, bool((params or {}).get("everything")))
     oper = opers or s.column(IF_OPER)
     speed = s.column(IF_HIGHSPEED) if not gone else _get_by_index(s, IF_HIGHSPEED, [i for i in names if i not in gone])
     states = {1: "up", 2: "down"}
@@ -535,7 +538,7 @@ def lan_report(conn, wait=1.0, everything=False):
     names = s.column(IF_NAME) or s.column(IF_DESCR)
     if not names:
         raise L.SnmpError("the device lists no interfaces")
-    gone, opers = _absent(s, names, everything)
+    gone, opers, _ = _absent(s, names, everything)
     keep = [i for i in names if i not in gone]
     if gone:
         notes.append(f"{len(gone)} interfaces that are not present, or are tunnels or VLANs, were not read")
