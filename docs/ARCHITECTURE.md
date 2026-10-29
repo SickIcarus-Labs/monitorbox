@@ -76,7 +76,7 @@ States: healthy, degraded, failed, unknown, disabled; freshness is separate. The
 
 ## 8. Several sites
 
-A full MonitorBox per site. One (the main one) is paired with the others and can manage them; control goes **one way only**. Sites talk over a separate site port (default 8443, off until enabled) using TLS with a pre-shared key made at one-time pairing, so only one port needs forwarding and no certificates are involved. If the link drops, each site keeps watching and alerting on its own and its peers show it as Unknown.
+A full MonitorBox per site. One (the main one) is paired with the others and can manage them; control goes **one way only**. Sites talk over a separate site port (default 8443, off until enabled) using TLS with a pre-shared key made at one-time pairing, so only one port needs forwarding and no certificates are involved. If the link drops, each site keeps watching and alerting on its own. Because the link runs over a private address, a silent link alone proves nothing, so the sites also tell each other their public addresses (over the same link, in the poll) and judge a silent link by pinging that address from outside the tunnel: the address answers = Degraded, it does not and this box's own internet is fine = Down, this box's own internet is down too = Unknown. A gateway that reports a private WAN address (double NAT or a UniFi glitch) means "cannot tell": nothing is shared. See `wanaddr.py` and `peer.py`.
 
 ## 9. Tests and CI
 

@@ -8,7 +8,7 @@ from .modules import current as modules_current, DEV_ONLY, always
 from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
 from . import sitesupdate
-from . import thisbox, followups, graphs, alerts, peer, perfstats, lanmap, portpeers, portwatch, autonotes, lansampler, busiest, security, passkeys
+from . import thisbox, followups, graphs, alerts, peer, wanaddr, perfstats, lanmap, portpeers, portwatch, autonotes, lansampler, busiest, security, passkeys
 from .monitor import Monitor
 from .auth import Auth
 from .modules import Modules
@@ -99,6 +99,11 @@ class App:
         self.alerts = alerts.Alerts(self.paths.p("config", "alerts.json"), self.paths.p("config", "alerts-state.json"), lambda: self.monitor.snapshot(fresh=True),
                                    hostname=lambda: self.peer.name())     # alerts say the site's own name (Settings, Sites), the computer name only when none is set
         self.peer = peer.Peer(self.paths.p("config", "sites.json"), self.port, self.internal_session, version)
+        self.wan = wanaddr.Own(self._gateway_wans)          # this box's public address, told to the paired sites so a silent link can be judged from outside the tunnel
+        self.peer.wan_info = self.wan.get
+        self.peer.wan_peek = self.wan.peek
+        self.peer.on_relink = self.wan.invalidate           # a link that comes back means the line was down: the address may have changed
+        self.peer.ping = probes.ping
         self.sites_update = sitesupdate.SitesUpdate(self.peer, self.apply_all)
         self.peer.relay_lookup = self.live_relay
         self.peer.on_change = self.sync_site_nodes
@@ -435,8 +440,9 @@ class App:
 
     def sync_site_nodes(self):
         """Each pairing is something to watch: a managed site's link here ('Tidewater is not answering from here'), and on a managed box,
-        whether the box that manages it is still in touch. Both are Unknown when silent, never down: a silent link proves nothing about the
-        site. They follow the pairings (removing a pairing removes them)."""
+        whether the box that manages it is still in touch. A silent link alone proves nothing about the site, so it is Unknown; with the other site's public address
+        (told over the link, see wanaddr.py) it is judged from outside the tunnel: Degraded when the address still replies, Down when it does not and this box's own
+        internet is fine. They follow the pairings (removing a pairing removes them)."""
         try:
             info = self.peer.get()
             mk = lambda i, name, chk: {"id": i, "name": name, "group": "Sites", "checks": [dict(chk, id="link", interval=15)]}
@@ -1403,6 +1409,22 @@ class App:
         out["flows"] = sorted(out["flows"], key=lambda f: -(f["down_bps"] + f["up_bps"]))[:25]
         out.update({"why": "" if out["flows"] else peers.get("why", ""), "read": peers.get("read", 0), "unread": peers.get("unread", []), "focus": (by.get(node) or {}).get("name", "") + " port " + str(port)})
         return out
+
+    def _gateway_wans(self):
+        """The WAN addresses the UniFi gateway reports, or None when no UniFi Network login is set up (then the address is worked out another way, see wanaddr.py)."""
+        conns = [c for c in monconfig.load_config(self.paths).get("connections", []) if isinstance(c, dict) and c.get("module") == "unifi-network"]
+        if not conns:
+            return None
+        ports, ok = [], False
+        for c in conns:
+            try:
+                ports += self.modules.call("unifi-network", "wan_ports", {"connection": c}, 20).get("ports") or []
+                ok = True
+            except Exception:
+                continue
+        if not ok:
+            raise RuntimeError("the UniFi login did not answer")      # the address is looked up again soon, not guessed
+        return ports or None
 
     def wan_ports(self, cid):
         """Which interfaces of this SNMP device are its WAN, when a UniFi Network login on the same address can say."""
