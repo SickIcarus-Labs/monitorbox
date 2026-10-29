@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-import sys, shutil, base64, json, os, re, secrets, socket, threading, time
+import sys, shutil, signal, base64, json, os, re, secrets, socket, threading, time
 from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
@@ -192,6 +192,14 @@ class App:
         if cid and conn is None:
             return None, f"connection '{cid}' is not configured", None, {}
         return self.modules.check(check, conn)
+
+    def _save_history(self):
+        """On the way out (an update, a restart, a container stop): the port history and its wrap bookkeeping as they are now, not as they were up to five minutes ago.
+        A card with a 16-bit counter goes round every 10 to 15 minutes; with older bookkeeping a restart could not tell a lap from a reset and began that port's learning again (#322)."""
+        try:
+            self.portwatch.save(force=True)
+        except Exception:
+            pass
 
     def detect(self, cid):
         """Re-detect: ask the connection's module what the device offers right now (read-only)."""
@@ -2857,9 +2865,16 @@ class App:
         threading.Thread(target=lambda: (self.modules.start_all(), self.first_run_sync()), daemon=True).start()
         threading.Thread(target=self.auto_loop, daemon=True).start()
         threading.Thread(target=self.backup_loop, daemon=True).start()
+        def on_term(*_):                         # a container stop or restart: leave through the same door as an update, so the history is saved
+            threading.Thread(target=self.httpd.shutdown, daemon=True).start()
+        try:
+            signal.signal(signal.SIGTERM, on_term)
+        except ValueError:
+            pass                                 # not the main thread (tests): nothing to catch
         try:
             self.httpd.serve_forever()
         finally:
+            self._save_history()
             self.graphs.stop()
             self.lansampler.stop()
             self.alerts.stop()
