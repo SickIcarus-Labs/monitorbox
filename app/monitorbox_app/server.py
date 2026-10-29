@@ -2262,6 +2262,8 @@ class App:
                     return self.site_pass("GET", 0)
                 if self.path == "/api/sites":
                     return self.send(200, app.peer.get())
+                if self.path == "/api/site-links":
+                    return self.send(200, app.peer.view())
                 if self.path == "/api/sites/update-all":
                     return self.send(200, app.sites_update.status())
                 if self.path == "/api/state":

@@ -275,6 +275,13 @@ class Peer:
                 "managers": [{"id": m["id"], "name": m.get("name", ""), "since": m.get("since"), "wan": m.get("wan"), "gw": m.get("gw"), "addr": self.addr.get(m["id"]), "probe": self.probes.get(("managers", m["id"]))} for m in c["managers"]],
                 "sites": [{"id": s["id"], "name": s.get("name", ""), "address": s["address"], "since": s.get("since"), "link": links.get(s["id"]), "wan": s.get("wan"), "gw": s.get("gw"), "probe": self.probes.get(("sites", s["id"]))} for s in c["sites"]]}
 
+    def view(self):
+        """What another site may see of this box's pairings (the main screen of a managed site): names, addresses and link state only. Never a key, a pairing code or anything that changes a pairing."""
+        g = self.get()
+        keep = ("id", "name", "wan", "gw", "addr", "probe")
+        return {"managers": [{k: m.get(k) for k in keep} for m in g["managers"]],
+                "sites": [dict({k: s.get(k) for k in keep + ("address",)}, link={"state": (s.get("link") or {}).get("state")}) for s in g["sites"]]}
+
     def set_name(self, name):
         c = self._cfg()
         c["name"] = str(name or "").strip()[:60]

@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.7.19** (#324) The other site's tab now really shows its "(managed by)" line expanded. In 1.7.17 and 1.7.18 the page asked the other site for its pairings through the Sites screen's address, which a managed site refuses to pass on (on purpose: a main box must not manage another box's pairings), so the line stayed plain. It now uses a read-only view that holds only names, addresses and link state.
 - **1.7.18** (#324) Wording on the other site's tab: the line reads "Broad Leaf (managed by)" and its rows are the same as on the main site: Internet address, Connects to, Gateway.
 - **1.7.17** (#324) The other site's tab now shows its side of the pairing the same way. Opening Turnberry's tab, "Managed by Broad Leaf" is an expandable line with Broad Leaf's internet address, the address its calls come from, and its gateway, each with a live light. Before, only the main site showed those lines.
 - **1.7.16** (#324) A paired site that is down now appears under "Needs attention" on the main screen, the same way a server in trouble does, with the reason and a Check now button. The headline ("Everything is fine") and the attention count still describe this site only. A site link is checked every 10 seconds and confirmed in 20 (was every 15 and 30), so its tab goes red sooner after a VPN or site outage.

@@ -276,7 +276,7 @@ async function hdrPollNow(){
 setInterval(()=>{if(!document.hidden&&!hdrRun)hdrPoll()},15000);
 addEventListener('visibilitychange',()=>{if(!document.hidden)hdrPoll()});
 async function refreshSites(){try{siCfg=await api('sites')}catch(e){siCfg=null}
- {const want=SITE;let j=null;if(want){try{const r=await fetch('/api/site/'+want+'/sites');if(r.ok)j=await r.json()}catch(e){}}   /* the site being looked at tells which boxes it is paired with: its own side of the pairing */
+ {const want=SITE;let j=null;if(want){try{const r=await fetch('/api/site/'+want+'/site-links');if(r.ok)j=await r.json()}catch(e){}}   /* the site being looked at tells which boxes it is paired with: its own side of the pairing */
   if(want===SITE&&JSON.stringify(j)!==JSON.stringify(siRemote)){siRemote=j;if(snap&&typeof render==='function')try{render()}catch(e){}}}
  if(siCfg&&SITE&&!siCfg.sites.some(s=>s.id===SITE)){SITE='';try{localStorage.removeItem('mb-site')}catch(e){};closeStream();route()}
  if(siCfg){try{const r=await fetch('/api/status');if(r.ok)locBanner=(await r.json()).banner}catch(e){}}
@@ -364,7 +364,7 @@ function fold(key,st,name,states,inner,d,bold,unit){
  return `<button class="rw${two?' two':''}${d?' sub1':''}" aria-expanded=${open}${padOf(d)} onclick="toggleN('${esc(key)}')">${dotc(st)}${two?`<span class=tx><span class=nm>${nm}</span><span class=dt>${esc(roll)}</span></span>`:`<span class=nm>${nm}</span><span class=dt>${esc(roll)}</span>`}<span class=cv aria-hidden=true>›</span></button>${open?inner():''}`}
 /* A paired site on the main screen: one line with its name and how the link is; tapping it shows the site's internet address and the address this box connects to
    (one line when they are the same, as when the site's router forwards the port or the line is double NAT). */
-let siRemote=null;   /* /api/sites of the site whose tab is open (null on this box's own tab) */
+let siRemote=null;   /* /api/site-links of the site whose tab is open (null on this box's own tab) */
 function siteInfo(n){const c=SITE?siRemote:siCfg;if(!c||!/^(site|managed-by)-/.test(n.id))return null;
  const s=(c.sites||[]).find(x=>'site-'+x.id===n.id),m=s?null:(c.managers||[]).find(x=>'managed-by-'+x.id===n.id);if(!s&&!m)return null;
  const wan=(s||m).wan||'',via=s?String(s.address||''):String(m.addr||''),host=via.replace(/:\d+$/,''),lines=[];

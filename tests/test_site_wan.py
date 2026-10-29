@@ -388,3 +388,26 @@ class LightsAndTiming(Verdict):
     def test_site_nodes_are_confirmed_in_30_seconds_not_60(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "monitorbox_app", "server.py")).read()
         self.assertIn('"confirmFailures": 2, "confirmSeconds": 20', src)
+
+
+class SiteLinksView(unittest.TestCase):
+    """The remote site's tab asks that site for its pairings (#324). That read must pass the manager-to-managed filter and leak nothing."""
+    def test_it_is_allowed_through_the_managed_box_filter_while_the_sites_screen_is_not(self):
+        blocked = lambda first: any(first == b.rstrip("/") or first.startswith(b) for b in peer.BLOCKED)
+        self.assertTrue(blocked("sites"))
+        self.assertFalse(blocked("site-links"))
+
+    def test_it_holds_no_key_and_no_pairing_code(self):
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        p = peer.Peer(os.path.join(d.name, "sites.json"), 8080, "x", lambda: "1.2.3", clock=lambda: 1000.0)
+        c = p._cfg()
+        c["managers"] = [{"id": "mgr", "name": "Broad Leaf", "key": "ab" * 32, "since": 1, "wan": MINE, "gw": "10.55.0.1"}]
+        c["sites"] = [{"id": "tb", "name": "Elsewhere", "address": "192.0.2.5:8443", "mid": "m1", "key": "cd" * 32, "since": 1}]
+        p._write(c)
+        p.addr["mgr"] = "10.55.0.9"
+        v = p.view()
+        self.assertEqual(v["managers"][0]["addr"], "10.55.0.9")
+        self.assertEqual(v["sites"][0]["address"], "192.0.2.5:8443")
+        text = str(v)
+        for secret in ("ab" * 32, "cd" * 32, "pairing", "code", "key"):
+            self.assertNotIn(secret, text)
