@@ -38,7 +38,7 @@ def handle(req):
     if m == "sample":
         return sample(a.get("connection") or {}, list(a.get("names") or []))
     if m == "lan_report":
-        return lan_report(a.get("connection") or {}, wait=float(a.get("wait", 1.0)))
+        return lan_report(a.get("connection") or {}, wait=float(a.get("wait", 1.0)), everything=bool(a.get("everything")))
     if m == "counters":
         return counters(a.get("connection") or {}, a.get("only") if isinstance(a.get("only"), list) else None)
     if m == "probe":
