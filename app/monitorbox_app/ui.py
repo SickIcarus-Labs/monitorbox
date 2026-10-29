@@ -243,10 +243,12 @@ addEventListener('pointerdown',e=>{if(bellOpen&&!e.target.closest('#bell,#bellbt
 addEventListener('keydown',e=>{if(e.key==='Escape'&&bellOpen){bellOpen=false;renderHeader();const b=$('#bellbtn');if(b)b.focus()}});
 addEventListener('hashchange',()=>{if(bellOpen){bellOpen=false;renderHeader()}});
 /* the version and the two things the bell can list; the versions page is already cached on the box, so asking is cheap */
+/* a module is waiting for the owner when it has a newer version and is installed, or is new from the built-in repository and was not uninstalled on purpose (the same rule the box uses to update by itself) */
+const modWaiting=c=>!!(c.needsApply&&c.target&&!(c.failed||[]).includes(c.target)&&(c.running||c.installed||(c.fromDefault&&!c.declined)));
 async function hdrOne(id){const pre='/api/'+(id?'site/'+id+'/':'');
  const g=async p=>{const r=await fetch(pre+p);if(!r.ok)throw new Error(r.status);return r.json()};
  const [v,f]=await Promise.all([g('versions'),g('followups').catch(()=>({suggestions:[]}))]);
- const mods=Object.entries(v.modules||{}).filter(([k,c])=>c.needsApply&&c.target&&!(c.failed||[]).includes(c.target)),appUp=v.app&&v.app.needsApply&&v.app.target&&!(v.app.failed||[]).includes(v.app.target);
+ const mods=Object.entries(v.modules||{}).filter(([k,c])=>modWaiting(c)),appUp=v.app&&v.app.needsApply&&v.app.target&&!(v.app.failed||[]).includes(v.app.target);
  return {ver:v.version||'',auto:(v.autoNotes||[]).map(x=>({id:x.id,text:x.text})),img:!!(v.image&&v.image.outdated),fu:(f.suggestions||[]).map(x=>({title:x.title,on:x.on,labels:x.labels})),pend:(appUp||mods.length)?{target:appUp?v.app.target:'',what:appUp?'MonitorBox itself'+(mods.length?' and '+mods.length+' module'+(mods.length==1?'':'s'):''):mods.length+' module'+(mods.length==1?'':'s')+' ready to install'}:null}}
 /* the bell covers every site: ask this box and each linked site (through the pass-through) once a minute. A site that fails to answer keeps its last answer out of the bell; it is simply left out. */
 let hdrRun=null,hdrAgain=false,rowSig='';
@@ -1423,13 +1425,13 @@ async function renderSettings(){
    ${bk.backups.length?bk.backups.map(bkRow).join(''):'<p><small>No backups yet. The first one is made about a minute after the box starts.</small></p>'}</div>`;
  const img=v.image&&v.image.outdated?`<div class=box><b>The container image needs updating.</b> This box is running image ${esc(v.image.have)}; this release was built for ${esc(v.image.wants)}. Everything keeps working, but some updates may not install until the image is re-pulled. Pull the new image and restart the container; your settings and data are kept.</div>`:'';
  const last=v.last&&v.last.result!='ok'?`<div class=box>Last install: ${esc(v.last.version)} — ${esc(v.last.result)}</div>`:'';
- const nPending=((v.app&&v.app.needsApply&&v.app.target&&!v.app.failed.includes(v.app.target))?1:0)+Object.values(v.modules||{}).filter(c=>c.needsApply&&c.target&&!c.failed.includes(c.target)).length;
+ const nPending=((v.app&&v.app.needsApply&&v.app.target&&!v.app.failed.includes(v.app.target))?1:0)+Object.values(v.modules||{}).filter(modWaiting).length;
  const linked=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked'),remoteWaiting=linked.some(x=>hdrSites[x.id]&&hdrSites[x.id].pend);rowSig=remoteWaitingNow();
  const checkSites=(SITE===''&&linked.length)?`<button class=btn id=chkall onclick="checkAllSites(this)">Check all sites</button>`:'';
  const updBtn=nPending>0?`<button class="btn pri" id=upall onclick="updateAll(this)">Update</button>`:'';        /* this box has something waiting */
  const sitesBtn=(SITE===''&&linked.length&&remoteWaiting)?`<button class="btn pri" id=upsites onclick="updateSites(this)">Update all sites</button>`:'';        /* a linked site has something waiting */
  const sec=(location.hash.split('/')[2]||''),nServers=new Set((conn.connections||[]).map(hostOf).filter(Boolean)).size,nNodes=((mon.monitoring||{}).nodes||[]).length,
-  upd=!!(v.app&&v.app.needsApply)||Object.values(v.modules||{}).some(c=>c.needsApply),lastBk=bk.backups&&bk.backups[0];
+  upd=!!(v.app&&v.app.needsApply)||Object.values(v.modules||{}).some(modWaiting),lastBk=bk.backups&&bk.backups[0];
  const SECS=[['display','Display','How the main screen looks on this device',`${view==='detail'?'Detailed':'Summarized'} · history ${HWIN.find(x=>x[0]===getHWin())[1]}`],
   ['history','History','What was not healthy, and when; which states the bars show','Last 30 days kept'],
   ['servers','Servers','The machines MonitorBox watches, and how it reaches them',`${nServers} server${nServers==1?'':'s'}`],
@@ -1778,7 +1780,7 @@ async function saveWake(remove){const e=sv.wake,x=curServer(),m=$('#wakemsg');
  catch(err){showErr(err,'#wakemsg')}}
 async function demo(n){try{await api('demo',{scenario:n});location.hash=''}catch(e){$('#msg').textContent=e.message}}
 async function checkUpdates(b){b.disabled=true;$('#chk').textContent='Checking…';
- try{const v=await api('check',{});hdrPoll();const n=(v.app&&v.app.needsApply?1:0)+Object.values(v.modules).filter(c=>c.needsApply).length;
+ try{const v=await api('check',{});hdrPoll();const n=(v.app&&v.app.needsApply?1:0)+Object.values(v.modules).filter(modWaiting).length;
   await renderSettings();$('#chk').textContent=v.checkError?v.checkError:(n?n+' update'+(n>1?'s':'')+' available':'Checked just now: everything is up to date')}
  catch(e){$('#chk').textContent=e.message;b.disabled=false}}
 async function checkAllSites(b){b.disabled=true;const ids=((siCfg&&siCfg.sites)||[]).filter(x=>(x.link||{}).state==='linked');$('#chk').textContent='Checking…';
