@@ -278,6 +278,18 @@ class Watch(unittest.TestCase):
         self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 9, 0, 3420, 0, 0)})], ["sw1"], now=43 * 60)
         self.assertEqual(self.w.series[key][-1][2] - q[-2][2], 10, "later real drops still count")
 
+    def test_the_trace_file_says_when_a_ports_history_is_started_and_thrown_away(self):
+        self.w.set_enabled(True)
+        self.run_minutes(3, lambda m: m)
+        self.w.feed([dev("Core switch", **{"Port 5": (0, 0, 0, 0, 0)})], ["sw1"], now=4 * 60)         # a restart: errors fall to 0
+        self.w.feed([dev("Core switch")], ["sw1"], now=5 * 60)
+        path = os.path.join(os.path.dirname(self.w.history_path), "port-trace.log")
+        with open(path) as f:
+            text = f.read()
+        self.assertIn("start sw1|Port 5", text)
+        self.assertIn("reset sw1|Port 5 errors", text)
+        self.assertIn("gone sw1|Port 5", text)
+
     def test_a_bonded_pair_adds_its_ports_and_a_missing_counter_is_not_invented(self):
         self.w.set_enabled(True)
         for m in range(0, 61):
