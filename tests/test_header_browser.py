@@ -230,6 +230,26 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_updates_page_offers_what_changed_for_a_module_too(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 800})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector("#bellbtn")
+            pg.goto(f"http://127.0.0.1:{self.port}/#/settings/updates"); pg.wait_for_selector("[data-sw=app]")
+            pg.evaluate("""()=>{const f=window.fetch;window.fetch=(u,o)=>String(u).endsWith('/api/versions')?f(u,o).then(async r=>{const j=await r.json();
+              j.modules.snmp={running:'0.3.11',pin:'latest',latest:'0.3.12',target:'0.3.12',options:[{version:'0.3.12',channels:['dev']}],failed:[],needsApply:true,pinMissing:false,installed:true,uses:0,repoOn:true,
+              changed:[{version:'0.3.12',changes:['Reads <b>servers</b> over SNMP.']}]};
+              return new Response(JSON.stringify(j))}):f(u,o);window.go2=()=>{route()}}""")
+            pg.evaluate("go2()")
+            pg.wait_for_selector("[data-sw=snmp] details summary")
+            self.assertEqual(pg.inner_text("[data-sw=snmp] details summary"), "What changed")
+            pg.click("[data-sw=snmp] details summary")
+            t = pg.inner_text("[data-sw=snmp] details")
+            self.assertIn("0.3.12", t); self.assertIn("Reads <b>servers</b> over SNMP.", t, "shown as text, never as markup")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_a_big_jump_shows_the_highlights_first_and_everything_on_request(self):
         c = self.start(); self.configure(c, [], [])
         with sync_playwright() as p:

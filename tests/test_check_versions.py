@@ -47,6 +47,10 @@ class CheckVersions(unittest.TestCase):
         self.assertEqual(len(p), 1)
         self.assertIn("snmp", p[0])
 
+    def test_a_modules_changelog_alone_needs_no_new_version(self):
+        write(self.r, "modules/snmp/CHANGELOG.md", "- **0.1.0** What it does.\n"); self.commit()
+        self.assertEqual(check_versions.check("main", self.r), [])
+
     def test_module_changed_with_bump_passes(self):
         write(self.r, "modules/snmp/main.py", "a = 2\n")
         write(self.r, "modules/snmp/manifest.json", json.dumps({"id": "snmp", "version": "0.1.1"})); self.commit()
