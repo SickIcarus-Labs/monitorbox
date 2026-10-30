@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+## 1.7.22 to 1.8.4 (stable, October 30)
+
 - **1.8.4** (#329) The log now names a port the way you know it ("Bonus Room, Port 7") when the port watch starts, resets, forgets or drops its readings, instead of an internal key with the end of a hardware address.
 - **1.8.3** (#329) The Logs page's first filter, "All", now includes debug lines whenever debug logging is on (it used to hide them until you chose "Include debug"). With debug off it is the normal log, as before. The last choice reads "All, with older debug lines" for debug lines written earlier.
 - **1.8.2** (with SNMP 0.3.11, #330) Fixed a device with many checks flipping most of them to Unknown every round. On Goliath (about 40 checks) the SNMP module let only four calls run at once and turned the rest away at once as "that device is still busy", so about 20 checks went Unknown together and came back 15 seconds later, again and again (the new Logs page made it plain). Each device now has its own four workers and checks wait their turn; a call is turned away as busy only after waiting 10 seconds. A device that really stops answering still cannot hold up the others. The four-at-a-time limit came from #327.
