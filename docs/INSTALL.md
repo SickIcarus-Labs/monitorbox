@@ -16,7 +16,7 @@ You need a machine that runs Docker (a Raspberry Pi 5 is what MonitorBox is buil
 
 None of this is required, but a few minutes of preparation makes the first run much smoother. MonitorBox walks you through connecting each thing and finds what it can on its own.
 
-- **SNMP:** turn it on, in advance, on the systems you want to watch (servers, switches, NAS). MonitorBox then finds their disks, interfaces and temperatures by itself.
+- **SNMP:** turn it on, in advance, on the systems you want to watch (servers, switches, NAS). MonitorBox then finds their disks and network interfaces by itself (and, on a QNAP, its disk temperatures).
 - **Portainer:** install it even if you do not use it to manage your containers. It is how MonitorBox sees your container stack. Once you are logged into Portainer:
   1. Open **My account, Access tokens, Add access token** and copy the token. Portainer shows it only once.
   2. Later, in MonitorBox (during first-run setup, or Settings, Servers), open the server that runs Portainer, choose **Portainer**, and paste the token into **Access token**. The port is 9443 unless you chose another; tick "Portainer uses plain http" only if you use port 9000.

@@ -1,8 +1,8 @@
 """Wake on LAN module. Sends magic packets; the App confirms the machine came up by checking it.
 
-  wake  {"macs": ["aa:bb:cc:dd:ee:ff", ...], "broadcast": "192.168.77.255", "port": 9}  ->  {"sent": N}
+  wake  {"macs": ["aa:bb:cc:dd:ee:ff", ...], "broadcast": "192.0.2.255", "port": 9}  ->  {"sent": N}
 
-MAC addresses are plain per-system settings (edited in the App, never baked into a backup file).
+MAC addresses are plain per-system settings (edited in the App; they live in monitorbox.json, so a settings backup carries them).
 A packet is sent for every MAC, so a machine with two network cards can be listed with both."""
 import json, os, re, socket, sys
 

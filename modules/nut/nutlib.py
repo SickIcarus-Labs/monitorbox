@@ -77,7 +77,9 @@ class Client:
                         break
                     if (terminator and terminator in text) or (not terminator and text.endswith("\n")):
                         break
-        except (OSError, socket.timeout) as e:
+        except socket.timeout:
+            raise NutError(f"the NUT server at {self.host}:{self.port} did not answer in time")
+        except OSError as e:
             raise NutError(f"cannot reach the NUT server at {self.host}:{self.port} ({e})")
         lines = buf.decode("utf-8", "replace").splitlines()
         while self.username and lines and lines[0] == "OK":        # the answers to USERNAME and PASSWORD

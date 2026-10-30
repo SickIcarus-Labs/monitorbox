@@ -264,10 +264,11 @@ def validate_wake(w):
     out = {"macs": norm}
     if "broadcast" in w:
         try:
-            ipaddress.ip_address(w["broadcast"])
+            if ipaddress.ip_address(w["broadcast"]).version != 4:
+                raise ValueError("the wake packet is sent over IPv4")
             out["broadcast"] = w["broadcast"]
         except ValueError:
-            errs.append("broadcast must be an IP address such as 192.168.77.255")
+            errs.append("broadcast must be an IPv4 address such as 192.0.2.255")
     if "port" in w:
         if isinstance(w["port"], int) and not isinstance(w["port"], bool) and 1 <= w["port"] <= 65535:
             out["port"] = w["port"]

@@ -67,7 +67,8 @@ class Client:
             raise ProtectError(self.login_failed[1])
         cookies = [c.split(";", 1)[0] for c in headers.get_all("Set-Cookie") or []]
         if not cookies:
-            raise ProtectError("the console accepted the login but sent no session")
+            self.login_failed = (time.time(), "cannot log in to UniFi Protect: the console accepted the login but sent no session")      # backed off like any other failed login
+            raise ProtectError(self.login_failed[1])
         self.cookie, self.login_failed = "; ".join(cookies), None
 
     def _get(self, path, limit=None):

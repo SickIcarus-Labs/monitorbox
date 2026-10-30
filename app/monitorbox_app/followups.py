@@ -282,7 +282,7 @@ def protect_from(source, existing_ids):
     while cid in existing_ids:
         cid, k = f"{base[:36]}-{k}", k + 1
     new = {"id": cid, "module": "unifi-protect"}
-    for key in ("base_url", "host", "port", "username", "password", "verify_tls", "timeout"):
+    for key in ("base_url", "host", "username", "password", "verify_tls", "timeout"):      # not "port": the Network console's port is not Protect's, and the Protect client ignores it
         if key in source:
             new[key] = source[key]
     return new
