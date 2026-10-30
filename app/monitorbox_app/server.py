@@ -675,6 +675,7 @@ class App:
                          "repoGone": rid not in names,
                          "alsoIn": [o for o in offered.get(mid, []) if o != rid and not self.same_builds(rid, o) and (not sha or any(
                              e.get("sha256") == sha for e in ((infos.get(o) or {}).get("catalog") or {}).get("modules", {}).get(mid, [])))]})
+            comp["changed"] = versions.whats_changed(cat.get("modules", {}).get(mid, []), (st.get(mid) or {}).get("active"), comp.get("target"))
             out["modules"][mid] = comp
         return out
 

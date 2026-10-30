@@ -8,7 +8,7 @@ pull request instead. Standard library only; needs the base branch fetched.
 Usage: tools/check_versions.py [BASE_REF]   (default origin/main). Exit 1 and one GitHub annotation per problem when a version is missing."""
 import json, os, subprocess, sys
 
-IGNORED = ("__pycache__/", ".pyc", "/tests/", "node_modules/")
+IGNORED = ("__pycache__/", ".pyc", "/tests/", "node_modules/", "/CHANGELOG.md")      # a changelog is notes, not code: it never needs a new version
 
 
 def git(*args, cwd):

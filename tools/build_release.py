@@ -19,11 +19,11 @@ SKIP = {"__pycache__"}
 HIGHLIGHT = re.compile(r"^\[highlight:\s*(.+?)\s*\]\s*")
 
 
-def parse_changes(root, version):
+def parse_changes(root, version, changelog=None):
     """(lines, highlights) for one app version. A line the author wants in the short version of a long update starts, after the ticket number, with
     [highlight: the short sentence]; the tag is taken off the full line and the short sentence goes into highlights."""
     out, marks = [], []
-    for ln in changes_for(root, version, raw=True):
+    for ln in changes_for(root, version, raw=True, changelog=changelog):
         m = HIGHLIGHT.match(ln)
         if m:
             marks.append(m.group(1))
@@ -32,11 +32,11 @@ def parse_changes(root, version):
     return out, marks
 
 
-def changes_for(root, version, raw=False):
+def changes_for(root, version, raw=False, changelog=None):
     """The plain-words lines CHANGELOG.md has for one app version ("- **1.6.33** (#313) Text ..."), without the version and the ticket number.
     They go into the catalog entry, so the box can show "What changed" for an update it has not installed yet."""
     try:
-        with open(os.path.join(root, "CHANGELOG.md")) as f:
+        with open(changelog or os.path.join(root, "CHANGELOG.md")) as f:
             lines = f.read().splitlines()
     except OSError:
         return []
@@ -57,6 +57,18 @@ def backfill_highlights(entries, root):
                 e["highlights"] = marks
 
 
+def backfill_changes(entries, root, changelog):
+    """Notes only, never the archive: a module's catalog entry published before its CHANGELOG.md had a line for that version gets the line on the next build.
+    An entry that already carries notes is left as it was published."""
+    for e in entries:
+        if not e.get("changes"):
+            lines, marks = parse_changes(root, e["version"], changelog)
+            if lines:
+                e["changes"] = lines
+            if marks and not e.get("highlights"):
+                e["highlights"] = marks
+
+
 def make_tgz(src_dir, arc_prefix=""):
     buf = io.BytesIO()
     with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as gz:
@@ -64,7 +76,7 @@ def make_tgz(src_dir, arc_prefix=""):
             for base, dirs, files in os.walk(src_dir):
                 dirs[:] = sorted(d for d in dirs if d not in SKIP)
                 for name in sorted(files):
-                    if name.endswith(".pyc"):
+                    if name.endswith(".pyc") or name == "CHANGELOG.md":      # a module's notes travel in the catalog, not in its archive (so a note never needs a new version)
                         continue
                     full = os.path.join(base, name)
                     rel = os.path.join(arc_prefix, os.path.relpath(full, src_dir))
@@ -157,9 +169,11 @@ def main(argv=None):
             sys.exit(f"modules/{mid}/manifest.json has id {man['id']!r}")
         with with_node_packages(os.path.join(moddir, mid), a.skip_node_packages) as src:
             data = make_tgz(src)
-        publish(cat.setdefault("modules", {}).setdefault(mid, []),
-                lambda v, mid=mid: ptr["modules"].__setitem__(mid, v),
-                f"module-{mid}", man["version"], data)
+        mlog = os.path.join(moddir, mid, "CHANGELOG.md")
+        mentries = cat.setdefault("modules", {}).setdefault(mid, [])
+        publish(mentries, lambda v, mid=mid: ptr["modules"].__setitem__(mid, v),
+                f"module-{mid}", man["version"], data, *parse_changes(a.root, man["version"], mlog))
+        backfill_changes(mentries, a.root, mlog)
 
     # Launcher: the image version this release was built for. A box whose own launcher is older tells its owner to re-pull the image.
     with open(os.path.join(a.root, "launcher", "monitorbox_launcher", "VERSION")) as f:
