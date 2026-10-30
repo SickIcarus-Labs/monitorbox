@@ -21,7 +21,7 @@ from .store import read_json, write_json
 
 STALE_OTHERS = 1800      # seconds: an interface the map does not show, with no new reading for this long, is dropped
 KEEP = 24 * 3600          # seconds of readings kept per port (a day, so the last busy spell is still remembered)
-EVERY = 30                # at most one kept reading per port per this many seconds
+EVERY = 60                # at most one kept reading per port per this many seconds (a day of them is about 1,400 per port)
 RECENT = 900              # the window that is compared with the port's earlier pace (15 minutes)
 MIN_HISTORY = 1800        # readings of a port needed before it can be called rising (30 minutes)
 RISE = 5                  # the recent pace must be at least this many times the earlier pace
@@ -135,6 +135,7 @@ class PortWatch:
         self.members = {}         # key -> the bond or team a network card belongs to ("bond0"): said in the alert
         self.used_at = {}         # key -> when the map last showed this port: a port that was in use in the last day keeps its history while its device sleeps (link down), the rest of the clean-up is for interfaces that never were ports
         self.speeds = {}          # key -> link speed in Mbit/s, from the map, so the minimums scale with the port
+        self.slot = {}            # key -> when the current kept reading started (rounds come every 10 s; a reading is kept every EVERY seconds)
         self.raw = {}             # key -> the last raw [rx errors, tx errors, rx drops, tx drops] read
         self.off = {}             # key -> what has been added to each of those so far to undo wraps: some drivers report a 16-bit counter, which starts again after 65,535
         self.switch_like = set()  # SNMP device ids that look like a switch (they learn addresses or hear neighbours) but were not matched to a UniFi device while UniFi has devices: said on the page, with why
@@ -286,10 +287,11 @@ class PortWatch:
                         row = [now, raw[0] + raw[1], raw[2] + raw[3], fl or 0, raw[0], raw[1], raw[2], raw[3]]
                         self._trace(now, f"reset {k} {kind} to={row[1:]} was={list(q[-1])[1:]}")
                         q.clear()                                 # a counter went backwards: the device restarted, so start again from here
-                    if not q or now - q[-1][0] >= EVERY:
+                    if not q or now - self.slot.get(k, q[-1][0]) >= EVERY:
                         q.append(row)
+                        self.slot[k] = now
                     else:
-                        q[-1] = row                               # same slot, newer figures
+                        q[-1] = row                               # same slot, newer figures (the slot keeps its start: otherwise a round every 10 s would never reach the next slot)
                     while q and q[0][0] < now - KEEP:
                         q.popleft()
             here = {i for _, i in zip(devices, ids)}                    # the devices that answered this round
@@ -298,7 +300,7 @@ class PortWatch:
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
-                self.raw.pop(k, None); self.off.pop(k, None)
+                self.raw.pop(k, None); self.off.pop(k, None); self.slot.pop(k, None)
                 self._trace(now, f"gone {k} (not read this round)")
             if self.shown:                                              # readings of interfaces the map does not show and nothing has fed for a while: forgotten
                 for k in [k for k in self.series if k not in self.shown and k not in seen and k.rsplit("|", 1)[0] not in hold and not self._was_in_use(k, now)
@@ -306,7 +308,7 @@ class PortWatch:
                     del self.series[k]
                     self.labels.pop(k, None)
                     self.links.pop(k, None)
-                    self.raw.pop(k, None); self.off.pop(k, None)
+                    self.raw.pop(k, None); self.off.pop(k, None); self.slot.pop(k, None)
                     self._trace(now, f"stale {k} (not on the map, no reading for a while)")
             if seen:
                 self.fed = True
