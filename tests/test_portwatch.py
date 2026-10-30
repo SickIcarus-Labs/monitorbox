@@ -287,9 +287,10 @@ class Watch(unittest.TestCase):
         self.w.feed([dev("Core switch", **{"Port 5": (0, 0, 0, 0, 0)})], ["sw1"], now=4 * 60)         # a restart: errors fall to 0
         self.w.feed([dev("Core switch")], ["sw1"], now=5 * 60)
         text = "\n".join(r["text"] for r in log.entries(source="portwatch"))
-        self.assertIn("start sw1|Port 5", text)
-        self.assertIn("reset sw1|Port 5 errors", text)
-        self.assertIn("gone sw1|Port 5", text)
+        self.assertNotIn("sw1|", text, "the log names a port the way the owner knows it, not by its internal key")
+        self.assertIn("start Core switch, Port 5", text)
+        self.assertIn("reset Core switch, Port 5 errors", text)
+        self.assertIn("gone Core switch, Port 5", text)
 
     def test_rounds_every_ten_seconds_still_keep_a_reading_every_minute(self):
         """Regression (two ports stuck at 0 minutes of readings): the newest reading was stored with the time of the latest round, so a round every 10 seconds never
