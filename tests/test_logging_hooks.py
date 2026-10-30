@@ -81,3 +81,26 @@ class Hooks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CallLines(unittest.TestCase):
+    def test_a_debug_call_line_names_the_device_but_never_its_address_or_login(self):
+        from monitorbox_app import modules
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        log = applog.setup(os.path.join(d.name, "logs"), "9.9.9", "dev"); self.addCleanup(lambda: setattr(applog, "_log", None))
+        log.set_debug(True)
+        import threading
+
+        class M(modules.Modules):
+            def __init__(self):
+                self.running, self.cards = {}, {}
+                self.lock = threading.Lock(); self.on_need = None
+                self.running["snmp"] = type("P", (), {"alive": lambda s: True, "call": lambda s, *a, **k: {}})()
+            def state(self): return {"snmp": {"active": "1"}}
+        m = M()
+        m.call("snmp", "counters", {"connection": {"name": "Goliath", "host": "10.9.8.7", "community": "fake-secret-1"}})
+        m.call("snmp", "discover", {"nothing": 1})
+        text = "\n".join(r["text"] for r in log.entries(source="modules", level="debug"))
+        self.assertIn("call snmp.counters for Goliath took", text)
+        self.assertIn("call snmp.discover took", text, "a call without a device is unchanged")
+        self.assertNotIn("10.9.8.7", text); self.assertNotIn("fake-secret-1", text)

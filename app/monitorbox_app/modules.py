@@ -301,11 +301,12 @@ class Modules:
             raise
         finally:
             ms = (time.monotonic() - t0) * 1000
-            applog.debug("modules", f"call {mid}.{method} took {ms:.0f} ms")
+            c = (params or {}).get("connection") if isinstance(params, dict) else None
+            who = f" for {c.get('name') or c.get('id')}" if isinstance(c, dict) and (c.get("name") or c.get("id")) else ""      # the device's name only: never its address or credentials
+            applog.debug("modules", f"call {mid}.{method}{who} took {ms:.0f} ms")
             perfstats.record("module", f"{mid}.{method}", ms)
             if ms >= perfstats.SLOW_MS:
-                c = (params or {}).get("connection") if isinstance(params, dict) else None
-                perfstats.slow(f"{mid}.{method}" + (f" for {c.get('name') or c.get('id')}" if isinstance(c, dict) else ""), ms)
+                perfstats.slow(f"{mid}.{method}{who}", ms)
 
     def _ensure(self, mid):
         """Install a module that something now needs (a connection to a device of its kind). `on_need` is set by the App; it says
