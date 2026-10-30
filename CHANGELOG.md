@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.2** (#329) The Logs page's first filter no longer offers two choices that mean the same. While debug logging is on, "All" already includes debug lines, so the other choice is now "All except debug" (the old "All, with older debug lines" shows only while debug is off).
 - **1.9.1** (#315) The log now records the raw numbers whenever a port's packet-drops counter falls by itself (what it read before, what it reads now, and what MonitorBox carried on from). This was missing, so a strange drops figure could not be traced.
 - **1.9.0** (with SNMP 0.3.12, UniFi Network 0.2.25, #315) Packet drops no longer raise the Port errors item when they are noise. A server's network card (Arrrrr3's eno3 discards about 650 frames a second the system has no use for) no longer counts its receive drops: a card that really loses frames shows receive errors, which are still counted, and its transmit drops still count. Everywhere else, drops count only when they are at least 0.1% of the packets in the same 15 minutes, when the device reports packet counts (SNMP and UniFi now read them); the line says the share. A device with no packet counts keeps the old rule. The port history now also keeps packet counts (a few more bytes per reading).
 
