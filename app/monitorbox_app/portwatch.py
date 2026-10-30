@@ -269,7 +269,7 @@ class PortWatch:
                     row = [now, a[0] + a[1], a[2] + a[3], fl or 0, a[0], a[1], a[2], a[3]]
                     q = self.series.setdefault(k, deque())
                     if not q:
-                        self._trace(now, f"start {k} row={row[1:]} raw={raw} off={off}")
+                        self._trace(now, f"start {self._nm(k)} row={row[1:]} raw={raw} off={off}")
                     if q and row[2] < q[-1][2] and row[1] >= q[-1][1] and row[3] >= q[-1][3]:
                         # only the drop counter fell (some NIC drivers shrink it by themselves): carry on from where it was, so the errors and link history and the learning survive
                         r = self.resets.setdefault(k, [0, "drops", 0.0, None, None])
@@ -286,7 +286,7 @@ class PortWatch:
                         r[0], r[1], r[2], r[3], r[4] = r[0] + 1, kind, now, q[-1][col], row[col]      # what it read before and what it reads now: shown on the page
                         self.off[k] = [0, 0, 0, 0]
                         row = [now, raw[0] + raw[1], raw[2] + raw[3], fl or 0, raw[0], raw[1], raw[2], raw[3]]
-                        self._trace(now, f"reset {k} {kind} to={row[1:]} was={list(q[-1])[1:]}")
+                        self._trace(now, f"reset {self._nm(k)} {kind} to={row[1:]} was={list(q[-1])[1:]}")
                         q.clear()                                 # a counter went backwards: the device restarted, so start again from here
                     if not q or now - self.slot.get(k, q[-1][0]) >= EVERY:
                         q.append(row)
@@ -298,19 +298,19 @@ class PortWatch:
             here = {i for _, i in zip(devices, ids)}                    # the devices that answered this round
             for k in [k for k in self.series if k not in seen and k.rsplit("|", 1)[0] not in hold and not self._was_in_use(k, now)
                       and (k.rsplit("|", 1)[0] in here or not self.series[k] or self.series[k][-1][0] < now - KEEP)]:   # a port gone from a device that answered, or one not seen for a day
+                self._trace(now, f"gone {self._nm(k)} (not read this round)")
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
                 self.raw.pop(k, None); self.off.pop(k, None); self.slot.pop(k, None)
-                self._trace(now, f"gone {k} (not read this round)")
             if self.shown:                                              # readings of interfaces the map does not show and nothing has fed for a while: forgotten
                 for k in [k for k in self.series if k not in self.shown and k not in seen and k.rsplit("|", 1)[0] not in hold and not self._was_in_use(k, now)
                           and (not self.series[k] or self.series[k][-1][0] < now - STALE_OTHERS)]:
+                    self._trace(now, f"stale {self._nm(k)} (not on the map, no reading for a while)")
                     del self.series[k]
                     self.labels.pop(k, None)
                     self.links.pop(k, None)
                     self.raw.pop(k, None); self.off.pop(k, None); self.slot.pop(k, None)
-                    self._trace(now, f"stale {k} (not on the map, no reading for a while)")
             if seen:
                 self.fed = True
             applog.debug("portwatch", f"round: {len(seen)} ports read, {len(self.series)} kept, {len(hold)} devices held back")
@@ -422,6 +422,10 @@ class PortWatch:
         mine = [k for k in keys if k in self.shown or k in cards]
         return mine or keys           # nothing matched the map (or no map yet): count what is read rather than say there is nothing
 
+    def _nm(self, k):
+        """A port as the owner knows it ("Bonus Room, Port 7"); the internal key only when no name is known."""
+        return self.labels.get(k) or k
+
     def _trace(self, now, what):
         """One line in the App's log whenever a port's history is started, thrown away or forgotten (the reason is the line)."""
         applog.info("portwatch", what)
@@ -444,7 +448,7 @@ class PortWatch:
         with self.lock:
             self.switch_like.discard(dev)
             for k in [k for k in self.series if k.startswith(pre)]:
-                self._trace(self.clock(), f"drop_device {k}")
+                self._trace(self.clock(), f"drop_device {self._nm(k)}")
                 del self.series[k]
                 self.labels.pop(k, None)
                 self.links.pop(k, None)
