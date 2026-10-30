@@ -17,6 +17,7 @@ shows its numbers, but never raises anything: the same rule as everywhere else, 
 import json, os, threading, time
 from collections import deque
 
+from . import applog
 from .store import read_json, write_json
 
 STALE_OTHERS = 1800      # seconds: an interface the map does not show, with no new reading for this long, is dropped
@@ -312,6 +313,7 @@ class PortWatch:
                     self._trace(now, f"stale {k} (not on the map, no reading for a while)")
             if seen:
                 self.fed = True
+            applog.debug("portwatch", f"round: {len(seen)} ports read, {len(self.series)} kept, {len(hold)} devices held back")
         self.save(now)
 
     def _links(self, k):
@@ -421,17 +423,8 @@ class PortWatch:
         return mine or keys           # nothing matched the map (or no map yet): count what is read rather than say there is nothing
 
     def _trace(self, now, what):
-        """One line in port-trace.log for each time a port's history is started, thrown away or forgotten, so a port that never finishes learning can be explained.
-        Names and counters only. The file is cut back when it passes 200 KB."""
-        try:
-            path = os.path.join(os.path.dirname(self.history_path), "port-trace.log")
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            if os.path.exists(path) and os.path.getsize(path) > 200_000:
-                os.remove(path)
-            with open(path, "a") as f:
-                f.write(f"{time.strftime('%H:%M:%S', time.localtime(now))} {what}\n")
-        except OSError:
-            pass
+        """One line in the App's log whenever a port's history is started, thrown away or forgotten (the reason is the line)."""
+        applog.info("portwatch", what)
 
     def only_for(self, dev):
         """The names of this device's ports that are worth reading (the ones the map shows), or None while that is not known: then everything is read."""

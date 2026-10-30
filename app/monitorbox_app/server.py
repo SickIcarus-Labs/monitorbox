@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 
 from .modules import current as modules_current, DEV_ONLY, always
-from . import liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
+from . import applog, liverelay, version, updates, versions, monconfig, demo, engine, sysinfo, backups, probes
 from .history import History
 from . import sitesupdate
 from . import thisbox, followups, graphs, alerts, peer, wanaddr, perfstats, lanmap, portpeers, portwatch, autonotes, lansampler, busiest, security, passkeys
@@ -698,6 +698,7 @@ class App:
                 raise ValueError("The container image is out of date and cannot install a chosen version. "
                                  "Re-pull the image (redeploy the stack with 'Re-pull image') once, then try again.")
             updates.request_launcher_install(self.paths, ent)
+            applog.info("updates", f"Installing MonitorBox {ent['version']} (it restarts).")
             self.exit_code = RESTART_EXIT
             threading.Thread(target=lambda: (time.sleep(0.5), self.httpd.shutdown()), daemon=True).start()
             return {"message": f"Installing App {ent['version']}…", "restarting": True}
@@ -1977,6 +1978,22 @@ class App:
             return p.remove_manager(str(body.get("id", "")))
         return None
 
+    def logs_page(self, q):
+        """What the Logs page shows: the newest lines (newest first) that match, and what it needs around them. `since` is the newest id the page already holds."""
+        log = applog.get()
+        if log is None:
+            return {"entries": [], "sources": [], "debug": {"on": False, "until": 0}, "counts": {"warning": 0, "error": 0}, "version": version()}
+        def one(name, default=""):
+            return (q.get(name) or [default])[0]
+        try:
+            since, limit = int(one("since", "0")), max(1, min(int(one("limit", "300")), 1000))
+        except ValueError:
+            since, limit = 0, 300
+        level = one("level", "info")
+        sources, counts = log.summary()
+        return {"entries": log.entries(since=since, level=level, source=one("source") or None, q=one("q") or None, limit=limit),
+                "sources": sources, "debug": {"on": log.debug_on(), "until": log.debug_until()}, "counts": counts, "version": version()}
+
     def serve(self):
         app = self
 
@@ -2278,6 +2295,18 @@ class App:
                         return self.send(401, {"error": "sign in"})
                     return self.send(200, {"version": version(), "requests": perfstats.summary("request"), "modules": perfstats.summary("module"), "slow": perfstats.slow_calls(),
                                            "processes": sysinfo.processes(app.modules.pids()), "about": sysinfo.about(), "since": int(perfstats.started()), "cpus": os.cpu_count()})
+                if self.path.startswith("/api/logs/download"):
+                    body = (applog.get().download() if applog.get() else "").encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Content-Disposition", f'attachment; filename="monitorbox-log-{time.strftime("%Y%m%d-%H%M")}.txt"')
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if self.path.startswith("/api/logs"):
+                    return self.send(200, app.logs_page(parse_qs(urlparse(self.path).query)))
                 if self.path == "/api/portwatch":
                     if not app.auth.valid(self.token()):
                         return self.send(401, {"error": "sign in"})
@@ -2781,11 +2810,21 @@ class App:
                             return self.send(409, {"error": str(e)})
                         app.reload_monitoring()
                         return self.send(200, {"revision": rev})
+                    if path == "/api/logs/debug":
+                        if not applog.get():
+                            raise ValueError("The log is not running.")
+                        applog.get().set_debug(bool(body.get("on")))
+                        return self.send(200, app.logs_page({}))
                     if path == "/api/backups":
                         lib = backups.lib()
                         if body.get("kind") not in lib.TARGETS:
                             raise ValueError("Choose a config or full backup.")
-                        lib.create(app.paths.root, body["kind"], "manual", app_version=version())
+                        try:
+                            made = lib.create(app.paths.root, body["kind"], "manual", app_version=version())
+                        except Exception as e:
+                            applog.error("backups", f"The {body['kind']} backup you asked for failed: {e}")
+                            raise
+                        applog.info("backups", f"{body['kind'].capitalize()} backup made by hand: {made}.")
                         backups.note_timing()
                         return self.send(200, app.backup_list())
                     if path == "/api/backups/delete":
@@ -2872,6 +2911,7 @@ class App:
                 self.send(404, {"error": "not found"})
 
         self.apply_start_files()
+        applog.setup(self.paths.p("logs"), version(), self.cfg()["channel"]).on_error = lambda source, text: autonotes.add_problem(self.paths, source, text, time.time())
         self.httpd = ThreadingHTTPServer(("0.0.0.0", self.port), H)
         self.sync_site_nodes()
         self.ensure_port_node()

@@ -10,7 +10,7 @@
 
 ## How MonitorBox works
 
-- [The core app](APP.md): what it checks by itself, how modules plug in, states, confirmation, alerts, settings, updates, backups, sites, and where the data lives.
+- [The core app](APP.md): what it checks by itself, how modules plug in, states, confirmation, alerts, settings, updates, backups, sites, logs, and where the data lives.
 - [Capabilities map](CAPABILITIES.md): which modules each feature needs, and what each module adds.
 - [Port errors](PORT-WATCH.md): the rules for the Port errors item.
 - [Architecture](ARCHITECTURE.md): how it is built. The [design log](DESIGN-LOG.md) holds the reasoning behind changes, oldest first; where the two disagree, the architecture page is current.

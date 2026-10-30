@@ -26,6 +26,16 @@ def add(paths, kind, name, frm, to, now):
     store.write_json(_file(paths), notes[-KEEP:])
 
 
+def add_problem(paths, source, text, now):
+    """The App itself failed at its job (a module that will not start, an alert nobody could be sent, a backup that failed): the bell says so, with a link to the log.
+    The same trouble again replaces its own note instead of piling up."""
+    import hashlib
+    nid = "problem:" + source + ":" + hashlib.sha1(text.encode()).hexdigest()[:10]
+    notes = [n for n in _load(paths) if n["id"] != nid]
+    notes.append({"id": nid, "at": int(now), "kind": "problem", "name": source, "text": text[:240], "go": f"#/logs?source={source}&level=error"})
+    store.write_json(_file(paths), notes[-KEEP:])
+
+
 def current(paths, app_version, now):
     """The notes to show, newest first. An App note shows only when the App now runs that version; one that never got there is dropped."""
     notes = _load(paths)
@@ -36,6 +46,8 @@ def current(paths, app_version, now):
 
 
 def text(n):
+    if n.get("kind") == "problem":
+        return str(n.get("text") or "Something went wrong.")
     who = "MonitorBox" if n.get("kind") == "app" else str(n.get("name") or "A module")
     return f"{who} updated itself from {n.get('from') or 'an earlier version'} to {n.get('to')}."
 

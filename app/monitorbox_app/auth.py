@@ -1,4 +1,5 @@
 import hashlib, hmac, os, secrets, threading, time
+from . import applog
 from .store import read_json, write_json
 
 N, R, P = 2 ** 14, 8, 1
@@ -51,6 +52,7 @@ class Auth:
         ok = hmac.compare_digest(_hash(password, bytes.fromhex(rec["salt"])), bytes.fromhex(rec["hash"]))
         if not ok:
             time.sleep(0.5)
+            applog.warning("auth", "A sign-in with the wrong password was refused.")
             return None
         return self.issue()
 
@@ -67,6 +69,7 @@ class Auth:
                 del self.saved[min(self.saved, key=lambda h: self.saved[h]["exp"])]
             self.saved[_th(tok)] = {"exp": now + LIFETIME, "fp": rec["hash"][:16]}
             self._save()
+        applog.info("auth", "A device signed in.")
         return tok
 
     def valid(self, tok):

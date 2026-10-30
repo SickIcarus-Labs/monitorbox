@@ -13,7 +13,7 @@
 import json, os, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import engine, probes
+from . import applog, engine, probes
 from .store import write_json
 
 SLOW_PING_MS = 200.0
@@ -258,8 +258,21 @@ class Monitor:
             since = _iso(now) if changed else prev["since"]
             new = {"ok": ok, "detail": detail, "ms": ms, "at": _iso(now), "since": since, "warn": warn, "notice": notice}
             self.results[key] = new
+            if prev is not None and (prev["ok"] != ok or bool(prev.get("warn")) != warn):
+                self._log_change(key, check, prev, ok, warn, detail)
             if changed or (prev and (prev["detail"] != detail or prev.get("stale"))):
                 self._bump()
+
+    @staticmethod
+    def _word(ok, warn):
+        return "unknown" if ok is None else "failed" if ok is False else "warning" if warn else "healthy"
+
+    def _log_change(self, key, check, prev, ok, warn, detail):
+        """One line when a check really changes state (not a notice, not a first reading). Called with the lock held."""
+        node = next((n for n in self.nodes if key.startswith(f"{n['id']}/")), None)
+        label = " / ".join(x for x in ((node or {}).get("name"), check.get("name") or check.get("label") or check.get("id")) if x) or key
+        was, now = self._word(prev["ok"], prev.get("warn")), self._word(ok, warn)
+        applog.log("info" if now == "healthy" else "warning", "checks", f"{label}: {was} to {now}. {str(detail)[:300]}")
 
     def _set_raw(self, key, ok, detail, ms, warn, notice, now, names=None):
         prev = self.raw.get(key)
