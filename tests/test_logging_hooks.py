@@ -1,5 +1,5 @@
 """Where the log meets the rest of the App: the bell, alerts, checks, backups and the page's data. Every value here is made up and different."""
-import os, sys, tempfile, unittest
+import json, os, sys, tempfile, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 os.environ.setdefault("MB_LAUNCHER_PATH", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "launcher"))
 from monitorbox_app import alerts, applog, autonotes, backups, engine, store  # noqa: E402
@@ -104,3 +104,33 @@ class CallLines(unittest.TestCase):
         self.assertIn("call snmp.counters for Goliath took", text)
         self.assertIn("call snmp.discover took", text, "a call without a device is unchanged")
         self.assertNotIn("10.9.8.7", text); self.assertNotIn("fake-secret-1", text)
+
+
+class StartLines(unittest.TestCase):
+    def test_a_module_start_line_says_which_process_and_who_asked_so_a_double_start_can_be_traced(self):
+        """The log showed unifi-network started twice a second apart at every restart, with its checks flipping to Unknown in between. The line must tell the two starts apart."""
+        from monitorbox_app import modules
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        log = applog.setup(os.path.join(d.name, "logs"), "9.9.9", "dev"); self.addCleanup(lambda: setattr(applog, "_log", None))
+        mdir = os.path.join(d.name, "mod"); os.makedirs(mdir)
+        with open(os.path.join(mdir, "main.py"), "w") as f:
+            f.write("import sys, json\nfor line in sys.stdin:\n    m = json.loads(line)\n    print(json.dumps({'id': m['id'], 'result': {}}), flush=True)\n")
+
+        class M(modules.Modules):
+            def __init__(self):
+                self.running = {}
+            def dir(self, mid, version): return mdir
+        with open(os.path.join(mdir, "manifest.json"), "w") as f:
+            json.dump({"id": "probe", "version": "1.0.0", "entry": [sys.executable, "main.py"]}, f)
+        m = M()
+        try:
+            m._start("probe", "1.0.0")
+            first = m.running["probe"].proc.pid
+            m._start("probe", "1.0.0")
+            second = m.running["probe"].proc.pid
+            lines = [r["text"] for r in log.entries(source="modules")]
+            self.assertTrue(any(f"(pid {first}, by " in t for t in lines), lines)
+            self.assertTrue(any(f"(pid {second}, stopped pid {first}, by " in t for t in lines), "the second start says it stopped the first")
+        finally:
+            for p in m.running.values():
+                p.stop()

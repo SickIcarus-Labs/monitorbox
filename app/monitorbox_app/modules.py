@@ -164,7 +164,11 @@ class Modules:
             old.stop()
         self.__dict__.setdefault("timeouts", {}).pop(mid, None)
         self.__dict__.setdefault("last_err", {}).pop(mid, None)
-        applog.info("modules", f"{mid} {version} started" + (f" (replacing {old.version})" if old and getattr(old, 'version', None) not in (None, version) else "") + ".")
+        pid = getattr(getattr(p, "proc", None), "pid", None)
+        oldpid = getattr(getattr(old, "proc", None), "pid", None) if old else None
+        why = threading.current_thread().name           # who asked for this start: the start-up pool, a check that found it dead, an update
+        applog.info("modules", f"{mid} {version} started" + (f" (replacing {old.version})" if old and getattr(old, 'version', None) not in (None, version) else "")
+                    + f" (pid {pid}" + (f", stopped pid {oldpid}" if oldpid else "") + f", by {why}).")
 
     def _to_start(self, st):
         want = self.wanted()
