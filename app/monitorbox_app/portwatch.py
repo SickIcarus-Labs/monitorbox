@@ -266,6 +266,15 @@ class PortWatch:
                     a = [raw[n] + off[n] for n in range(4)]
                     row = [now, a[0] + a[1], a[2] + a[3], fl or 0, a[0], a[1], a[2], a[3]]
                     q = self.series.setdefault(k, deque())
+                    if q and row[2] < q[-1][2] and row[1] >= q[-1][1] and row[3] >= q[-1][3]:
+                        # only the drop counter fell (some NIC drivers shrink it by themselves): carry on from where it was, so the errors and link history and the learning survive
+                        r = self.resets.setdefault(k, [0, "drops", 0.0, None, None])
+                        r[0], r[1], r[2], r[3], r[4] = r[0] + 1, "drops", now, q[-1][2], row[2]
+                        for n in (2, 3):
+                            if a[n] < q[-1][4 + n]:
+                                off[n] = q[-1][4 + n] - raw[n]
+                        a = [raw[n] + off[n] for n in range(4)]
+                        row = [now, a[0] + a[1], a[2] + a[3], fl or 0, a[0], a[1], a[2], a[3]]
                     if q and any(row[j] < q[-1][j] for j in (1, 2, 3)):
                         col = next(j for j in (1, 2, 3) if row[j] < q[-1][j])
                         kind = KINDS[col - 1]

@@ -262,6 +262,22 @@ class Watch(unittest.TestCase):
         self.assertEqual(st["rising"], [])
         self.assertTrue(st["learning"])
 
+    def test_only_the_drop_counter_going_backwards_keeps_the_errors_history_and_the_learning(self):
+        self.w.set_enabled(True)
+        self.run_minutes(40, lambda m: m * 1000)               # errors keep climbing
+        key = self.w.key("sw1", "Port 5")
+        before = len(self.w.series[key])
+        self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 7, 0, 30000, 0, 0)})], ["sw1"], now=41 * 60)
+        self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 9, 0, 3410, 0, 0)})], ["sw1"], now=42 * 60)   # the driver shrank the drops by itself
+        q = self.w.series[key]
+        self.assertEqual(len(q), before + 2, "nothing was thrown away")
+        self.assertEqual(q[-1][2], q[-2][2], "the drops carry on from where they were, none are invented")
+        self.assertEqual(q[-1][1], 40 * 1000 + 9, "errors are untouched")
+        self.assertFalse(self.w.state([key])["learning"])
+        self.assertEqual(self.w.resets[key][:2], [1, "drops"], "it is still counted and shown")
+        self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 9, 0, 3420, 0, 0)})], ["sw1"], now=43 * 60)
+        self.assertEqual(self.w.series[key][-1][2] - q[-2][2], 10, "later real drops still count")
+
     def test_a_bonded_pair_adds_its_ports_and_a_missing_counter_is_not_invented(self):
         self.w.set_enabled(True)
         for m in range(0, 61):
@@ -904,7 +920,7 @@ class CountedSplit(unittest.TestCase):
         row = w.page()["watched"][0]
         self.assertEqual((row["resets"], row["resetKind"]), (1, "packet drops"))
         self.assertEqual((row["resetFrom"], row["resetTo"]), (20, 5), "the page says how far the counter fell")
-        self.assertEqual(row["minutes"], 1, "its history started again at the reset")
+        self.assertEqual(row["minutes"], 3, "only the drops fell, so the port keeps its history (it used to start again)")
 
 
 class BySpeed(unittest.TestCase):
@@ -1027,7 +1043,8 @@ class WrappingCounters(unittest.TestCase):
 
     def test_a_fall_from_anywhere_else_is_still_a_reset(self):
         w, _ = self.make()
-        self.feed(w, [1000, 2000, 30000, 500, 900])                         # not near 65,536: the device restarted
+        for m, (e, v) in enumerate([(10, 1000), (20, 2000), (30, 30000), (0, 500), (1, 900)]):   # not near 65,536, and the errors fell too: the device restarted
+            w.feed([dev("Core", **{"Port 1": (e, 0, v, 0, 0)})], ["sw1"], now=m * 30)
         self.assertEqual(w.resets["sw1|Port 1"][0], 1)
         self.assertEqual(len(w.series["sw1|Port 1"]), 2, "history started again at the reset")
 
