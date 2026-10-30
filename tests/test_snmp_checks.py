@@ -97,6 +97,17 @@ class Counters(unittest.TestCase):
         self.assertEqual({k: got["port1"][k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, {"rxErr": 31, "txErr": 42, "rxDrop": 53, "txDrop": 64}, "each counter keeps its own value")
         self.assertEqual({k: got["port2"][k] for k in got["port2"] if k.endswith(("Err", "Drop"))}, {"rxErr": 7}, "only what the device answered")
 
+    def test_packet_counts_come_along_as_the_sum_of_unicast_multicast_and_broadcast_each_with_its_own_value(self):
+        X = "1.3.6.1.2.1.31.1.1.1"
+        agent = F.Agent(community="fake-community"); self.addCleanup(agent.close)
+        agent.mib = {f"{X}.1.1": "port1", f"{X}.6.1": ("c64", 111), f"{X}.10.1": ("c64", 222),
+                     f"{X}.7.1": ("c64", 1001), f"{X}.8.1": ("c64", 2002), f"{X}.9.1": ("c64", 3004),      # received: unicast, multicast, broadcast
+                     f"{X}.11.1": ("c64", 4008), f"{X}.12.1": ("c64", 5016), f"{X}.13.1": ("c64", 6032),    # sent
+                     f"{X}.1.2": "port2", f"{X}.6.2": ("c64", 333), f"{X}.10.2": ("c64", 444), f"{X}.7.2": ("c64", 9), f"{X}.8.2": ("c64", 8)}  # port2 answers only some
+        got = C.counters(conn(agent, "cnt4"))["ports"]
+        self.assertEqual((got["port1"]["rxPkts"], got["port1"]["txPkts"]), (1001 + 2002 + 3004, 4008 + 5016 + 6032))
+        self.assertNotIn("rxPkts", got["port2"], "a device that gives only some of the six counters gives no total: a wrong share is worse than none")
+
 
 class CountersQuick(unittest.TestCase):
     """#299: after the first reading the counters ask for the real interfaces by index instead of walking every table again."""

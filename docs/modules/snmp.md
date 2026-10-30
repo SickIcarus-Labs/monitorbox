@@ -36,6 +36,7 @@ Objects read (all standard, numeric, no MIB files needed):
 | State, speed, type, address, last change | ifOperStatus `...2.2.1.8`, ifHighSpeed `...31.1.1.1.15`, ifType `...2.2.1.3`, ifPhysAddress `...2.2.1.6`, ifLastChange `...2.2.1.9` |
 | Traffic (64-bit, else 32-bit) | ifHCInOctets `...31.1.1.1.6`, ifHCOutOctets `...31.1.1.1.10`, ifInOctets `...2.2.1.10`, ifOutOctets `...2.2.1.16` |
 | Errors and discards | `...2.2.1.14`, `...2.2.1.20`, `...2.2.1.13`, `...2.2.1.19` |
+| Packets (for the Port errors drop share), 64-bit: received unicast, multicast, broadcast; sent unicast, multicast, broadcast | `...31.1.1.1.7`, `.8`, `.9`; `.11`, `.12`, `.13` |
 | Which interface sits on which (bonds, VLANs) | ifStackStatus `1.3.6.1.2.1.31.1.2.1.3` |
 | Volumes | hrStorage `1.3.6.1.2.1.25.2.3.1` (type, description, units, size, used); only "fixed disk" entries are offered |
 | CPU and memory | net-snmp UCD `1.3.6.1.4.1.2021.11.11.0` (CPU idle), `...4.5.0`, `...4.6.0`, `...4.14.0`, `...4.15.0` (memory) |

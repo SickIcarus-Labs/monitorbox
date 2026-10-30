@@ -308,7 +308,7 @@ def wan_ports(devices):
 
 # ---------------------------------------------------------------- LAN report (read-only look at what the controller says about each device and port) ----
 PORT_FIELDS = ("port_idx", "name", "up", "enable", "speed", "full_duplex", "is_uplink", "media", "op_mode", "aggregated_by", "network_name",
-               "poe_enable", "poe_good", "poe_power", "rx_errors", "tx_errors", "rx_dropped", "tx_dropped", "stp_state", "stp_role",
+               "poe_enable", "poe_good", "poe_power", "rx_errors", "tx_errors", "rx_dropped", "tx_dropped", "rx_packets", "tx_packets", "stp_state", "stp_role",
                "mac_table_count", "link_down_count")
 
 

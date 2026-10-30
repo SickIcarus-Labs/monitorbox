@@ -51,6 +51,50 @@ class Judge(unittest.TestCase):
         louder = vals[:21] + [(vals[20][0] + 1500 * k, 0, 0) for k in range(1, 4)]      # five times the worst before: that is news
         self.assertEqual(portwatch.judge(self.series(5, louder))["rising"], ["errors"])
 
+    def with_packets(self, rx_drops_per_5min, rx_packets_per_5min, tx_drops_per_5min=0, tx_packets_per_5min=1000):
+        """Ten readings 5 minutes apart with nothing, then three with the given drops and packets per 5 minutes; rows carry the packet counts
+        [t, errors, drops, flaps, rxErr, txErr, rxDrop, txDrop, rxPackets, txPackets]."""
+        rows, rd, td, rp, tp = [], 0, 0, 0, 0
+        for i in range(13):
+            late = i >= 10
+            rd += rx_drops_per_5min if late else 0
+            td += tx_drops_per_5min if late else 0
+            rp += rx_packets_per_5min
+            tp += tx_packets_per_5min
+            rows.append([i * 300, 0, rd + td, 0, 0, 0, rd, td, rp, tp])
+        return rows
+
+    def test_a_flood_of_drops_that_is_a_sliver_of_the_traffic_is_not_a_problem(self):
+        q = self.with_packets(200_000, 500_000_000)                         # 0.04% of the packets
+        j = portwatch.judge(q)
+        self.assertEqual(j["rising"], [])
+        self.assertLess(j["share"], portwatch.DROP_SHARE)
+
+    def test_the_same_drops_that_are_a_real_share_of_the_traffic_are_rising_and_say_so(self):
+        q = self.with_packets(200_000, 50_000_000)                          # 0.4% of the packets
+        j = portwatch.judge(q)
+        self.assertEqual(j["rising"], ["drops"])
+        self.assertAlmostEqual(j["share"], 200_000 / 50_200_000, places=6)
+
+    def test_without_packet_counts_the_old_rule_still_applies(self):
+        q = self.series(5, [(0, 0, 0)] * 10 + [(0, 200_000, 0), (0, 400_000, 0), (0, 600_000, 0)])
+        j = portwatch.judge(q)
+        self.assertEqual(j["rising"], ["drops"])
+        self.assertIsNone(j["share"])
+
+    def test_a_server_card_judges_only_its_transmit_drops(self):
+        rx_only = self.with_packets(200_000, 50_000_000)
+        self.assertEqual(portwatch.judge(rx_only, server=True)["rising"], [], "receive drops on a server card are discarded frames")
+        tx = self.with_packets(0, 50_000_000, tx_drops_per_5min=200_000, tx_packets_per_5min=50_000_000)
+        j = portwatch.judge(tx, server=True)
+        self.assertEqual(j["rising"], ["drops"])
+        self.assertAlmostEqual(j["share"], 200_000 / 50_200_000, places=6)
+
+    def test_a_packet_counter_that_went_backwards_is_not_a_share(self):
+        q = self.with_packets(200_000, 50_000_000)
+        q[-1][8] = 5                                                        # the device restarted its packet counter
+        self.assertIsNone(portwatch.drop_share(q[-1], q[-4]))
+
     def test_link_drops_count_only_on_uplinks_and_servers(self):
         q = self.series(5, [(0, 0, 0)] * 10 + [(0, 0, 1), (0, 0, 3), (0, 0, 6)])
         self.assertEqual(portwatch.judge(q, flaps=True)["rising"], ["flaps"])
@@ -977,7 +1021,7 @@ class SnmpOnly(unittest.TestCase):
         self.minutes = lambda: (self.t[0] - 1000.0) / 60
         self.calls = []
 
-    def sampler(self, conns, unifi=None):
+    def sampler(self, conns, unifi=None, side="rx", pkts_per_minute=None):
         from monitorbox_app import lansampler, portpeers
         report = {
             "swa": {"sysName": "swa-box", "ports": [{"name": "Gi1/0/1", "lldp": {"name": "swb-box"}, "learned": 4}, {"name": "Gi1/0/2", "learned": 1}, {"name": "Gi1/0/3"}]},
@@ -995,7 +1039,8 @@ class SnmpOnly(unittest.TestCase):
                 return report[cid]
             names = [p["name"] for p in report[cid]["ports"]]
             return {"sysName": report[cid]["sysName"], "ports": {n: {"in": 1, "out": 1, "bits": 64, "up": True, "speedMbps": 1000, "rxErr": 0, "txErr": 0,
-                                                                  "rxDrop": rising(7), "txDrop": 3} for n in names}}
+                                                                  "rxDrop": rising(7) if side == "rx" else 7, "txDrop": rising(3) if side == "tx" else 3,
+                                                                  **({"rxPkts": int(self.minutes() * pkts_per_minute) + 10, "txPkts": int(self.minutes() * pkts_per_minute) + 20} if pkts_per_minute else {})} for n in names}}
         return lansampler.LanSampler(portpeers.PortSeries(clock=lambda: self.t[0]), lambda: conns, call, clock=lambda: self.t[0], watch=self.w)
 
     def run_for(self, sm, minutes):
@@ -1011,9 +1056,27 @@ class SnmpOnly(unittest.TestCase):
         self.assertEqual(kinds, {"Switch A, Gi1/0/1": ["drops"], "Switch B, Gi1/0/1": ["drops"]}, "the links alert; the client ports on the same switches do not")
         self.assertEqual(self.w.card_speeds["snmp:swa|Gi1/0/1"], 1000, "the speed comes from the device itself")
 
-    def test_a_device_that_is_not_a_switch_is_a_server_and_every_card_counts(self):
-        self.run_for(self.sampler([{"id": "nas", "name": "NAS", "module": "snmp", "host": "192.0.2.43"}]), 61)
+    def test_a_device_that_is_not_a_switch_is_a_server_and_every_card_counts_but_only_its_transmit_drops(self):
+        self.run_for(self.sampler([{"id": "nas", "name": "NAS", "module": "snmp", "host": "192.0.2.43"}], side="tx"), 61)
         self.assertEqual({f["label"]: f["kinds"] for f in self.w.findings()}, {"NAS, eth0": ["drops"]})
+
+    def test_through_the_sampler_transmit_drops_that_are_a_sliver_of_the_packets_stay_quiet_and_a_real_share_alerts_and_says_so(self):
+        quiet = self.sampler([{"id": "nas", "name": "NAS", "module": "snmp", "host": "192.0.2.43"}], side="tx", pkts_per_minute=500_000_000)
+        self.run_for(quiet, 61)
+        self.assertEqual(self.w.findings(), [], "20,000 drops a minute among 500 million packets is not a problem")
+        self.setUp()
+        busy = self.sampler([{"id": "nas", "name": "NAS", "module": "snmp", "host": "192.0.2.43"}], side="tx", pkts_per_minute=200_000)
+        self.run_for(busy, 61)
+        found = self.w.findings()
+        self.assertEqual([(f["label"], f["kinds"]) for f in found], [("NAS, eth0", ["drops"])])
+        self.assertGreater(found[0]["share"], 0.05)
+        self.assertIn("% of packets", self.w.check()[1])
+
+    def test_a_server_cards_receive_drops_are_discarded_frames_not_loss_and_do_not_alert(self):
+        # #315: Arrrrr3's eno3 discards about 650 frames a second the kernel has no use for; real loss would show as receive errors
+        self.run_for(self.sampler([{"id": "nas", "name": "NAS", "module": "snmp", "host": "192.0.2.43"}], side="rx"), 61)
+        self.assertEqual(self.w.findings(), [])
+        self.assertTrue(self.w.series["snmp:nas|eth0"], "still read and kept")
 
     def test_the_roles_are_read_once_and_then_only_every_ten_minutes(self):
         sm = self.sampler([{"id": "swa", "name": "Switch A", "module": "snmp", "host": "192.0.2.41"}])

@@ -133,7 +133,8 @@ class LanSampler:
             if ports:
                 self.series.feed_counters(dev, ports, now)
                 covered.add(dev)
-                snmp_bad[dev] = {lab: {"rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"]}
+                snmp_bad[dev] = {lab: {"rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"],
+                                       "rx_packets": v.get("rxPkts"), "tx_packets": v.get("txPkts")}          # always set, so a device never mixes SNMP drops with the controller's packet counts
                                  for lab, v in ports.items() if all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop"))}
         for d, i in zip(devices, ids):
             if i in covered or d.get("type") not in ("usw", "udm", "ugw", "uxg"):
@@ -188,6 +189,7 @@ class LanSampler:
                 self.watch.set_why(sid, self.explain(c))
             role = self._role(c, sid)
             if self.watch is not None:
+                self.watch.set_is_switch(sid, bool(role.get("switch")))
                 self.watch.set_switch_like(sid, bool(role.get("switch")) and self.has_unifi)       # a switch read on its own while UniFi has devices: worth saying why it was not matched
             up_s = r.get("uptimeS") if isinstance(r, dict) else None
             rebooted = isinstance(up_s, int) and isinstance(self.uptime.get(sid), int) and up_s + 5 < self.uptime[sid]
@@ -199,7 +201,7 @@ class LanSampler:
                 if not isinstance(v, dict) or v.get("stacked") or stacked(nm) or not all(isinstance(v.get(k), int) for k in ("rxErr", "txErr", "rxDrop", "txDrop")):
                     continue                                          # a bond, team or VLAN only repeats the cards under it
                 key = self.watch.key(sid, nm) if self.watch is not None else f"{sid}|{nm}"
-                ports.append({"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"], "up": v.get("up"),
+                ports.append({"name": nm, "rx_errors": v["rxErr"], "tx_errors": v["txErr"], "rx_dropped": v["rxDrop"], "tx_dropped": v["txDrop"], "rx_packets": v.get("rxPkts"), "tx_packets": v.get("txPkts"), "up": v.get("up"),
                               **({"link_down_count": self._link_drops(key, v, now, rebooted)} if isinstance(v.get("changedAgo"), int) else {})})
                 if v.get("bond"):
                     members[key] = ", ".join(v["bond"])
