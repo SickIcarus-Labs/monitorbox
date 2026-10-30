@@ -1989,7 +1989,7 @@ class App:
             since, limit = int(one("since", "0")), max(1, min(int(one("limit", "300")), 1000))
         except ValueError:
             since, limit = 0, 300
-        level = one("level", "info")
+        level = one("level", "auto")
         sources, counts = log.summary()
         return {"entries": log.entries(since=since, level=level, source=one("source") or None, q=one("q") or None, limit=limit),
                 "sources": sources, "debug": {"on": log.debug_on(), "until": log.debug_until()}, "counts": counts, "version": version()}

@@ -72,6 +72,15 @@ class Engine(unittest.TestCase):
         self.assertNotIn("round 3", [r["text"] for r in log.entries(level="debug")], "after 24 hours it is off again")
         self.assertIn("round 2", [r["text"] for r in log.entries(level="debug")], "switching off deletes nothing")
 
+    def test_all_shows_debug_lines_while_debug_is_on_and_not_otherwise(self):
+        log, _ = self.make()
+        log.set_debug(True)
+        log.write("debug", "portwatch", "round 1")
+        self.assertIn("round 1", [r["text"] for r in log.entries(level="auto")], "debug is on: All includes it without changing the filter")
+        log.set_debug(False)
+        self.assertNotIn("round 1", [r["text"] for r in log.entries(level="auto")], "debug is off: All is the normal log")
+        self.assertIn("round 1", [r["text"] for r in log.entries(level="debug")], "older debug lines are still reachable")
+
     def test_debug_is_kept_apart_so_it_cannot_push_the_normal_log_out(self):
         log, name = self.make()
         log.set_debug(True)

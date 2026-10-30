@@ -179,7 +179,9 @@ class Log:
         self.write("info", "app", f"MonitorBox {version} started" + (f" (channel {channel})" if channel else "") + ".")
 
     def entries(self, since=0, level="info", source=None, q=None, limit=300, include_debug=True):
-        """Newest first. `level` is the lowest shown. Reads the files, not the memory, so a restart does not empty the page."""
+        """Newest first. `level` is the lowest shown ("auto" = everything being recorded: debug included only while debug is on). Reads the files, not the memory, so a restart does not empty the page."""
+        if level == "auto":                              # "All": every line being recorded, so debug lines show whenever debug is on
+            level = "debug" if self.debug_on() else "info"
         floor = LEVELS.index(level) if level in LEVELS else 1
         seen, rows = set(), []
         with self.lock:
