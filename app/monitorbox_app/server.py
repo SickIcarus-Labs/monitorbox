@@ -139,7 +139,7 @@ class App:
         nodes, _err = monconfig.all_nodes(self.paths)
         node = next((n for n in nodes if n["id"] == nid), None)
         if not node or not node.get("wake"):
-            raise ValueError("That system has no wake settings. Add a 'wake' block with its MAC addresses.")
+            raise ValueError("That system has no wake settings. Open its server page under Settings, Servers and choose Wake on LAN to add its MAC addresses.")
         with self.wake_lock:
             cur = self.wakes.get(nid)
             if cur and cur["state"] in ("sending", "waiting"):

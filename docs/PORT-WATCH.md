@@ -64,5 +64,5 @@ The page and the check count the ports in use, the ports the network map shows. 
 
 ## Known limits
 
-- SNMP-only boxes (no UniFi) do not yet get the map or port watch on their own, and a port reported by both UniFi and SNMP can still be counted twice (campaign ticket #292).
+- A device is read one way only, UniFi or SNMP, never both (see "What it reads"), so a port is not counted twice.
 - UniFi's own UI does not show raw error counters; this item reads the counters it exposes.
