@@ -1,1 +1,1 @@
-{"id": "unifi-protect", "name": "UniFi Protect", "version": "0.1.5", "entry": ["python3", "main.py"]}
+{"id": "unifi-protect", "name": "UniFi Protect", "version": "0.1.6", "entry": ["python3", "main.py"]}

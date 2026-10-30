@@ -98,5 +98,40 @@ class SecondBatch(unittest.TestCase):
         self.assertIn("did not answer in time", str(cm.exception))
 
 
+
+class ConsoleThatStopsAnswering(unittest.TestCase):
+    """On Oct 29 a UniFi console went quiet for six minutes and every UniFi and Protect check read 'module did not answer': each call waited out its own
+    timeout behind the one before it. After one real failure the rest must fail at once with the real reason."""
+    def silent_server(self):
+        import socket
+        srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(50)
+        self.addCleanup(srv.close)
+        return srv.getsockname()[1]
+
+    def test_unifi_network_calls_queued_behind_a_silent_console_fail_at_once(self):
+        import time
+        sys.path.insert(0, os.path.join(HERE, "..", "modules", "unifi-network"))
+        import unifilib
+        c = unifilib.Client(f"https://127.0.0.1:{self.silent_server()}", "example-reader", "example-pass-4417", "default", False, 0.5)
+        t0 = time.time()
+        for _ in range(6):
+            with self.assertRaises(unifilib.UnifiError) as cm:
+                c.get("stat/device")
+            self.assertIn("cannot reach the UniFi controller", str(cm.exception))
+        self.assertLess(time.time() - t0, 2.0, "six calls must cost about one timeout, not six")
+
+    def test_protect_calls_queued_behind_a_silent_console_fail_at_once(self):
+        import time
+        sys.path.insert(0, os.path.join(HERE, "..", "modules", "unifi-protect"))
+        import protectlib
+        c = protectlib.Client(f"https://127.0.0.1:{self.silent_server()}", "example-reader", "example-pass-4417", False, 0.5)
+        t0 = time.time()
+        for _ in range(6):
+            with self.assertRaises(protectlib.ProtectError) as cm:
+                c._request("GET", "/proxy/protect/api/bootstrap")
+            self.assertIn("cannot reach UniFi Protect", str(cm.exception))
+        self.assertLess(time.time() - t0, 2.0)
+
+
 if __name__ == "__main__":
     unittest.main()
