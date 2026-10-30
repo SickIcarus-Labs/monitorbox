@@ -41,7 +41,7 @@ One host-networked container (Wake-on-LAN and LAN discovery need it), `read_only
 /config
   launcher/  releases/  current/  previous/   versions and links; switching a version is changing a link
   config/    monitorbox.json + revision history
-  data/      per-module state; app/monitorbox.db (SQLite)
+  data/      per-module state; app/ (password record, last readings, port history)
   backups/   never included in a backup
   logs/
 ```
@@ -58,7 +58,7 @@ Other releases repositories can be added on the Updates page; a built-in one can
 
 ## 5. Configuration
 
-One file, `monitorbox.json`, holding intent only (live state and history are in SQLite). Every edit goes through validate, diff, revision-conflict check, atomic apply and undoable history. A bad edit can never take the app down: it keeps running on the last good version and shows the exact error. A system owns its checks, wake settings and criticality; connections hold credentials and endpoints once; disks and interfaces are listed by **name** and the SNMP module looks up the current index (re-detect on failure) so a drive layout change self-heals. Discovered services and cameras are stored only as decisions.
+One file, `monitorbox.json`, holding intent only (history is in `config/history.jsonl`; the latest readings are cached under `data/app/`). Every edit goes through validate, diff, revision-conflict check, atomic apply and undoable history. A bad edit can never take the app down: it keeps running on the last good version and shows the exact error. A system owns its checks, wake settings and criticality; connections hold credentials and endpoints once; disks and interfaces are listed by **name** and the SNMP module looks up the current index (re-detect on failure) so a drive layout change self-heals. Discovered services and cameras are stored only as decisions.
 
 Everything is editable in the app. Secrets are stored in plain text in the file (mode 0600) by design, masked in the UI and never logged, so protect the config folder. The admin password is never in the file.
 
@@ -70,7 +70,7 @@ One code path, two outputs: **config backup** (`monitorbox.json`, nightly) and *
 
 ## 7. Monitoring, dependencies and alerts
 
-States: healthy, degraded, failed, unknown, disabled; freshness is separate. The App keeps a dependency map from what you declare, what integrations discover (containers depend on their host, cameras on Scrypted and the network path) and the UniFi topology (device, switch port, switch, uplink). **One alert per root cause:** dependents are marked "affected by" it and stop raising their own alarms, while still displaying what is actually observed. Planned reboots and maintenance work the same way, with a timer, and alert only if the system has not returned when it ends. Alerts use hold-down times, recovery notices, deduplication, maintenance windows and silences. Messages go by email (any SMTP server) or to Home Assistant.
+States: healthy, degraded, failed, unknown (and pending, before a first result). A thing marked expected down shows grey but keeps its observed state. The App keeps a dependency map from what you declare, what integrations discover (containers depend on their host, cameras on Scrypted and the network path) and the UniFi topology (device, switch port, switch, uplink). **One alert per root cause:** dependents are marked "affected by" it and stop raising their own alarms, while still displaying what is actually observed. Alerts use hold-down times, recovery notices, deduplication, storm and flap damping, and expected-down marks (maintenance windows and silences do not exist yet). Messages go by email (any SMTP server) or to Home Assistant.
 
 **Port errors.** A built-in item that watches switch port counters and link state from UniFi and SNMP for rising errors, drops and links that go away. Read-only, Degraded never Failed. The rules are in [PORT-WATCH.md](PORT-WATCH.md).
 
