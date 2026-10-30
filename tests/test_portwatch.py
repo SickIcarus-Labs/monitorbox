@@ -290,6 +290,17 @@ class Watch(unittest.TestCase):
         self.assertIn("reset sw1|Port 5 errors", text)
         self.assertIn("gone sw1|Port 5", text)
 
+    def test_rounds_every_ten_seconds_still_keep_a_reading_every_minute(self):
+        """Regression (two ports stuck at 0 minutes of readings): the newest reading was stored with the time of the latest round, so a round every 10 seconds never
+        got a full slot after the last kept reading and a port that started again stayed at one reading until a round happened to run long."""
+        self.w.set_enabled(True)
+        for n in range(0, 61):                                  # 10 minutes of rounds, 10 seconds apart
+            self.w.feed([dev("Core switch", **{"Port 5": (n, 0, 0, 0, 0)})], ["sw1"], now=n * 10.0)
+        q = self.w.series[self.w.key("sw1", "Port 5")]
+        self.assertGreaterEqual(len(q), 10, "about one reading a minute is kept")
+        self.assertEqual(q[-1][1], 60, "and the newest figures are in the last one")
+        self.assertEqual(self.w.page()["watched"][0]["minutes"], 9)
+
     def test_a_bonded_pair_adds_its_ports_and_a_missing_counter_is_not_invented(self):
         self.w.set_enabled(True)
         for m in range(0, 61):
@@ -1040,7 +1051,7 @@ class WrappingCounters(unittest.TestCase):
 
     def feed(self, w, raws, start=0):
         for m, v in enumerate(raws):
-            w.feed([dev("Core", **{"Port 1": (0, 0, v, 0, 0)})], ["sw1"], now=start + m * 30)
+            w.feed([dev("Core", **{"Port 1": (0, 0, v, 0, 0)})], ["sw1"], now=start + m * 60)
 
     def test_a_sixteen_bit_counter_going_round_is_not_a_reset(self):
         w, _ = self.make()
@@ -1056,7 +1067,7 @@ class WrappingCounters(unittest.TestCase):
     def test_a_fall_from_anywhere_else_is_still_a_reset(self):
         w, _ = self.make()
         for m, (e, v) in enumerate([(10, 1000), (20, 2000), (30, 30000), (0, 500), (1, 900)]):   # not near 65,536, and the errors fell too: the device restarted
-            w.feed([dev("Core", **{"Port 1": (e, 0, v, 0, 0)})], ["sw1"], now=m * 30)
+            w.feed([dev("Core", **{"Port 1": (e, 0, v, 0, 0)})], ["sw1"], now=m * 60)
         self.assertEqual(w.resets["sw1|Port 1"][0], 1)
         self.assertEqual(len(w.series["sw1|Port 1"]), 2, "history started again at the reset")
 
@@ -1065,7 +1076,7 @@ class WrappingCounters(unittest.TestCase):
         self.feed(w, [64000, 64700, 65400, 500, 1200])                      # went round once
         w.save(now=150, force=True)
         w2 = portwatch.PortWatch(paths, clock=lambda: 200.0); w2.set_enabled(True); w2.restore()
-        self.feed(w2, [1900, 2600, 3300], start=180)
+        self.feed(w2, [1900, 2600, 3300], start=300)
         self.assertNotIn("sw1|Port 1", w2.resets)
         q = list(w2.series["sw1|Port 1"])
         # the saved history is thinned to one reading per five minutes, so its first row is the last one read (1200, plus the 65,536 that went round)
