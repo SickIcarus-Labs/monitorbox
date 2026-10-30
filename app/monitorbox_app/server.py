@@ -2242,23 +2242,31 @@ class App:
 
             def do_GET(self):
                 t0 = time.monotonic()
+                tok = None if perfstats.skip(self.path) else perfstats.begin(perfstats.request_key("GET", self.path))
                 try:
                     if self.wrong_host():
                         return
                     return self._get()
                 finally:
-                    if not perfstats.skip(self.path):
+                    if tok is not None:
+                        ms = perfstats.end(tok)
                         perfstats.record("request", perfstats.request_key("GET", self.path), (time.monotonic() - t0) * 1000)
+                        if ms >= perfstats.SLOW_REQUEST_MS:
+                            applog.debug("app", f"slow request {perfstats.request_key('GET', self.path)} took {ms:.0f} ms")
 
             def do_POST(self):
                 t0 = time.monotonic()
+                tok = None if perfstats.skip(self.path) else perfstats.begin(perfstats.request_key("POST", self.path))
                 try:
                     if self.wrong_host():
                         return
                     return self._post()
                 finally:
-                    if not perfstats.skip(self.path):
+                    if tok is not None:
+                        ms = perfstats.end(tok)
                         perfstats.record("request", perfstats.request_key("POST", self.path), (time.monotonic() - t0) * 1000)
+                        if ms >= perfstats.SLOW_REQUEST_MS:
+                            applog.debug("app", f"slow request {perfstats.request_key('POST', self.path)} took {ms:.0f} ms")
 
             def _get(self):
                 if self.path.startswith("/icons/"):
@@ -2294,7 +2302,7 @@ class App:
                 if self.path == "/api/perf":
                     if not app.auth.valid(self.token()):
                         return self.send(401, {"error": "sign in"})
-                    return self.send(200, {"version": version(), "requests": perfstats.summary("request"), "modules": perfstats.summary("module"), "slow": perfstats.slow_calls(),
+                    return self.send(200, {"version": version(), "requests": perfstats.summary("request"), "modules": perfstats.summary("module"), "slow": perfstats.slow_calls(), "waiting": perfstats.waiting(),
                                            "processes": sysinfo.processes(app.modules.pids()), "about": sysinfo.about(), "since": int(perfstats.started()), "cpus": os.cpu_count()})
                 if self.path.startswith("/api/logs/download"):
                     body = (applog.get().download() if applog.get() else "").encode()
