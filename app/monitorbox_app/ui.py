@@ -149,7 +149,9 @@ textarea{width:100%;min-height:260px;font:13px/1.4 ui-monospace,Menlo,monospace}
 .lg-s{color:var(--sub);font-size:13px;text-align:right}
 .lg-lv{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:.05rem .4rem;border-radius:99px;border:1px solid var(--line)}
 .lg-lv.warning{color:#FBBF24;border-color:#FBBF24}.lg-lv.error{color:#F87171;border-color:#F87171}.lg-lv.debug{color:var(--sub)}
-.lg-d{grid-column:1/-1;font-size:12px;color:var(--sub)}
+.lg-d{grid-column:1/-1;font-size:13px;color:var(--sub);padding-top:.3rem}
+.lg-l.open{background:rgba(255,255,255,.05);border-left:3px solid var(--sub);padding-left:.5rem}
+.lg-c{font-style:normal;color:var(--sub);font-size:11px}
 </style><body><header id=hdr hidden></header><main id=m>Loading…</main><div id=dr></div><script>
 const $=s=>document.querySelector(s);
 /* Sites: with another site's tab picked, every call except these goes to that site through the main box (/api/site/<id>/…) */
@@ -624,20 +626,20 @@ const spd=m=>!m?'':m>=1000?(m/1000)+' GbE':m+' Mbit';
 let lgTimer=null,lgItems=[],lgHeld=[],lgOpen=new Set(),lgF={level:'info',source:'',q:''},lgDebug={on:false,until:0},lgSources=[],lgMenu=false,lgQT=null,lgSeq=0;
 const lgQs=(extra)=>'logs?'+new URLSearchParams(Object.assign({level:lgF.level,source:lgF.source,q:lgF.q},extra)).toString();
 const lgAtTop=()=>(window.scrollY||document.documentElement.scrollTop||0)<60;
-const lgBusy=()=>{const a=document.activeElement;return lgOpen.size>0||(a&&(a.id==='lg-q'||a.id==='lg-src'||a.id==='lg-lvl'))||(window.getSelection&&String(window.getSelection()).length>0)};
+const lgBusy=()=>{const a=document.activeElement,sel=window.getSelection&&window.getSelection();return lgOpen.size>0||(a&&a.id==='lg-q')||!!(sel&&String(sel).length>0&&sel.anchorNode&&$('#lg-list')&&$('#lg-list').contains(sel.anchorNode))};
 async function lgStat(){const e=$('#lgstat');if(!e)return;try{const j=await api('logs?limit=1&level=error');const c=j.counts||{};
  e.textContent=c.error?c.error+' error'+(c.error==1?'':'s')+' in the last day.':c.warning?c.warning+' warning'+(c.warning==1?'':'s')+' in the last day.':'All quiet in the last day.'}catch(x){e.textContent=''}}
 function renderLogs(){clearInterval(lgTimer);document.body.dataset.s='green';lgItems=[];lgHeld=[];lgOpen=new Set();lgMenu=false;const hq=new URLSearchParams(location.hash.split('?')[1]||'');lgF={level:['info','warning','error','debug'].includes(hq.get('level'))?hq.get('level'):'info',source:hq.get('source')||'',q:''};
  mpage().innerHTML=`<div class=top><h1 style="margin:0;font-size:28px">Logs</h1><div class=row><button class="btn sm" onclick="location.hash='#/settings/advanced'">← Advanced</button><button class="btn sm" id=lg-mb aria-label="Log options" onclick="lgToggleMenu()">⋯</button></div></div>
  <div id=lg-menu class=box hidden></div><div id=lg-banner></div>
- <div class=lg-bar><select id=lg-lvl aria-label="Level" onchange="lgFilter()"><option value=info>All</option><option value=warning>Warnings and errors</option><option value=error>Errors only</option><option value=debug>Include debug</option></select>
+ <div class=lg-bar><select id=lg-lvl aria-label="Level" onchange="lgFilter()"><option value=info>All (no debug)</option><option value=warning>Warnings and errors</option><option value=error>Errors only</option><option value=debug>Include debug</option></select>
   <select id=lg-src aria-label="Source" onchange="lgFilter()"><option value="">Every source</option></select>
   <input id=lg-q type=search placeholder="Search" aria-label="Search" oninput="lgSearchSoon()"></div>
  <div id=lg-nw><button id=lg-new class="btn pri" hidden onclick="lgShowHeld()"></button></div>
  <div id=lg-list><p class=sub>Loading…</p></div>`;
  $('#lg-lvl').value=lgF.level;lgLoad();lgTimer=setInterval(lgTick,3000);window.addEventListener('scroll',lgScroll,{passive:true})}
 function lgScroll(){if(!location.hash.startsWith('#/logs')){window.removeEventListener('scroll',lgScroll);return}if(lgHeld.length&&lgAtTop()&&!lgBusy())lgShowHeld()}
-function lgFilter(){lgF.level=$('#lg-lvl').value;lgF.source=$('#lg-src').value;lgLoad()}
+function lgFilter(){lgF.level=$('#lg-lvl').value;lgF.source=$('#lg-src').value;if(document.activeElement&&document.activeElement.tagName==='SELECT')document.activeElement.blur();lgLoad()}
 function lgSearchSoon(){clearTimeout(lgQT);lgQT=setTimeout(()=>{lgF.q=($('#lg-q')||{}).value||'';lgLoad()},350)}
 async function lgLoad(){const my=++lgSeq;let j;try{j=await api(lgQs({limit:300}))}catch(e){const l=$('#lg-list');if(l)l.innerHTML='<p class=sub>Could not read the logs ('+esc(e.message)+'). That MonitorBox may be running an older version.</p>';return}
  if(my!==lgSeq||!location.hash.startsWith('#/logs'))return;lgItems=j.entries||[];lgHeld=[];lgOpen=new Set();lgMeta(j);lgDraw();window.scrollTo(0,0)}
@@ -649,10 +651,11 @@ async function lgTick(){if(!location.hash.startsWith('#/logs')){clearInterval(lg
  lgHeld=add.concat(lgHeld);if(lgAtTop()&&!lgBusy())lgShowHeld();else lgPill()}
 function lgPill(){const b=$('#lg-new');if(!b)return;b.hidden=!lgHeld.length;b.textContent=lgHeld.length+' new entr'+(lgHeld.length==1?'y':'ies')+' ↑'}
 function lgShowHeld(){if(!lgHeld.length)return;lgItems=lgHeld.concat(lgItems).slice(0,1000);lgHeld=[];lgDraw();lgPill();if(!lgAtTop())window.scrollTo(0,0)}
-function lgToggle(id){lgOpen.has(id)?lgOpen.delete(id):lgOpen.add(id);const e=document.querySelector('.lg-l[data-id="'+id+'"]');if(e)e.classList.toggle('open',lgOpen.has(id))}
+function lgToggle(id){lgOpen.has(id)?lgOpen.delete(id):lgOpen.add(id);lgDraw()}
+function lgOnly(src){lgF.source=src;lgOpen=new Set();const m=$('#lg-src');if(m)m.value=src;lgLoad()}
 function lgDraw(){const L=$('#lg-list');if(!L)return;if(!lgItems.length){L.innerHTML='<p class=sub>Nothing to show'+(lgF.q||lgF.source||lgF.level!=='info'?' with these filters':' yet')+'.</p>';lgPill();return}
  let day='',h='';for(const e of lgItems){const d=e.time.slice(0,10);if(d!==day){day=d;h+=`<div class=lg-day>${esc(new Date(d+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}))}</div>`}
-  const open=lgOpen.has(e.id);h+=`<div class="lg-l${open?' open':''}" data-id="${e.id}" onclick="lgToggle(${e.id})"><span class=lg-t>${esc(e.time.slice(11))}</span><span class="lg-lv ${esc(e.level)}">${esc(e.level)}</span><span class=lg-s>${esc(e.source)}</span><div class=lg-x>${esc(e.text)}</div></div>`}
+  const open=lgOpen.has(e.id);h+=`<div class="lg-l${open?' open':''}" data-id="${e.id}" onclick="lgToggle(${e.id})"><span class=lg-t>${esc(e.time.slice(11))}</span><span class="lg-lv ${esc(e.level)}">${esc(e.level)}</span><span class=lg-s>${esc(e.source)} <i class=lg-c>${open?'▾':'▸'}</i></span><div class=lg-x>${esc(e.text)}</div>${open?`<div class=lg-d>${esc(new Date(e.time).toLocaleString([],{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'}))} · ${esc(e.level)} · ${esc(e.source)} · entry ${e.id}<br><button class="btn sm" onclick="event.stopPropagation();lgOnly('${esc(e.source)}')">Only ${esc(e.source)}</button></div>`:''}</div>`}
  L.innerHTML=h;lgPill()}
 function lgToggleMenu(){const m=$('#lg-menu');if(!m)return;m.hidden=!m.hidden;if(!m.hidden)lgMenuDraw()}
 function lgMenuDraw(){const m=$('#lg-menu');m.innerHTML=`<div class=row><a class=btn href="${U('logs/download')}" download>Download logs</a><button class=btn onclick="lgCopy()">Copy last 100 lines</button></div>
