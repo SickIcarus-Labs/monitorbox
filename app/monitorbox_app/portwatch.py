@@ -27,6 +27,7 @@ RECENT = 900              # the window that is compared with the port's earlier 
 MIN_HISTORY = 1800        # readings of a port needed before it can be called rising (30 minutes)
 RISE = 5                  # the recent pace must be at least this many times the earlier pace
 FLOOR = {"errors": 20, "drops": 10000, "flaps": 3}     # new in the window, at least, before it is worth a line, on a 1 Gbit link; errors and drops scale with the link speed (below)
+DROP_SHARE = 0.001        # packet drops are only worth a line when they are at least this share of the packets (0.1%), where the port's packet counts are known
 FLOOR_MIN = {"errors": 20, "drops": 1000}               # ... but never lower than this, however slow the link
 WORDS = {"errors": "errors", "drops": "packet drops", "flaps": "link drops"}
 KINDS = ("errors", "drops", "flaps")
@@ -83,10 +84,27 @@ def floor_for(kind, speed_mbps=None):
     return max(FLOOR_MIN[kind], round(FLOOR[kind] * scale))
 
 
-def judge(q, flaps=True, speed=None):
+def drop_share(last, cut, tx_only=False):
+    """The share of packets dropped between two readings: the worse of receive and transmit (drops / (packets + drops)). None when either reading has no packet counts
+    (an older saved reading, a device that does not report them) or a counter went backwards."""
+    if len(last) < 10 or len(cut) < 10:
+        return None
+    worst = 0.0
+    for d, pk in (((7, 9),) if tx_only else ((6, 8), (7, 9))):
+        dd, pp = last[d] - cut[d], last[pk] - cut[pk]
+        if dd < 0 or pp < 0:
+            return None
+        if dd + pp > 0:
+            worst = max(worst, dd / (dd + pp))
+    return worst
+
+
+def judge(q, flaps=True, speed=None, server=False):
     """How one port is doing, from its readings [[t, errors, drops, flaps], ...] (oldest first).
-    -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}"""
-    out = {"learning": True, "rising": [], "perHour": {}, "was": {}, "split": {}}
+    -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}
+    `server`: this is a server's network card. Its receive drops are frames the kernel discarded because nothing wanted them (unknown protocol or VLAN), not loss: a card that really
+    loses frames shows receive errors, which are counted as ever. So only its transmit drops count as drops."""
+    out = {"learning": True, "rising": [], "perHour": {}, "was": {}, "split": {}, "share": None}
     if len(q) < 2:
         return out
     now, first = q[-1][0], q[0][0]
@@ -98,19 +116,24 @@ def judge(q, flaps=True, speed=None):
     for i, kind in enumerate(KINDS, start=1):
         if kind in ("flaps", "drops") and not flaps:
             continue                                              # a client port drops whenever a laptop sleeps, and a TV in standby backs up its port: only uplinks, links between switches and servers are worth a line
-        new = q[-1][i] - cut[i]
+        ci = 7 if kind == "drops" and server and len(q[-1]) >= 8 and len(cut) >= 8 else i      # the column that is judged: a server card's drops are its transmit drops
+        new = q[-1][ci] - cut[ci]
         out["perHour"][kind] = round(new * 3600 / RECENT)
         if kind in SPLIT and len(q[-1]) >= 8 and len(cut) >= 8:     # receive and transmit apart: a bad link shows as receive errors, a backed-up port as transmit drops
             a, b = SPLIT[kind]
             out["split"][kind] = {"rx": round((q[-1][a] - cut[a]) * 3600 / RECENT), "tx": round((q[-1][b] - cut[b]) * 3600 / RECENT)}
-        worst = _worst(q, cut[0], i)
+        worst = _worst(q, cut[0], ci)
         if worst is None and span_before >= 60:
-            worst = cut[i] - q[0][i]                                  # less than one stretch of history: what there was
+            worst = cut[ci] - q[0][ci]                                  # less than one stretch of history: what there was
         was = None if worst is None else worst * 3600 / RECENT
         out["was"][kind] = None if was is None else round(was)
         if out["learning"] or new < floor_for(kind, speed):
             continue
         if was is None or new * 3600 / RECENT >= RISE * was:
+            if kind == "drops":
+                out["share"] = drop_share(q[-1], cut, tx_only=(ci == 7))
+                if out["share"] is not None and out["share"] < DROP_SHARE:
+                    continue                                          # plenty of drops, but a sliver of the traffic (a server's network card discards frames it does not want): not a problem
             out["rising"].append(kind)
     return out
 
@@ -141,6 +164,7 @@ class PortWatch:
         self.off = {}             # key -> what has been added to each of those so far to undo wraps: some drivers report a 16-bit counter, which starts again after 65,535
         self.switch_like = set()  # SNMP device ids that look like a switch (they learn addresses or hear neighbours) but were not matched to a UniFi device while UniFi has devices: said on the page, with why
         self.card_speeds = {}     # the same for ports read over SNMP, from the device itself (the map does not show a switch that UniFi does not know)
+        self.switches = set()     # ids of SNMP devices that are switches (their ports are not server cards: see judge())
         self.client_ports = set() # keys of ports on an SNMP-only switch that look like a client's (no neighbour, at most one address behind them): packet and link drops are not a problem there
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
         self.resets = {}          # key -> [times its counter went backwards (so its history started again), which counter, when]: shown on the page, to explain a port that never finishes learning
@@ -174,7 +198,7 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         rising, off = [], []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, self._links(k), self._speed(k))
+            j = judge(q, self._links(k), self._speed(k), self._is_server(k))
             row = {"key": k, "label": label, "alert": k not in known}
             if k in known:
                 off.append({**row, "kinds": j["rising"]})
@@ -249,6 +273,7 @@ class PortWatch:
                     e = [_num(p.get("rx_errors")), _num(p.get("tx_errors"))]
                     dr = [_num(p.get("rx_dropped")), _num(p.get("tx_dropped"))]
                     fl = _num(p.get("link_down_count"))
+                    pk = [_num(p.get("rx_packets")), _num(p.get("tx_packets"))]
                     if None in e or None in dr:
                         continue                                  # that switch gave no counters for this port: nothing to watch, nothing invented
                     k = self.key(i, p["name"])
@@ -288,6 +313,8 @@ class PortWatch:
                         row = [now, raw[0] + raw[1], raw[2] + raw[3], fl or 0, raw[0], raw[1], raw[2], raw[3]]
                         self._trace(now, f"reset {self._nm(k)} {kind} to={row[1:]} was={list(q[-1])[1:]}")
                         q.clear()                                 # a counter went backwards: the device restarted, so start again from here
+                    if None not in pk:
+                        row = row + [int(pk[0]), int(pk[1])]               # packets received and sent, so a drop count can be judged as a share of the traffic
                     if not q or now - self.slot.get(k, q[-1][0]) >= EVERY:
                         q.append(row)
                         self.slot[k] = now
@@ -319,6 +346,11 @@ class PortWatch:
     def _links(self, k):
         """Packet drops and link drops count on this port: an uplink, a link between switches, or a server (the map says which; every network card read over SNMP is a server's)."""
         return k in self.flap_ports or (k.startswith("snmp:") and k not in self.client_ports)
+
+    def _is_server(self, k):
+        """A network card of a server read over SNMP (not a switch port): see judge()."""
+        dev = k.rsplit("|", 1)[0]
+        return k.startswith("snmp:") and dev in self.cards and dev not in self.switches
 
     def _speed(self, k):
         return self.speeds.get(k) or self.card_speeds.get(k)
@@ -394,7 +426,7 @@ class PortWatch:
             q = list(self.series.get(pk) or [])
         if not q:
             return {"label": label, "state": "none", "split": {}}
-        j = judge(q, self._links(pk), self._speed(pk))
+        j = judge(q, self._links(pk), self._speed(pk), self._is_server(pk))
         if not j["split"]:
             return {"label": label, "state": "learning", "split": {}}
         return {"label": label, "state": "figures", "split": j["split"]}
@@ -467,6 +499,11 @@ class PortWatch:
         with self.lock:
             q = self.series.get(key)
             return int(q[-1][3]) if q else 0
+
+    def set_is_switch(self, sid, on):
+        """Whether an SNMP device is a switch (it learns addresses or hears neighbours): its ports are not a server's cards, whether or not UniFi is there too."""
+        with self.lock:
+            (self.switches.add if on else self.switches.discard)(sid)
 
     def set_switch_like(self, sid, on):
         with self.lock:
@@ -582,7 +619,7 @@ class PortWatch:
         """One map port (one or several keys, a bonded pair) in words and figures, or None when there is nothing to say."""
         known = self.known()
         with self.lock:
-            js = [judge(list(self.series[k]), self._links(k), self._speed(k)) for k in keys if k in self.series]
+            js = [judge(list(self.series[k]), self._links(k), self._speed(k), self._is_server(k)) for k in keys if k in self.series]
         if not js:
             return None
         per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
@@ -601,9 +638,9 @@ class PortWatch:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
         out = []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
-            j = judge(q, self._links(k), self._speed(k))
+            j = judge(q, self._links(k), self._speed(k), self._is_server(k))
             if j["rising"] and k not in known:
-                out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "other": self.other_end(k),
+                out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "share": j["share"], "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
         return out
 
@@ -631,6 +668,7 @@ class PortWatch:
             per, was, split = f["perHour"], f["was"], f["split"]
             what = " and ".join(f"{WORDS[k]} rising (about {per[k]:,} an hour"
                                 + (f": {split[k]['rx']:,} receive, {split[k]['tx']:,} transmit" if k in split else "")
+                                + (f", {f['share'] * 100:.2g}% of packets" if k == "drops" and f.get("share") is not None else "")
                                 + (f", was {was[k]:,}" if was[k] is not None else "") + ")" for k in f["kinds"])
             busy, other = f["traffic"], f["other"]
             kind = next((k for k in f["kinds"] if k in SPLIT), None)

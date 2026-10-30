@@ -229,6 +229,8 @@ def run_check(name, params, conn):
 
 # ---------------------------------------------------------------- traffic counters ----
 IF_HC_IN, IF_HC_OUT = "1.3.6.1.2.1.31.1.1.1.6", "1.3.6.1.2.1.31.1.1.1.10"      # 64-bit octet counters
+IF_PKTS_IN = {"inU": "1.3.6.1.2.1.31.1.1.1.7", "inM": "1.3.6.1.2.1.31.1.1.1.8", "inB": "1.3.6.1.2.1.31.1.1.1.9"}        # 64-bit packet counters: unicast, multicast, broadcast
+IF_PKTS_OUT = {"outU": "1.3.6.1.2.1.31.1.1.1.11", "outM": "1.3.6.1.2.1.31.1.1.1.12", "outB": "1.3.6.1.2.1.31.1.1.1.13"}
 IF_IN_DISC, IF_IN_ERR, IF_OUT_DISC, IF_OUT_ERR = "1.3.6.1.2.1.2.2.1.13", "1.3.6.1.2.1.2.2.1.14", "1.3.6.1.2.1.2.2.1.19", "1.3.6.1.2.1.2.2.1.20"   # errors and discards, per direction
 IF_IN, IF_OUT = "1.3.6.1.2.1.2.2.1.10", "1.3.6.1.2.1.2.2.1.16"                  # 32-bit ones, for devices without the 64-bit pair
 
@@ -315,6 +317,14 @@ def _ago(uptime, changed):
     return (uptime - changed) // 100 if isinstance(uptime, int) and isinstance(changed, int) and uptime >= changed else None
 
 
+def _packets(v):
+    """{"rxPkts", "txPkts"} (every packet, whatever its kind) when the device reported all six counters, else nothing."""
+    ins, outs = [v.get(k) for k in IF_PKTS_IN], [v.get(k) for k in IF_PKTS_OUT]
+    if all(isinstance(x, int) for x in ins + outs):
+        return {"rxPkts": sum(ins), "txPkts": sum(outs)}
+    return {}
+
+
 def _row(a, b, wide, sp, lab, bad, oper=None, ago=None, stack=None):
     return {"in": a, "out": b, "bits": 64 if wide else 32, **({"up": oper == 1} if isinstance(oper, int) else {}), **({"speedMbps": int(sp)} if isinstance(sp, int) and sp > 0 else {}), **({"label": lab} if lab else {}),
             **({"changedAgo": ago} if isinstance(ago, int) else {}), **(stack or {}),
@@ -349,6 +359,8 @@ def _read(s, idxs, wide, alias=False, counters_only=False):
     cols = [("in", c_in), ("out", c_out)]
     if not counters_only:
         cols += [("speed", IF_HIGHSPEED), ("oper", IF_OPER), ("changed", IF_LAST_CHANGE), ("rxErr", IF_IN_ERR), ("txErr", IF_OUT_ERR), ("rxDrop", IF_IN_DISC), ("txDrop", IF_OUT_DISC)]
+        if wide:
+            cols += list(IF_PKTS_IN.items()) + list(IF_PKTS_OUT.items())          # packets, so the App can judge drops as a share of the traffic (no 64-bit counters: none)
         if alias:
             cols.append(("alias", IF_ALIAS))
     got = _get_many(s, [f"{oid}.{idx}" for idx in idxs for _, oid in cols])
@@ -365,7 +377,7 @@ def _quick(s, lay, only=None, ut=None):
         v = vals[idx]
         if not isinstance(v["in"], int) or not isinstance(v["out"], int):
             return None
-        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"], _ago(ut, v["changed"]), lay.get("stack", {}).get(idx))      # the speed is read each time: a link that negotiates down shows at once
+        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {**{k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, **_packets(v)}, v["oper"], _ago(ut, v["changed"]), lay.get("stack", {}).get(idx))      # the speed is read each time: a link that negotiates down shows at once
     return out
 
 
@@ -424,7 +436,7 @@ def _full(s, ut=None):
         if not v or not isinstance(v["in"], int) or not isinstance(v["out"], int):
             continue
         lab = L.text(v["alias"] or b"")[:60]
-        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, v["oper"], _ago(ut, v["changed"]), stack.get(idx))
+        out[nm] = _row(v["in"], v["out"], wide, v["speed"], lab, {**{k: v[k] for k in ("rxErr", "txErr", "rxDrop", "txDrop")}, **_packets(v)}, v["oper"], _ago(ut, v["changed"]), stack.get(idx))
         ifs[idx] = (nm, v["speed"] if isinstance(v["speed"], int) else None, lab)
     try:
         sysname = L.text(s.get([SYS_NAME]).get(SYS_NAME) or b"")[:60]           # the device's own name: the App uses it to tell which UniFi device this connection is
