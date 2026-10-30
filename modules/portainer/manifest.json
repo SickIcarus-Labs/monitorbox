@@ -1,1 +1,1 @@
-{"id": "portainer", "name": "Portainer", "version": "0.1.6", "entry": ["python3", "main.py"]}
+{"id": "portainer", "name": "Portainer", "version": "0.1.7", "entry": ["python3", "main.py"]}

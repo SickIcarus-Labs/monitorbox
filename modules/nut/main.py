@@ -44,7 +44,7 @@ def check_ups(params, conn):
     c = client(conn)
     if not name:
         names = ", ".join(c.list_ups()) or "none"
-        return {"state": "unknown", "detail": f"this check needs a 'ups' name (the server has: {names}). Use Re-detect."}
+        return {"state": "unknown", "detail": f"this check needs a 'ups' name (the server has: {names}). Open the server and choose Pick what to watch."}
     try:
         v = c.list_vars(name)
     except N.StaleData as e:

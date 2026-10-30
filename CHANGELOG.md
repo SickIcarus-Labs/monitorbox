@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.7.22** (with SNMP 0.3.10, Scrypted 0.2.3, Portainer 0.1.7, NUT 0.1.3, UniFi Network 0.2.23, UniFi Protect 0.1.4, #328) Small fixes found while writing the documentation. A VPN tunnel you paused on purpose in UniFi now shows as Degraded with the word "paused", not as Down. A UPS that reports both "on battery" and "low battery" is announced as the low battery. A garbled message can no longer stop the SNMP module. Portainer no longer follows a redirect with your access token; it tells you the address redirected. A Scrypted connection that asks for the certificate check is now really checked, even when another Scrypted connection does not ask. Error messages that said "Use Re-detect" now name the real button, "Pick what to watch".
 ## 1.7.10 to 1.7.21 (stable, October 29)
 
 - **1.7.21** (#324) The other site's tab now shows its "(managed by)" line expanded the first time it is opened. Before, it appeared only after tapping away and back, because the page asked the other site for its pairings at the next 10-second round.

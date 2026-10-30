@@ -317,6 +317,7 @@ class PoweredBy(unittest.TestCase):
         import importlib.util
         spec = importlib.util.spec_from_file_location("nut_main_for_engine", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "modules", "nut", "main.py"))
         m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        self.assertEqual(list(engine.POWER_URGENT)[0], "shutting down")      # most serious first (#328)
         for w in engine.POWER_URGENT:
             self.assertIn(w, m.STATUS_WORDS.values())
 

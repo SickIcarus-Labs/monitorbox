@@ -136,6 +136,15 @@ class ScryptedModule(unittest.TestCase):
         r = self.call("discover", {"connection": dict(self.conn, host="192.0.2.11")})
         self.assertIn("taking a picture from Doorbell failed", r["error"])
 
+    def test_certificate_checking_follows_each_connection_not_the_one_before(self):
+        """A connection that asks for the certificate check is checked even after a connection that does not (#328: one switch for the whole process)."""
+        other = dict(self.conn, host="192.0.2.10")
+        self.check("server")                                                  # no check asked for: self-signed is normal on Scrypted
+        self.check("server", conn=dict(other, verify_tls=True))               # check asked for
+        self.check("server", conn=dict(self.conn, host="192.0.2.11"))
+        tls = [c.split("tls=")[1] for c in self.calls() if c.startswith("connect")]
+        self.assertEqual(tls, ["unchecked", "checked", "unchecked"])
+
     def test_only_reads_ever_reach_scrypted(self):
         self.check("server"); self.check("cameras"); self.call("cameras", {"connection": self.conn})
         self.call("snapshot", {"connection": self.conn, "id": "1"}); self.call("discover", {"connection": self.conn})

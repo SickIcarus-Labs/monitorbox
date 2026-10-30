@@ -50,6 +50,22 @@ function baseUrl(conn) {
   return `https://${raw}:${conn.port || 10443}`;
 }
 
+// Node has one process-wide switch for certificate checking. A self-signed certificate is normal on Scrypted, so a connection that does not ask
+// for the check turns it off, but only while that connection is being made, and one connection at a time, so a connection that does ask for the
+// check is really checked (it used to inherit the switch from an earlier connection and was not).
+let tlsTurn = Promise.resolve();
+function withTls(verify, run) {
+  const go = async () => {
+    const was = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    if (verify) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED; else process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    try { return await run(); }
+    finally { if (was === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED; else process.env.NODE_TLS_REJECT_UNAUTHORIZED = was; }
+  };
+  const result = tlsTurn.then(go, go);
+  tlsTurn = result.then(() => {}, () => {});
+  return result;
+}
+
 async function connect(conn) {
   const url = baseUrl(conn);
   const key = JSON.stringify([url, conn.username, conn.password, !!conn.verify_tls]);
@@ -58,15 +74,14 @@ async function connect(conn) {
   if (have?.pending) return have.pending;
   if (have?.failedAt && Date.now() - have.failedAt < 60000 && have.refused)           // a refused login is not retried for a minute (no lock-outs)
     throw new ScryptedProblem(`${have.refused} (not retrying for a minute, so the account is not locked out)`);
-  if (!conn.verify_tls) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';              // a self-signed certificate is normal on Scrypted; only this module process is affected
   const entry = { pending: null };
   entry.pending = (async () => {
     const connectScryptedClient = await loadClient();
     const log = console.log; console.log = () => {};                                  // the client library is chatty and stdout is our protocol
     try {
-      const sdk = await timed('connecting to Scrypted', connectScryptedClient({
+      const sdk = await withTls(!!conn.verify_tls, () => timed('connecting to Scrypted', connectScryptedClient({
         baseUrl: url, pluginId: '@scrypted/core', username: conn.username, password: conn.password, clientName: 'MonitorBox', local: false,
-      }), (conn.timeout || 10) * 1000);
+      }), (conn.timeout || 10) * 1000));
       sdk.onClose = () => { sessions.delete(key); };
       sessions.set(key, { sdk });
       return sdk;
@@ -129,9 +144,9 @@ function checkCameras(cams, names) {
 }
 
 function checkCamera(cams, name) {
-  if (!name) return { state: 'unknown', detail: "this check needs a camera 'name'. Use Re-detect." };
+  if (!name) return { state: 'unknown', detail: "this check needs a camera 'name'. Open the server and choose Pick what to watch." };
   const c = cams.find(x => x.name.toLowerCase() === String(name).toLowerCase());
-  if (!c) return { state: 'unknown', detail: `Scrypted shows this account no camera called '${name}' any more (it shows: ${cams.map(x => x.name).join(', ') || 'none'}). Use Re-detect.` };
+  if (!c) return { state: 'unknown', detail: `Scrypted shows this account no camera called '${name}' any more (it shows: ${cams.map(x => x.name).join(', ') || 'none'}). Open the server and choose Pick what to watch.` };
   return { state: c.state, detail: c.detail };
 }
 
