@@ -14,6 +14,7 @@ READ_ONLY_PATHS = ("stat/device", "stat/health", "rest/networkconf", "v2/vpn/con
 LOOK_ALLOWED = (("GET", "v2/api/site/{site}/traffic"), ("GET", "v2/api/site/{site}/traffic-flows"), ("POST", "v2/api/site/{site}/traffic-flows"),
                 ("GET", "v2/api/site/{site}/traffic/applications"), ("GET", "v2/api/site/{site}/traffic/categories"))
 LOGIN_BACKOFF = 60                                       # after a refused login, do not try again for this long
+UNREACHABLE_FOR = 10                                      # after the console does not answer, every call fails at once for this long (then one real try)
 CACHE_SECONDS = 5                                        # checks that run together share one fetch
 
 
@@ -39,8 +40,11 @@ class Client:
         self.lock = threading.Lock()
         self.cookie, self.prefix, self.login_failed, self.csrf = None, None, None, None     # prefix: "/proxy/network" on UniFi OS
         self.cache = {}
+        self.unreachable = None      # (when, message) of the last time the controller did not answer
 
     def _request(self, method, path, body=None):
+        if self.unreachable and time.time() - self.unreachable[0] < UNREACHABLE_FOR:
+            raise UnifiError(self.unreachable[1])       # a console that just did not answer is not asked again by every check queued behind this one: each would wait out its own timeout
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method)
         req.add_header("Accept", "application/json")
@@ -52,11 +56,15 @@ class Client:
             req.add_header("X-Csrf-Token", self.csrf)       # UniFi OS answers 403 to a POST (even a read-only search) without the token it gave at login
         try:
             with self.opener.open(req, timeout=self.timeout) as r:
+                self.unreachable = None
                 return r.status, r.read(), r.headers
         except urllib.error.HTTPError as e:
+            self.unreachable = None
             return e.code, e.read(), e.headers
         except (OSError, ValueError) as e:
-            raise UnifiError(f"cannot reach the UniFi controller at {self.base} ({getattr(e, 'reason', e)})")
+            msg = f"cannot reach the UniFi controller at {self.base} ({getattr(e, 'reason', e)})"
+            self.unreachable = (time.time(), msg)
+            raise UnifiError(msg)
 
     def _login(self):
         if self.login_failed and time.time() - self.login_failed[0] < LOGIN_BACKOFF:
