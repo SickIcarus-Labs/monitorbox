@@ -7,7 +7,7 @@ const log = what => fs.appendFileSync(process.env.MB_FAKE_SCRYPTED_LOG, what + '
 
 export async function connectScryptedClient({ baseUrl, pluginId, username, password }) {
   const w = world();
-  log(`connect ${baseUrl} ${pluginId}`);
+  log(`connect ${baseUrl} ${pluginId} tls=${process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0' ? 'unchecked' : 'checked'}`);   // what certificate checking was in force while connecting
   if (w.down) throw new Error('connect ECONNREFUSED');
   if (username !== w.username || password !== w.password) throw new Error('Request failed with status code 401');
   const device = d => ({

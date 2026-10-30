@@ -82,7 +82,8 @@ def _aggregate_state(node, states):
 
 
 # The words of the NUT module's UPS status that mean the power is going (alerts.py announces these at once; a test keeps them in step with the module)
-POWER_URGENT = {"on battery": "is running on battery", "low battery": "has a low battery", "shutting down": "is shutting down"}
+# Most serious first: a UPS that reports "on battery" and "low battery" together is announced as the low battery (alerts.py takes the first match).
+POWER_URGENT = {"shutting down": "is shutting down", "low battery": "has a low battery", "on battery": "is running on battery"}
 
 
 _CONFIRMING = re.compile(r"^(?:failed|warning) just now, confirming \([^)]*\): (.*)$", re.S)

@@ -47,7 +47,7 @@ def uplink_of(d, devices):
 
 def check_device(params, devices):
     if not params.get("name") and not params.get("mac"):
-        return {"state": "unknown", "detail": "this check needs a device 'name' (or 'mac'). Use Re-detect."}
+        return {"state": "unknown", "detail": "this check needs a device 'name' (or 'mac'). Open the server and choose Pick what to watch."}
     d = find_device(devices, params.get("name"), params.get("mac"))
     if not d:
         names = ", ".join(sorted(dev_name(x) for x in devices)) or "none"
@@ -94,7 +94,7 @@ def readings(d):
 
 def check_temperature(params, devices):
     if not params.get("name") and not params.get("mac"):
-        return {"state": "unknown", "detail": "this check needs a device 'name' (or 'mac'). Use Re-detect."}
+        return {"state": "unknown", "detail": "this check needs a device 'name' (or 'mac'). Open the server and choose Pick what to watch."}
     d = find_device(devices, params.get("name"), params.get("mac"))
     if not d:
         return {"state": "unknown", "detail": f"the controller has no device called '{params.get('name') or params.get('mac')}'"}
@@ -138,7 +138,7 @@ def check_devices(params, devices):
 def check_health(params, health, devices=None):
     sub = str(params.get("subsystem") or "").lower()
     if not sub:
-        return {"state": "unknown", "detail": "this check needs a 'subsystem' (wan, lan, wlan, www or vpn). Use Re-detect."}
+        return {"state": "unknown", "detail": "this check needs a 'subsystem' (wan, lan, wlan, www or vpn). Open the server and choose Pick what to watch."}
     h = next((x for x in health if x.get("subsystem") == sub), None)
     if not h:
         return {"state": "unknown", "detail": f"the controller has no '{sub}' health (it has: {', '.join(x.get('subsystem', '?') for x in health) or 'none'})"}
@@ -233,7 +233,7 @@ def check_tunnel(params, networks, connections):
     name = params.get("name")
     mine = tunnels_of(networks)
     if not name:
-        return {"state": "unknown", "detail": "this check needs a tunnel 'name'. Use Re-detect."}
+        return {"state": "unknown", "detail": "this check needs a tunnel 'name'. Open the server and choose Pick what to watch."}
     n = next((t for t in mine if str(t.get("name", "")).lower() == str(name).lower()), None)
     if not n:
         names = ", ".join(sorted(str(t.get("name")) for t in mine)) or "none"
@@ -242,8 +242,8 @@ def check_tunnel(params, networks, connections):
     bits = [tunnel_kind(n)]
     if n.get("ip_subnet"):
         bits.append(f"tunnel {n['ip_subnet']}")
-    if st == "paused":
-        return {"state": "failed", "detail": " · ".join(bits + ["paused (turned off in UniFi)"])}
+    if st == "paused":                      # switched off on purpose in UniFi: worth a heads-up, not a red Down
+        return {"state": "degraded", "detail": " · ".join(bits + ["paused (turned off in UniFi)"])}
     if st == "connected":
         return {"state": "healthy", "detail": " · ".join(bits + ["connected"])}
     if st in ("disconnected", "down", "error", "failed"):

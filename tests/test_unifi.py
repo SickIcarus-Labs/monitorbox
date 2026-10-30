@@ -181,7 +181,7 @@ class UnifiChecks(unittest.TestCase):
         self.assertEqual((r["state"], r["detail"]), ("healthy", "OpenVPN · tunnel 10.24.112.134/32 · connected"))
         self.assertEqual(self.run_check("tunnel", name="Tidewater")["detail"], "WireGuard · tunnel 192.168.4.4/32 · connected")
         r = self.run_check("tunnel", name="Ferndale")
-        self.assertEqual((r["state"], "paused" in r["detail"]), ("failed", True))
+        self.assertEqual((r["state"], "paused" in r["detail"]), ("degraded", True))      # paused on purpose in UniFi: Degraded, not Down (#328)
         for status, want in [("disconnected", "failed"), ("down", "failed"), ("connecting", "unknown"), ("", "unknown")]:
             self.c.connections[0]["status"] = status
             self.assertEqual(self.run_check("tunnel", name="PIA Cali")["state"], want, status)
@@ -204,7 +204,7 @@ class UnifiChecks(unittest.TestCase):
         r = self.run_check("tunnel", name="PIA Cali")
         self.assertEqual(r["state"], "unknown")
         self.assertIn("did not report", r["detail"])
-        self.assertEqual(self.run_check("tunnel", name="Ferndale")["state"], "failed")      # paused is known from the settings
+        self.assertEqual(self.run_check("tunnel", name="Ferndale")["state"], "degraded")      # paused is known from the settings
         self.assertEqual(self.run_check("devices")["state"], "healthy")
         self.c.os_style = False                                              # a classic controller has no such endpoint either
         M.CLIENTS.clear()
@@ -225,7 +225,7 @@ class UnifiChecks(unittest.TestCase):
         self.assertEqual({(s["node"], s["group"], s["rule"]) for s in d["suggest"]}, {(s["label"] if s["batch"] != "Overview" else "UniFi", "Network", "primary") for s in d["suggest"]})      # the overview shares one item; every device and tunnel is its own
         self.assertEqual({s["batch"] for s in d["suggest"]}, {"Overview", "Devices", "VPN tunnels"})
         for s in d["suggest"]:                                  # every suggestion is a check that really runs
-            want = "failed" if s["params"].get("name") == "Ferndale" else "healthy"       # Ferndale is paused in the fake
+            want = "degraded" if s["params"].get("name") == "Ferndale" else "healthy"       # Ferndale is paused in the fake
             self.assertEqual(self.run_check(s["check"], **s["params"])["state"], want, s)
 
     def test_classic_controller_paths_and_a_named_site(self):

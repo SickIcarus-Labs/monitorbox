@@ -17,6 +17,12 @@ CACHE_SECONDS = 5            # checks that run together share one fetch
 DEFAULT_PORT = 9443
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect would carry the access token to wherever it points. Refuse it: the answer is then the redirect's own HTTP error."""
+    def redirect_request(self, *a, **k):
+        return None
+
+
 class PortainerError(Exception):
     pass
 
@@ -44,7 +50,7 @@ class Client:
         if not verify_tls:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-        self.opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), urllib.request.ProxyHandler({}))
+        self.opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), urllib.request.ProxyHandler({}), _NoRedirect())
         self.lock, self.cache = threading.Lock(), {}
 
     def get(self, path, query=None, auth=True):
@@ -64,6 +70,8 @@ class Client:
             with self.opener.open(req, timeout=self.timeout) as r:
                 data = json.loads(r.read() or b"null")
         except urllib.error.HTTPError as e:
+            if 300 <= e.code < 400:
+                raise PortainerError(f"Portainer redirected the request (HTTP {e.code}); the token is never sent on to another address. Check the address, and whether it should be http or https")
             why = {401: "Portainer refused the access token", 403: "Portainer refused the access token (it may not be allowed to see that environment)",
                    404: "Portainer does not have that (is it a newer or older version?)"}.get(e.code, f"Portainer answered HTTP {e.code}")
             raise PortainerError(why)

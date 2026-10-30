@@ -107,4 +107,9 @@ def _serve(req):
 if __name__ == "__main__":
     pool = ThreadPoolExecutor(max_workers=8)   # one slow device must not hold up the others
     for line in sys.stdin:
-        pool.submit(serve, json.loads(line))
+        try:
+            req = json.loads(line)
+            req["id"]
+        except (ValueError, TypeError, KeyError):
+            continue                       # one garbled line must not end the module (and so every check)
+        pool.submit(serve, req)

@@ -276,7 +276,7 @@ class ByName(unittest.TestCase):
         r = self.vol("gone", "/nope")
         self.assertEqual(r["state"], "unknown")
         self.assertIn("/data", r["detail"])
-        self.assertIn("Re-detect", r["detail"])
+        self.assertIn("Pick what to watch", r["detail"])      # the message now names the real button (#328)
 
     def test_thresholds(self):
         self.agent.mib = volume_rows([(1, "/a", 860, 1000), (2, "/b", 960, 1000)])

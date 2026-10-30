@@ -76,11 +76,11 @@ def camera_state(c, now=None):
 def check_camera(params, boot, now=None):
     cams = boot.get("cameras") or []
     if not (params.get("name") or params.get("id")):
-        return {"state": "unknown", "detail": "this check needs a camera 'name'. Use Re-detect."}
+        return {"state": "unknown", "detail": "this check needs a camera 'name'. Open the server and choose Pick what to watch."}
     c = find(cams, params.get("name"), params.get("id"))
     if not c:
         names = ", ".join(sorted(cam_name(x) for x in cams)) or "none"
-        return {"state": "unknown", "detail": f"UniFi Protect has no camera called '{params.get('name')}' any more (it has: {names}). Use Re-detect."}
+        return {"state": "unknown", "detail": f"UniFi Protect has no camera called '{params.get('name')}' any more (it has: {names}). Open the server and choose Pick what to watch."}
     st, detail = camera_state(c, now)
     return {"state": st, "detail": detail}
 
@@ -168,7 +168,7 @@ def check_drive(params, boot, now=None):
     Protect's own screen shows such a drive green."""
     nvr = boot.get("nvr") or {}
     if params.get("slot") is None and not params.get("model"):
-        return {"state": "unknown", "detail": "this check needs a drive 'slot'. Use Re-detect."}
+        return {"state": "unknown", "detail": "this check needs a drive 'slot'. Open the server and choose Pick what to watch."}
     mine = [d for d in drives(nvr) if (params.get("slot") is None or d.get("slot") == params.get("slot")) and (not params.get("model") or d.get("model") == params.get("model"))]
     if not mine:
         return {"state": "unknown", "detail": "UniFi Protect does not list that drive (it may be out, or the console did not report its drives)"}

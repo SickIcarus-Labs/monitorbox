@@ -94,7 +94,7 @@ class _Missing(Exception):
 def not_found(what, name, found):
     shown = ", ".join(found[:8]) + (" …" if len(found) > 8 else "")
     return res("unknown", f"{what} '{name}' is not on the device any more" + (f" (it has: {shown})" if found else "") +
-               ". Use Re-detect to pick the current name.")
+               ". Open the server, choose Pick what to watch, and pick the current name.")
 
 
 # ---------------------------------------------------------------- checks ----
@@ -125,7 +125,7 @@ def resources(sess, p, conn):
 def volume(sess, p, conn):
     name = p.get("name")
     if not name:
-        return res("unknown", "this check needs a 'name' (a volume name; use Re-detect to see them)")
+        return res("unknown", "this check needs a 'name' (a volume name; open the server and choose Pick what to watch to see them)")
     try:
         idx, v = by_name(sess, conn.get("id"), HR_DESCR, name, (HR_UNITS, HR_SIZE, HR_USED))
     except _Missing as m:
@@ -145,7 +145,7 @@ def volume(sess, p, conn):
 def interface(sess, p, conn):
     name = p.get("name")
     if not name:
-        return res("unknown", "this check needs a 'name' (an interface name; use Re-detect to see them)")
+        return res("unknown", "this check needs a 'name' (an interface name; open the server and choose Pick what to watch to see them)")
     try:
         idx, v = by_name(sess, conn.get("id"), IF_NAME, name, (IF_OPER, IF_HIGHSPEED))
     except _Missing as m:

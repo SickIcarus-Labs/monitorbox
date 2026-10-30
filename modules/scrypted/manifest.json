@@ -1,1 +1,1 @@
-{"id": "scrypted", "name": "Scrypted", "version": "0.2.2", "entry": ["node", "main.mjs"]}
+{"id": "scrypted", "name": "Scrypted", "version": "0.2.3", "entry": ["node", "main.mjs"]}
