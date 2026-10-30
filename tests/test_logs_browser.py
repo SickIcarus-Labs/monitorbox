@@ -35,4 +35,12 @@ class Logs(T.SnmpE2E):
             pg.evaluate("lgHeld=[{id:Date.now()+1,time:'2026-10-30T03:00:00',level:'info',source:'app',text:'held line'}];lgPill()")
             self.assertFalse(pg.evaluate("document.getElementById('lg-new').hidden"))
             pg.click("#lg-new"); self.assertIn("held line", pg.inner_text("#lg-list"))
+            # the level list never offers two choices that mean the same: with debug on, "All" already includes it, so the other choice is "All except debug"
+            pg.evaluate("lgF.level='debug'"); pg.evaluate("lgSetDebug(true)"); pg.wait_for_function("lgDebug.on")
+            self.assertEqual(pg.eval_on_selector_all("#lg-lvl option", "o=>o.map(x=>x.textContent)"), ["All", "All except debug", "Warnings and errors", "Errors only"])
+            self.assertEqual(pg.evaluate("lgF.level"), "auto", "a choice that is no longer offered falls back to All")
+            pg.select_option("#lg-lvl", "info"); self.assertEqual(pg.evaluate("lgF.level"), "info")
+            pg.evaluate("lgSetDebug(false)"); pg.wait_for_function("!lgDebug.on")
+            self.assertEqual(pg.eval_on_selector_all("#lg-lvl option", "o=>o.map(x=>x.textContent)"), ["All", "Warnings and errors", "Errors only", "All, with older debug lines"])
+            self.assertEqual(pg.evaluate("lgF.level"), "auto")
             self.assertEqual(errs, []); b.close()
