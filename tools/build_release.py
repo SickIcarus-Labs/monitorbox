@@ -76,7 +76,7 @@ def make_tgz(src_dir, arc_prefix=""):
             for base, dirs, files in os.walk(src_dir):
                 dirs[:] = sorted(d for d in dirs if d not in SKIP)
                 for name in sorted(files):
-                    if name.endswith(".pyc") or name == "CHANGELOG.md":      # a module's notes travel in the catalog, not in its archive (so a note never needs a new version)
+                    if name.endswith(".pyc") or (name == "CHANGELOG.md" and base == src_dir):      # a module's own notes travel in the catalog, not in its archive (so a note never needs a new version); only that one file: packages inside carry their own
                         continue
                     full = os.path.join(base, name)
                     rel = os.path.join(arc_prefix, os.path.relpath(full, src_dir))

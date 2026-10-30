@@ -64,6 +64,21 @@ class Skip(unittest.TestCase):
         self.assertEqual(cat["modules"]["kept"][0]["changes"], ["What the module does, in plain words."])
         self.assertNotIn("changes", cat["modules"]["left-out"][0])
 
+    def test_only_the_modules_own_changelog_stays_out_of_the_archive(self):
+        """Regression (1.9.4 publish failed): every changelog was left out, including the ones inside a module's node packages, so the Scrypted archive no longer
+        matched the published one."""
+        import importlib.util, io, tarfile
+        spec = importlib.util.spec_from_file_location("br", BUILD); br = importlib.util.module_from_spec(spec); spec.loader.exec_module(br)
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        os.makedirs(os.path.join(d, "node_modules", "pkg"))
+        for rel in ("CHANGELOG.md", "main.py", os.path.join("node_modules", "pkg", "CHANGELOG.md")):
+            with open(os.path.join(d, rel), "w") as f:
+                f.write("x\n")
+        names = tarfile.open(fileobj=io.BytesIO(br.make_tgz(d)), mode="r:gz").getnames()
+        self.assertIn("main.py", names)
+        self.assertNotIn("CHANGELOG.md", names, "the module's own notes are not shipped")
+        self.assertIn(os.path.join("node_modules", "pkg", "CHANGELOG.md"), names, "a package's own file is")
+
     def test_notes_added_after_a_version_was_published_reach_it_without_a_new_version(self):
         ptr, cat1, out1 = self.build()
         sha = cat1["modules"]["kept"][0]["sha256"]
