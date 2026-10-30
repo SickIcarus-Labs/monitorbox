@@ -29,6 +29,17 @@ class Stats(unittest.TestCase):
             perfstats.slow(f"x{i}", 5000)
         self.assertEqual(len(perfstats.slow_calls()), 10, "only the last few are kept")
 
+    def test_a_request_that_has_not_finished_is_listed_and_one_that_has_is_not(self):
+        """Regression: a request that never finishes is never recorded, so the report looked clean while Settings would not load."""
+        slow_one = perfstats.begin("GET /api/versions")
+        quick = perfstats.begin("GET /api/state")
+        perfstats.end(quick)
+        got = perfstats.waiting(over_ms=0)
+        self.assertEqual([g["what"] for g in got], ["GET /api/versions"])
+        self.assertEqual(perfstats.waiting(), [], "a request younger than a second is not worth a line")
+        self.assertGreaterEqual(perfstats.end(slow_one), 0)
+        self.assertEqual(perfstats.waiting(over_ms=0), [])
+
     def test_only_the_last_samples_are_kept(self):
         for i in range(perfstats.KEEP + 50):
             perfstats.record("module", "snmp.poll", i)

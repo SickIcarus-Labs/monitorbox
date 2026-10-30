@@ -195,6 +195,7 @@ async function perfRun(){const out=$('#perfout');if(!out)return;out.innerHTML='<
   L.push('Requests handled (n / avg / p95 / max ms): '+P.requests.slice(0,12).map(x=>`${x.key} ${x.count}/${x.avgMs}/${x.p95Ms}/${x.maxMs}`).join(' · '));
   L.push('Module calls (n / avg / p95 / max ms): '+(P.modules.slice(0,12).map(x=>`${x.key} ${x.count}/${x.avgMs}/${x.p95Ms}/${x.maxMs}`).join(' · ')||'none yet'));
   L.push('Slow module calls (over 3 s, newest first): '+((P.slow||[]).map(x=>`${x.what} ${(x.ms/1000).toFixed(1)} s, ${x.agoSec<120?x.agoSec+' s':Math.round(x.agoSec/60)+' min'} ago`).join(' · ')||'none'));
+  L.push('Requests still waiting (over 1 s): '+((P.waiting||[]).map(x=>`${x.what} ${x.ageSec} s`).join(' · ')||'none'));
   L.push('Memory MB: '+P.processes.map(x=>x.name+' '+x.mb).join(' · ')+(P.about&&P.about.containerMb!=null?` · container ${P.about.containerMb}`:''))}
  else h+=`<p class=sub>The box did not give its own timings${err?' ('+esc(err)+')':''}. It may be running an older version.</p>`;
  PERFTXT=L.join('\n');out.innerHTML=h;$('#perfcopy').hidden=false}

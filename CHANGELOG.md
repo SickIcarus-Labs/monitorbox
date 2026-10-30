@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.6** (#336) For finding why Settings sometimes will not load: the performance report now lists requests that are still waiting (a request that never finishes used to be missing from it), and the debug log notes any request that took over a second.
 - **1.9.5** (#334) The log's "started" line for a module now says which process it is, which process it stopped and who asked for the start. At every restart UniFi Network is started twice a second apart and its checks flip to Unknown for a few seconds in between; this shows where the second start comes from.
 - **1.9.4** (#333) Modules now have their own change notes. Settings, Versions shows **What changed** under a module update, the same as for MonitorBox itself. Each module has a short note on what it does to start with, and every later version adds a line.
 - **1.9.3** (#329) The debug log now names the device on every module call ("call snmp.counters for Goliath took 57 ms"), so a slow call can be tied to the device that was slow. Only the device's name is logged, never its address or login.

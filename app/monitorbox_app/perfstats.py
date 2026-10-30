@@ -64,9 +64,37 @@ def skip(path):
     return path.startswith(("/api/stream", "/api/live/events", "/api/perf")) or not path.startswith("/api/")
 
 
+_open = {}                      # token -> (started, what): requests being answered right now. A request that never finishes is never recorded, so this is the only way to see one
+_next = [0]
+SLOW_REQUEST_MS = 1000
+
+
+def begin(what):
+    with _lock:
+        _next[0] += 1
+        _open[_next[0]] = (time.monotonic(), str(what)[:80])
+        return _next[0]
+
+
+def end(token):
+    """Takes the request off the waiting list; returns how long it took in ms."""
+    with _lock:
+        t = _open.pop(token, None)
+    return (time.monotonic() - t[0]) * 1000 if t else 0.0
+
+
+def waiting(over_ms=SLOW_REQUEST_MS):
+    """Requests that have been waiting longer than `over_ms`, oldest first: [{what, ageSec}]."""
+    now = time.monotonic()
+    with _lock:
+        rows = sorted(((now - t) * 1000, w) for t, w in _open.values())
+    return [{"what": w, "ageSec": round(ms / 1000, 1)} for ms, w in reversed(rows) if ms >= over_ms]
+
+
 def reset():
     with _lock:
         _data.clear()
+        _open.clear()
         del _slow[:]
 
 

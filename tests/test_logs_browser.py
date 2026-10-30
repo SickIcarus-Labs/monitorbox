@@ -13,6 +13,11 @@ class Logs(T.SnmpE2E):
     test_monitoring_follows_a_volume_when_the_indexes_move_and_re_detect_shows_it = None
     test_the_editor_masks_the_community_and_keeps_it_on_save = None
 
+    def test_the_performance_report_lists_requests_still_waiting(self):
+        c = self.start(); self.configure(c, [], [])
+        got = c.get("/api/perf")
+        self.assertEqual(got["waiting"], [], "nothing is stuck on a quiet box")
+
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_tap_opens_a_line_a_picked_filter_does_not_hold_lines_back_and_reading_does(self):
         c = self.start(); self.configure(c, [], [])
