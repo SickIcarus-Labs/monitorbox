@@ -322,6 +322,18 @@ class Watch(unittest.TestCase):
         self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 9, 0, 3420, 0, 0)})], ["sw1"], now=43 * 60)
         self.assertEqual(self.w.series[key][-1][2] - q[-2][2], 10, "later real drops still count")
 
+    def test_the_log_shows_the_raw_values_when_only_the_drop_counter_falls(self):
+        from monitorbox_app import applog
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        log = applog.setup(os.path.join(d.name, "logs")); self.addCleanup(lambda: setattr(applog, "_log", None))
+        self.w.set_enabled(True)
+        self.run_minutes(40, lambda m: m * 1000)
+        self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 7, 0, 30000, 0, 0)})], ["sw1"], now=41 * 60)
+        self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 9, 0, 3410, 0, 0)})], ["sw1"], now=42 * 60)
+        text = "\n".join(r["text"] for r in log.entries(source="portwatch"))
+        self.assertIn("drops fell Core switch, Port 5 was=30000 now=3410", text)
+        self.assertIn("raw=[", text)
+
     def test_the_log_says_when_a_ports_history_is_started_and_thrown_away(self):
         from monitorbox_app import applog
         d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)

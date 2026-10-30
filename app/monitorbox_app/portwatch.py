@@ -299,6 +299,7 @@ class PortWatch:
                         # only the drop counter fell (some NIC drivers shrink it by themselves): carry on from where it was, so the errors and link history and the learning survive
                         r = self.resets.setdefault(k, [0, "drops", 0.0, None, None])
                         r[0], r[1], r[2], r[3], r[4] = r[0] + 1, "drops", now, q[-1][2], row[2]
+                        self._trace(now, f"drops fell {self._nm(k)} was={q[-1][2]} now={row[2]} raw={raw} off={off} (carried on)")
                         for n in (2, 3):
                             if a[n] < q[-1][4 + n]:
                                 off[n] = q[-1][4 + n] - raw[n]
