@@ -105,7 +105,7 @@ A check normally runs every 15 seconds with a 10 second timeout in the App. A fa
 
 ## Known limits
 
-- **At most 4 requests at once per device** (address and port). A fifth is turned away at once instead of waiting. A rejected check answers **Unknown** with "that device is still busy with earlier requests"; other calls get an error with the same words. The count goes back down as the earlier requests finish.
+- **At most 4 requests at once per device** (address and port), each device with its own four workers. More than four wait their turn there (a device such as a NAS has dozens of checks that all arrive together). A request that has waited 10 seconds, or that arrives when 300 are already waiting, is turned away: a check answers **Unknown** with "that device is still busy with earlier requests"; other calls get an error with the same words. A device that stops answering therefore holds only its own workers, never another device's.
 - **The module runs 8 requests at a time in all.** One slow device can use at most 4 of the 8, but two devices that both stop answering can use all 8 until their requests time out.
 - One conversation with a device at a time: requests for the same connection take turns.
 - A check that needs a long table walk on a slow device can run past the App's timeout and show Unknown ("did not answer").
@@ -143,7 +143,7 @@ Messages appear in the check's detail line, prefixed "SNMP:" when they come from
 | 'x' matches N rows; use a more specific name | Two rows share the name. |
 | the device did not report the size of 'x' / a status for 'x' | The row exists but has no value. |
 | (unrecognised status; tell MonitorBox what it means with ok / warn / bad) | A table row status is in no list; shown as Degraded. |
-| that device is still busy with earlier requests (it is slow or not answering) | The 4-at-once limit; see above. |
+| that device is still busy with earlier requests (it is slow or not answering) | A request waited more than 10 seconds for its device's four workers; see above. |
 | the device lists no interfaces | Switch report on a device with no interface table. |
 | `... (file.py:123)` | An unexpected fault in the module; the file and line say where. |
 
