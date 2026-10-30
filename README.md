@@ -34,7 +34,7 @@ You need a machine running Docker. Quick version:
 2. Start the container from the [compose file](docs/INSTALL.md#the-compose-file), with Portainer or plain Docker Compose.
 3. Open `http://<your-machine>:8080`.
 
-The full steps, including installing Portainer, are in the **[install guide](docs/INSTALL.md)**. The other guides: [setup guides](docs/GUIDES.md), [troubleshooting](docs/TROUBLESHOOTING.md), [security and privacy](docs/SECURITY.md), [known limitations](docs/LIMITATIONS.md). Please read the install guide's "Before you start" section: a little preparation (read-only accounts, SNMP) makes the first run much smoother.
+The full steps, including installing Portainer, are in the **[install guide](docs/INSTALL.md)**. The documentation index is [docs/README.md](docs/README.md). The other guides: [setup guides](docs/GUIDES.md), [troubleshooting](docs/TROUBLESHOOTING.md), [security and privacy](docs/SECURITY.md), [known limitations](docs/LIMITATIONS.md). Please read the install guide's "Before you start" section: a little preparation (read-only accounts, SNMP) makes the first run much smoother.
 
 ## How it is built
 
