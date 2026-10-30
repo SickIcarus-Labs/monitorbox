@@ -1,6 +1,7 @@
 """Backups for the App: a thin wrapper over the launcher's backup.py, so the App and the launcher
 (which does the restoring, even with the App down) share ONE code path and ONE file format."""
 import json, os, sys, threading, time
+from . import applog
 
 OLD_IMAGE = ("The container image is out of date and cannot do backups. "
              "Re-pull the image (redeploy the stack with 'Re-pull image') once, then try again.")
@@ -21,7 +22,34 @@ def lib():
         fast = lambda root: listing(root)
         fast.fast = True
         backup.list_backups = fast
+    if not getattr(backup.create, "with_log", False):
+        # A full backup also carries the normal log (never the debug log, never a settings backup), so a rebuilt box still has its history.
+        # The image's own backup code only walks config/, data/app/ and releases/, and cannot change without a re-pull, so the App puts a copy where it looks.
+        original = backup.create
+
+        def create(root, kind="config", *a, **k):
+            if kind == "full":
+                copy_log(root)
+            return original(root, kind, *a, **k)
+        create.with_log = True
+        backup.create = create
     return backup
+
+
+def copy_log(root):
+    """The normal log's files, copied into data/app/log-copy/ (the same files, replaced each time). Never raises: a backup without the log is still a backup."""
+    import shutil
+    try:
+        dst = os.path.join(root, "data", "app", "log-copy")
+        shutil.rmtree(dst, ignore_errors=True)
+        src = os.path.join(root, "logs")
+        names = [n for n in os.listdir(src) if n.startswith("mb.log")]
+        if names:
+            os.makedirs(dst, exist_ok=True)
+            for n in names:
+                shutil.copy2(os.path.join(src, n), os.path.join(dst, n))
+    except OSError:
+        pass
 
 
 _cache = {"sig": None, "list": None}
@@ -125,6 +153,11 @@ def run_auto(root, app_version):
     made = []
     for kind, age in (("config", 86400), ("full", 7 * 86400)):
         if due(b.list_backups(root), kind, age):
-            made.append(b.create(root, kind, "auto", app_version=app_version))
+            try:
+                made.append(b.create(root, kind, "auto", app_version=app_version))
+            except Exception as e:
+                applog.error("backups", f"The automatic {kind} backup failed: {e}")
+                raise
+            applog.info("backups", f"Automatic {kind} backup made: {made[-1]}.")
             note_timing()
     return made

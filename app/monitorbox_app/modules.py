@@ -7,7 +7,7 @@ A module may also send unasked lines {"event": "...", "session": "<id>", "messag
 listened for that session id (ModuleProcess.listen), and are dropped if nobody did.
 """
 import json, os, re, select, shutil, subprocess, sys, threading, time
-from . import perfstats
+from . import perfstats, applog
 
 from .store import read_json, write_json
 
@@ -139,6 +139,8 @@ class Modules:
         self.starting = set()             # modules the app is bringing up right now: a check for one of them waits instead of reporting "not running"
         self.boot = time.monotonic()
         self.install_tried = {}           # module id -> when an install for a need was last tried
+        self.timeouts = {}                # module id -> calls in a row that got no answer (logged once at 5, and when it answers again)
+        self.last_err = {}                # module id -> the last reason it would not start, so the log says each reason once
 
     def state(self):
         return read_json(self.paths.modules_state, {})
@@ -160,6 +162,9 @@ class Modules:
         self.running[mid] = p
         if old:
             old.stop()
+        self.__dict__.setdefault("timeouts", {}).pop(mid, None)
+        self.__dict__.setdefault("last_err", {}).pop(mid, None)
+        applog.info("modules", f"{mid} {version} started" + (f" (replacing {old.version})" if old and getattr(old, 'version', None) not in (None, version) else "") + ".")
 
     def _to_start(self, st):
         want = self.wanted()
@@ -183,8 +188,9 @@ class Modules:
             def one(mid, version):
                 try:
                     self._start(mid, version)
-                except Exception:
-                    pass  # shown as not running in the UI
+                except Exception as e:
+                    applog.error("modules", f"{mid} {version} did not start: {e}")
+                    # shown as not running in the UI
                 finally:
                     self.starting.discard(mid)
             # a few at a time: the wait is a fraction of all of them added up, without eight programs starving each other on a small computer
@@ -208,10 +214,12 @@ class Modules:
             try:
                 self.install_archive(entry["url"], entry["sha256"], self.dir(mid, entry["version"]))
             except Exception as e:
+                applog.error("modules", f"{mid} {entry['version']} could not be installed: {e}")
                 return f"failed: {e}"
             try:
                 self._start(mid, entry["version"])
             except Exception as e:
+                applog.error("modules", f"{mid} {entry['version']} installed but would not start: {e}" + (f" ({rec.get('active')} keeps running)" if rec.get("active") else ""))
                 failed = rec.get("failed", [])
                 if entry["version"] not in failed:
                     failed.append(entry["version"])
@@ -222,6 +230,7 @@ class Modules:
                 return f"failed: {e}"
             st[mid] = {"active": entry["version"], "failed": rec.get("failed", []), "sha256": entry["sha256"]}   # the build that runs: a repo that offers the same bytes can take over
             self._save(st)
+            applog.info("modules", f"{mid} updated" + (f" from {rec['active']}" if rec.get("active") else "") + f" to {entry['version']}.")
             return "updated"
 
     def uninstall(self, mid):
@@ -248,10 +257,14 @@ class Modules:
             self.last_try[mid] = time.monotonic()
             rec = self.state().get(mid, {})
             if rec.get("active"):
+                if self.running.get(mid) is not None and mid not in self.__dict__.setdefault("last_err", {}):
+                    applog.warning("modules", f"{mid} stopped unexpectedly; starting it again.")
                 try:
                     self._start(mid, rec["active"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    if self.__dict__.setdefault("last_err", {}).get(mid) != str(e):
+                        self.last_err[mid] = str(e)
+                        applog.error("modules", f"{mid} {rec['active']} would not start again: {e}")
             return self.running.get(mid)
         finally:
             self.lock.release()
@@ -276,9 +289,19 @@ class Modules:
             raise RuntimeError(f"the {mid} module is not running (install it under Settings, Versions)")
         t0 = time.monotonic()
         try:
-            return p.call(method, params, timeout=timeout)
+            r = p.call(method, params, timeout=timeout)
+            if self.__dict__.setdefault("timeouts", {}).pop(mid, 0) >= 5:
+                applog.info("modules", f"{mid} is answering again.")
+            return r
+        except TimeoutError:
+            tm = self.__dict__.setdefault("timeouts", {})
+            n = tm[mid] = tm.get(mid, 0) + 1
+            if n == 5:
+                applog.error("modules", f"{mid} has not answered {n} calls in a row (last: {method}).")
+            raise
         finally:
             ms = (time.monotonic() - t0) * 1000
+            applog.debug("modules", f"call {mid}.{method} took {ms:.0f} ms")
             perfstats.record("module", f"{mid}.{method}", ms)
             if ms >= perfstats.SLOW_MS:
                 c = (params or {}).get("connection") if isinstance(params, dict) else None

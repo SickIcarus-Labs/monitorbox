@@ -28,7 +28,7 @@ written to a log or an error message.
 import calendar, json, os, re, secrets, socket, threading, time, urllib.error, urllib.request
 from urllib.parse import urlparse
 
-from . import engine, ha, mailer
+from . import applog, engine, ha, mailer
 from .store import read_json, write_json
 
 RECOVER_AFTER = 30
@@ -670,12 +670,16 @@ class Alerts:
                 if err is None:
                     self.outbox.remove(item)
                     self.last = {"at": _iso(now), "ok": True, "what": item["event"]["title"], "error": None}
+                    applog.info("alerts", f"Sent: {item['event']['title']} (via {', '.join(item.get('via') or ['?'])})" + (f", after {item['tries']} failed tries" if item.get("tries") else "") + ".")
                 else:
                     item["tries"] += 1
                     item["next"] = now + min(5 * 3 ** (item["tries"] - 1), MAX_BACKOFF)
                     self.last = {"at": _iso(now), "ok": False, "what": item["event"]["title"], "error": err}
                     if now - item["first"] >= GIVE_UP_AFTER:
                         self.outbox.remove(item)
+                        applog.error("alerts", f"Gave up sending: {item['event']['title']} after {item['tries']} tries: {err}")
+                    else:
+                        applog.warning("alerts", f"Not delivered (try {item['tries']}, next in {int(item['next'] - now)} s): {item['event']['title']}: {err}")
                 self._save()
 
     def test(self):

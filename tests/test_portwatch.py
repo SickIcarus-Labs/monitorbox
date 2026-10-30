@@ -278,14 +278,15 @@ class Watch(unittest.TestCase):
         self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 9, 0, 3420, 0, 0)})], ["sw1"], now=43 * 60)
         self.assertEqual(self.w.series[key][-1][2] - q[-2][2], 10, "later real drops still count")
 
-    def test_the_trace_file_says_when_a_ports_history_is_started_and_thrown_away(self):
+    def test_the_log_says_when_a_ports_history_is_started_and_thrown_away(self):
+        from monitorbox_app import applog
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        log = applog.setup(os.path.join(d.name, "logs")); self.addCleanup(lambda: setattr(applog, "_log", None))
         self.w.set_enabled(True)
         self.run_minutes(3, lambda m: m)
         self.w.feed([dev("Core switch", **{"Port 5": (0, 0, 0, 0, 0)})], ["sw1"], now=4 * 60)         # a restart: errors fall to 0
         self.w.feed([dev("Core switch")], ["sw1"], now=5 * 60)
-        path = os.path.join(os.path.dirname(self.w.history_path), "port-trace.log")
-        with open(path) as f:
-            text = f.read()
+        text = "\n".join(r["text"] for r in log.entries(source="portwatch"))
         self.assertIn("start sw1|Port 5", text)
         self.assertIn("reset sw1|Port 5 errors", text)
         self.assertIn("gone sw1|Port 5", text)

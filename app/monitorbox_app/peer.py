@@ -23,7 +23,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from . import wanaddr
+from . import applog, wanaddr
 from .store import read_json, write_json
 
 DEFAULT_PORT = 8443
@@ -390,6 +390,7 @@ class Peer:
         c["managers"].append({"id": mid, "name": name, "key": key, "since": int(self.clock())})
         self._write(c)
         self._changed()
+        applog.info("sites", f"{name} paired with this MonitorBox and now manages it.")
         return {"id": mid, "key": key, "name": self.name(), "version": self.version()}
 
     def _changed(self):
@@ -665,6 +666,7 @@ class Peer:
         c["sites"].append({"id": sid, "name": nm, "address": addr, "mid": j["id"], "key": j["key"], "since": int(self.clock())})
         self._write(c)
         self._changed()
+        applog.info("sites", f"Paired with {nm} at {addr}.")
         self.poll_once()
         return self.get()
 
@@ -684,6 +686,7 @@ class Peer:
         c["sites"] = [x for x in c["sites"] if x["id"] != sid]
         self._write(c)
         self._changed()
+        applog.info("sites", f"Removed the site {s.get('name') or sid}.")
         with self.lock:
             self.links.pop(sid, None)
         return self.get()

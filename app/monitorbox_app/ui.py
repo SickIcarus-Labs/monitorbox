@@ -135,6 +135,21 @@ small,.sub{color:var(--sub)}
 @media (prefers-reduced-motion:reduce){.busybar i{animation:none;width:100%;opacity:.5}}
 .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1rem;margin:.75rem 0}
 textarea{width:100%;min-height:260px;font:13px/1.4 ui-monospace,Menlo,monospace}
+.lg-bar{display:flex;gap:.5rem;flex-wrap:wrap;padding:.6rem 0}
+.lg-bar select,.lg-bar input{min-height:44px;flex:1 1 9rem;min-width:0}
+.lg-bar input{flex:2 1 12rem;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:12px;color:inherit;padding:.6rem .9rem}
+#lg-nw{position:sticky;top:72px;height:0;z-index:3;text-align:center}
+#lg-new{margin:.2rem auto;box-shadow:0 4px 18px rgba(0,0,0,.5)}
+#lg-new[hidden],#lg-menu[hidden]{display:none}
+.lg-day{margin:1rem 0 .2rem;font-size:13px;color:var(--sub);text-transform:uppercase;letter-spacing:.04em}
+.lg-l{display:grid;grid-template-columns:auto auto 1fr;gap:.1rem .6rem;align-items:baseline;padding:.55rem .1rem;border-bottom:1px solid var(--line);cursor:pointer;min-height:44px}
+.lg-l .lg-x{grid-column:1/-1;font-size:15px;overflow-wrap:anywhere}
+.lg-l:not(.open) .lg-x{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lg-t{font-variant-numeric:tabular-nums;color:var(--sub);font-size:13px}
+.lg-s{color:var(--sub);font-size:13px;text-align:right}
+.lg-lv{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:.05rem .4rem;border-radius:99px;border:1px solid var(--line)}
+.lg-lv.warning{color:#FBBF24;border-color:#FBBF24}.lg-lv.error{color:#F87171;border-color:#F87171}.lg-lv.debug{color:var(--sub)}
+.lg-d{grid-column:1/-1;font-size:12px;color:var(--sub)}
 </style><body><header id=hdr hidden></header><main id=m>Loading…</main><div id=dr></div><script>
 const $=s=>document.querySelector(s);
 /* Sites: with another site's tab picked, every call except these goes to that site through the main box (/api/site/<id>/…) */
@@ -227,7 +242,7 @@ function hdrItems(){const o=[],multi=!!(siCfg&&siCfg.sites.length);
   const pre=multi?t.name+': ':'',fu=d.fu,p=d.pend,nf=fu.reduce((a,x)=>a+(x.labels?x.labels.length:1),0); /* things, not offers: three containers from one machine are 3 */
   if(fu.length)o.push({id:'fu'+t.id,site:t.id,icon:HI.box,tint:'rgba(52,211,153,.18)',ink:'#6EE7B7',title:pre+(nf===1?'1 new thing found':nf+' new things found'),sub:[...new Set(fu.map(x=>x.on?'On '+x.on:x.title))].slice(0,3).join(', ')+(fu.length>3?' and '+(fu.length-3)+' more':''),cta:'Set up',go:'#/settings/servers'});
   if(p)o.push({id:'upd'+t.id,site:t.id,icon:HI.down,tint:'rgba(96,165,250,.20)',ink:'#93C5FD',title:pre+(p.target?'Update '+p.target+' is ready':'An update is ready'),sub:p.what,cta:'Update',go:'#/settings/updates'});
-  for(const a of d.auto||[])o.push({id:'auto'+t.id+a.id,site:t.id,icon:HI.down,tint:'rgba(52,211,153,.18)',ink:'#6EE7B7',title:pre+a.text,sub:'',cta:'OK',go:'#/settings/updates',seen:a.id});
+  for(const a of d.auto||[])o.push(a.kind==='problem'?{id:'auto'+t.id+a.id,site:t.id,icon:HI.bell,tint:'rgba(248,113,113,.18)',ink:'#FCA5A5',title:pre+a.text,sub:'MonitorBox itself had trouble. The log has the details.',cta:'Logs',go:a.go||'#/logs',seen:a.id}:{id:'auto'+t.id+a.id,site:t.id,icon:HI.down,tint:'rgba(52,211,153,.18)',ink:'#6EE7B7',title:pre+a.text,sub:'',cta:'OK',go:'#/settings/updates',seen:a.id});
   if(d.img)o.push({id:'img'+t.id,site:t.id,icon:HI.down,tint:'rgba(251,191,36,.18)',ink:'#FCD34D',title:pre+'The container image needs updating',sub:'Re-pull it to get the newest base.',cta:'How',go:'#/settings/updates'})}
  return o}
 function renderHeader(){const h=$('#hdr');if(!h||h.hidden)return;
@@ -258,7 +273,7 @@ async function hdrOne(id){const pre='/api/'+(id?'site/'+id+'/':'');
  const g=async p=>{const r=await fetch(pre+p);if(!r.ok)throw new Error(r.status);return r.json()};
  const [v,f]=await Promise.all([g('versions'),g('followups').catch(()=>({suggestions:[]}))]);
  const mods=Object.entries(v.modules||{}).filter(([k,c])=>modWaiting(c)),appUp=v.app&&v.app.needsApply&&v.app.target&&!(v.app.failed||[]).includes(v.app.target);
- return {ver:v.version||'',auto:(v.autoNotes||[]).map(x=>({id:x.id,text:x.text})),img:!!(v.image&&v.image.outdated),fu:(f.suggestions||[]).map(x=>({title:x.title,on:x.on,labels:x.labels})),pend:(appUp||mods.length)?{target:appUp?v.app.target:'',what:appUp?'MonitorBox itself'+(mods.length?' and '+mods.length+' module'+(mods.length==1?'':'s'):''):mods.length+' module'+(mods.length==1?'':'s')+' ready to install'}:null}}
+ return {ver:v.version||'',auto:(v.autoNotes||[]).map(x=>({id:x.id,text:x.text,kind:x.kind,go:x.go})),img:!!(v.image&&v.image.outdated),fu:(f.suggestions||[]).map(x=>({title:x.title,on:x.on,labels:x.labels})),pend:(appUp||mods.length)?{target:appUp?v.app.target:'',what:appUp?'MonitorBox itself'+(mods.length?' and '+mods.length+' module'+(mods.length==1?'':'s'):''):mods.length+' module'+(mods.length==1?'':'s')+' ready to install'}:null}}
 /* the bell covers every site: ask this box and each linked site (through the pass-through) once a minute. A site that fails to answer keeps its last answer out of the bell; it is simply left out. */
 let hdrRun=null,hdrAgain=false,rowSig='';
 /* One round at a time. Asked again while one is running, it runs one more round straight after (what was asked for may have changed since the running one began) and the caller waits for that. */
@@ -313,7 +328,7 @@ async function seedDisplay(){try{const d=await api('display');
  if(d.cammode&&lsGet('mb-cammode')===null){lsSet('mb-cammode',d.cammode);camMode=d.cammode==='live'?'live':'pics'}
  if(d.gwin&&lsGet('mb-gw')===null){lsSet('mb-gw',d.gwin);grWin=0}if(d.gpanel&&lsGet('mb-gp')===null)lsSet('mb-gp',d.gpanel);
  if(d.dw&&lsGet('mb-dw')===null)setDw(d.dw)}catch(e){}}
-function route(){ if(location.hash==='#/settings/watched'){location.hash='#/settings/advanced';return} if(location.hash!=='#/settings/servers')window._ret=null; if(location.hash.startsWith('#/settings')){closeStream();renderSettings()}else if(location.hash==='#/setup/review'){closeStream();renderReview()}else if(location.hash==='#/setup'){closeStream();renderSetup()}else if(location.hash==='#/welcome'){closeStream();renderWelcome()}else if(location.hash==='#/map'){closeStream();renderMap()}else{openStream()} }
+function route(){ if(location.hash==='#/settings/watched'){location.hash='#/settings/advanced';return} if(location.hash!=='#/settings/servers')window._ret=null; if(location.hash.startsWith('#/settings')){closeStream();renderSettings()}else if(location.hash==='#/setup/review'){closeStream();renderReview()}else if(location.hash==='#/setup'){closeStream();renderSetup()}else if(location.hash==='#/welcome'){closeStream();renderWelcome()}else if(location.hash==='#/map'){closeStream();renderMap()}else if(location.hash.startsWith('#/logs')){closeStream();renderLogs()}else{openStream()} }
 addEventListener('hashchange',route);
 
 /* ---------- live status ---------- */
@@ -605,6 +620,47 @@ async function pwOn(on){try{await api('portwatch',{on})}catch(e){alert(e.message
 async function pwKnown(a,known){try{await api('portwatch',{keys:a.dataset.k.split('\t'),known})}catch(e){alert(e.message)}await mapLoad()}
 function mapTog(d){const k=d.dataset.n;if(d.open)mapOpen.add(k);else mapOpen.delete(k)}
 const spd=m=>!m?'':m>=1000?(m/1000)+' GbE':m+' Mbit';
+/* ---------- the Logs page: its own page; new lines follow you at the top and never move the page once you have scrolled ---------- */
+let lgTimer=null,lgItems=[],lgHeld=[],lgOpen=new Set(),lgF={level:'info',source:'',q:''},lgDebug={on:false,until:0},lgSources=[],lgMenu=false,lgQT=null,lgSeq=0;
+const lgQs=(extra)=>'logs?'+new URLSearchParams(Object.assign({level:lgF.level,source:lgF.source,q:lgF.q},extra)).toString();
+const lgAtTop=()=>(window.scrollY||document.documentElement.scrollTop||0)<60;
+const lgBusy=()=>{const a=document.activeElement;return lgOpen.size>0||(a&&(a.id==='lg-q'||a.id==='lg-src'||a.id==='lg-lvl'))||(window.getSelection&&String(window.getSelection()).length>0)};
+async function lgStat(){const e=$('#lgstat');if(!e)return;try{const j=await api('logs?limit=1&level=error');const c=j.counts||{};
+ e.textContent=c.error?c.error+' error'+(c.error==1?'':'s')+' in the last day.':c.warning?c.warning+' warning'+(c.warning==1?'':'s')+' in the last day.':'All quiet in the last day.'}catch(x){e.textContent=''}}
+function renderLogs(){clearInterval(lgTimer);document.body.dataset.s='green';lgItems=[];lgHeld=[];lgOpen=new Set();lgMenu=false;const hq=new URLSearchParams(location.hash.split('?')[1]||'');lgF={level:['info','warning','error','debug'].includes(hq.get('level'))?hq.get('level'):'info',source:hq.get('source')||'',q:''};
+ mpage().innerHTML=`<div class=top><h1 style="margin:0;font-size:28px">Logs</h1><div class=row><button class="btn sm" onclick="location.hash='#/settings/advanced'">← Advanced</button><button class="btn sm" id=lg-mb aria-label="Log options" onclick="lgToggleMenu()">⋯</button></div></div>
+ <div id=lg-menu class=box hidden></div><div id=lg-banner></div>
+ <div class=lg-bar><select id=lg-lvl aria-label="Level" onchange="lgFilter()"><option value=info>All</option><option value=warning>Warnings and errors</option><option value=error>Errors only</option><option value=debug>Include debug</option></select>
+  <select id=lg-src aria-label="Source" onchange="lgFilter()"><option value="">Every source</option></select>
+  <input id=lg-q type=search placeholder="Search" aria-label="Search" oninput="lgSearchSoon()"></div>
+ <div id=lg-nw><button id=lg-new class="btn pri" hidden onclick="lgShowHeld()"></button></div>
+ <div id=lg-list><p class=sub>Loading…</p></div>`;
+ $('#lg-lvl').value=lgF.level;lgLoad();lgTimer=setInterval(lgTick,3000);window.addEventListener('scroll',lgScroll,{passive:true})}
+function lgScroll(){if(!location.hash.startsWith('#/logs')){window.removeEventListener('scroll',lgScroll);return}if(lgHeld.length&&lgAtTop()&&!lgBusy())lgShowHeld()}
+function lgFilter(){lgF.level=$('#lg-lvl').value;lgF.source=$('#lg-src').value;lgLoad()}
+function lgSearchSoon(){clearTimeout(lgQT);lgQT=setTimeout(()=>{lgF.q=($('#lg-q')||{}).value||'';lgLoad()},350)}
+async function lgLoad(){const my=++lgSeq;let j;try{j=await api(lgQs({limit:300}))}catch(e){const l=$('#lg-list');if(l)l.innerHTML='<p class=sub>Could not read the logs ('+esc(e.message)+'). That MonitorBox may be running an older version.</p>';return}
+ if(my!==lgSeq||!location.hash.startsWith('#/logs'))return;lgItems=j.entries||[];lgHeld=[];lgOpen=new Set();lgMeta(j);lgDraw();window.scrollTo(0,0)}
+function lgMeta(j){if(j.debug)lgDebug=j.debug;if(j.sources){lgSources=j.sources;const s=$('#lg-src');if(s){const keep=lgF.source;s.innerHTML='<option value="">Every source</option>'+lgSources.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');s.value=keep}}
+ const b=$('#lg-banner');if(b)b.innerHTML=lgDebug.on?`<div class=box style="border-color:#FBBF24"><b>Debug logging is on</b> until ${esc(new Date(lgDebug.until*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}))}. It records more detail and switches itself off after 24 hours. <button class="btn sm" onclick="lgSetDebug(false)">Turn off</button></div>`:'';
+ const m=$('#lg-menu');if(m&&!m.hidden)lgMenuDraw()}
+async function lgTick(){if(!location.hash.startsWith('#/logs')){clearInterval(lgTimer);return}if(document.hidden||!lgItems)return;const newest=Math.max(lgItems.length?lgItems[0].id:0,lgHeld.length?lgHeld[0].id:0),my=lgSeq;let j;
+ try{j=await api(lgQs({since:newest,limit:300}))}catch(e){return}if(my!==lgSeq)return;lgMeta(j);const add=(j.entries||[]).filter(e=>e.id>newest);if(!add.length)return;
+ lgHeld=add.concat(lgHeld);if(lgAtTop()&&!lgBusy())lgShowHeld();else lgPill()}
+function lgPill(){const b=$('#lg-new');if(!b)return;b.hidden=!lgHeld.length;b.textContent=lgHeld.length+' new entr'+(lgHeld.length==1?'y':'ies')+' ↑'}
+function lgShowHeld(){if(!lgHeld.length)return;lgItems=lgHeld.concat(lgItems).slice(0,1000);lgHeld=[];lgDraw();lgPill();if(!lgAtTop())window.scrollTo(0,0)}
+function lgToggle(id){lgOpen.has(id)?lgOpen.delete(id):lgOpen.add(id);const e=document.querySelector('.lg-l[data-id="'+id+'"]');if(e)e.classList.toggle('open',lgOpen.has(id))}
+function lgDraw(){const L=$('#lg-list');if(!L)return;if(!lgItems.length){L.innerHTML='<p class=sub>Nothing to show'+(lgF.q||lgF.source||lgF.level!=='info'?' with these filters':' yet')+'.</p>';lgPill();return}
+ let day='',h='';for(const e of lgItems){const d=e.time.slice(0,10);if(d!==day){day=d;h+=`<div class=lg-day>${esc(new Date(d+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}))}</div>`}
+  const open=lgOpen.has(e.id);h+=`<div class="lg-l${open?' open':''}" data-id="${e.id}" onclick="lgToggle(${e.id})"><span class=lg-t>${esc(e.time.slice(11))}</span><span class="lg-lv ${esc(e.level)}">${esc(e.level)}</span><span class=lg-s>${esc(e.source)}</span><div class=lg-x>${esc(e.text)}</div></div>`}
+ L.innerHTML=h;lgPill()}
+function lgToggleMenu(){const m=$('#lg-menu');if(!m)return;m.hidden=!m.hidden;if(!m.hidden)lgMenuDraw()}
+function lgMenuDraw(){const m=$('#lg-menu');m.innerHTML=`<div class=row><a class=btn href="${U('logs/download')}" download>Download logs</a><button class=btn onclick="lgCopy()">Copy last 100 lines</button></div>
+ <label class=sub style="display:flex;align-items:center;gap:.5rem;min-height:44px;margin-top:.4rem"><input type=checkbox ${lgDebug.on?'checked':''} onchange="lgSetDebug(this.checked)">Debug logging${lgDebug.on?'':' (off)'}</label>
+ <p class=sub style="margin:0">Debug adds detail, such as timing of every round and why a check could not be read. It switches itself off after 24 hours and what it wrote ages out on its own. Passwords and tokens are never written.</p><span id=lg-cm class=sub></span>`}
+async function lgSetDebug(on){try{const j=await api('logs/debug',{on:!!on});lgMeta(j);lgLoad()}catch(e){const c=$('#lg-cm');if(c)c.textContent=e.message}}
+async function lgCopy(){const t=lgItems.slice(0,100).map(e=>e.time+' '+e.level.toUpperCase()+' '+e.source+' '+e.text).join('\n');let ok=false;try{await navigator.clipboard.writeText(t);ok=true}catch(x){}
+ const c=$('#lg-cm');if(!c)return;if(ok)c.textContent='Copied.';else{c.innerHTML=`<textarea id=lg-tx readonly rows=8 style="width:100%">${esc(t)}</textarea>`;const x=$('#lg-tx');x.focus();x.select()}}
 async function renderMap(){mapOpen=new Set();mapPeer=null;document.body.dataset.s='green';clearInterval(mapTimer);closeDrawer();
  mpage().innerHTML=`<div class=top><div class=row><h1 style="margin:0;font-size:28px">Network map</h1></div><button class="btn sm" onclick="location.hash='#/settings/advanced'">← Advanced</button></div><p class=sub id=mapmsg>Reading the switches…</p><div id=mapout></div>`;
  await mapLoad();mapTimer=setInterval(()=>{if(location.hash!=='#/map'){clearInterval(mapTimer);return}mapLoad()},10000)}
@@ -1470,7 +1526,7 @@ async function renderSettings(){
   ['backups','Backups','Nightly backups, download, restore',lastBk?'Last: '+lt(lastBk.created):'No backups yet'],
   ['updates','Updates and versions','Channel, installed versions, modules',upd?'Update available':'Up to date'],
   ['box','This box','Time zone, memory use, restart, factory reset, sign out',ab?(ab.containerMb!=null?ab.containerMb:ab.processesTotalMb)+' MB in use':''],
-  ['advanced','Advanced','Troubleshooting tools and the JSON editors','Network map, performance, switch report, flows']];
+  ['advanced','Advanced','Troubleshooting tools and the JSON editors','Logs, network map, performance, switch report, flows']];
  const PARTS={display:`<h3>Main screen</h3><div class=box><p class=sub style="margin-top:0">How the main screen looks on <b>this device</b>. <b>Summarized</b> shows one tile for each group (Servers, Network and so on). <b>Detailed</b> lists every check. You can also switch from the main screen itself.</p>
    <div class=seg role=group aria-label="Main screen view"><button aria-pressed=${view==='summary'} onclick="setView('summary')">Summarized</button><button aria-pressed=${view==='detail'} onclick="setView('detail')">Detailed</button></div>
    <p class=sub style="margin-bottom:.4rem">How far back the history bar in each side panel reaches, on <b>this device</b>. MonitorBox keeps 30 days whichever you pick.</p>
@@ -1519,6 +1575,8 @@ async function renderSettings(){
    <div class=row><button class="btn" onclick="factoryReset()">Factory reset…</button></div></div>
   <div class=row><button class=btn onclick="api('logout',{}).then(boot)">Sign out</button></div><p id=msg></p>`,advanced:`<h3>Advanced</h3><p class=sub style="margin-top:0">Troubleshooting tools, and the raw editors behind the settings screens. You don\'t need anything here day to day. To change one system\'s settings, open that system and tap <b>Edit monitoring</b> instead.</p>
   <p class=sub style="margin:.2rem 0 0"><i>Here there be dragons.</i></p>
+  <h3>Logs</h3><div class=box><p class=sub style="margin-top:0">What MonitorBox did and saw: checks changing state, alerts, modules, backups, sign-ins. <span id=lgstat></span></p>
+   <div class=row><button class=btn onclick="location.hash='#/logs'">Open the logs</button></div></div>
   <h3>Network map</h3><div class=box><p class=sub style="margin-top:0">A map of your network: the devices MonitorBox can see and how they connect.</p>
    <div class=row><button class=btn onclick="location.hash='#/map'">Open the network map</button></div></div>
   <h3>Performance</h3><div class=box><p class=sub style="margin-top:0">How long this site takes to answer, and where its memory goes. On the Tidewater tab it includes the link from here.</p>
@@ -1541,7 +1599,7 @@ async function renderSettings(){
   ${last}<div class=hubg>${SECS.map(x=>`<button class="hub" onclick="location.hash='#/settings/${x[0]}'"><b>${x[1]}</b><span class=sub>${esc(x[2])}</span><small>${esc(x[3])}</small></button>`).join('')}</div>
   <div class=row style="margin-top:1rem"><button class=btn onclick="api('logout',{}).then(boot)">Sign out</button></div><p id=msg></p>`;return}
  mpage().innerHTML=`<div class=top><div class=row><button class=btn onclick="location.hash='#/settings'">← Settings</button><h1 style="margin:0;font-size:28px">${cur[1]}</h1></div><small>MonitorBox ${esc(v.version)}${v.imageVersion?' · image '+esc(v.imageVersion)+(v.image&&v.image.outdated?' (update available)':''):''} · channel ${esc(v.channel)}</small></div>
-  ${sec==='servers'&&window._ret?`<div class=box style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap"><span>You are setting up your box.</span><button class="btn pri" onclick="const r=window._ret;window._ret=null;location.hash=r">← Back to ${window._ret==='#/setup/review'?'the review':'Set up'}</button></div>`:''}${PARTS[sec].replace(/<h3>(Main screen|Servers)<\/h3>/,'')}<p id=msg></p>`;if(sec==='history'){hpRange('1');loadBarShow()}if(sec==='box')loadTzBox();if(sec==='servers')loadServers();if(sec==='graphs')graphSettings();if(sec==='power')powerSettings();if(sec==='alerts'){alertSettings();loadConfirm()}if(sec==='sites')siteSettings();if(sec==='security')securitySettings()}
+  ${sec==='servers'&&window._ret?`<div class=box style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap"><span>You are setting up your box.</span><button class="btn pri" onclick="const r=window._ret;window._ret=null;location.hash=r">← Back to ${window._ret==='#/setup/review'?'the review':'Set up'}</button></div>`:''}${PARTS[sec].replace(/<h3>(Main screen|Servers)<\/h3>/,'')}<p id=msg></p>`;if(sec==='history'){hpRange('1');loadBarShow()}if(sec==='box')loadTzBox();if(sec==='servers')loadServers();if(sec==='graphs')graphSettings();if(sec==='power')powerSettings();if(sec==='alerts'){alertSettings();loadConfirm()}if(sec==='sites')siteSettings();if(sec==='security')securitySettings();if(sec==='advanced')lgStat()}
 /* the history page: stretches that were not healthy, in a range, filtered by state */
 let hpFrom=0,hpTo=0;
 function zoneEpoch(y,m,d,h,mi,s){const g=Date.UTC(y,m-1,d,h,mi,s);if(!BOXTZ)return Math.floor(new Date(y,m-1,d,h,mi,s).getTime()/1000);

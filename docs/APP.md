@@ -149,11 +149,15 @@ Everything is under the config folder (`/config` in the container). Backups are 
 | `data/app/` | The password record, module install state, the last readings, the last map, the port-error history. |
 | `data/local/` | Live sign-ins; never carried by a backup to another box. |
 | `releases/` | Downloaded App and module versions. Switching version is changing a link. |
-| `backups/`, `logs/` | Backup archives and logs. |
+| `backups/`, `logs/` | Backup archives and logs (see Logs below). |
 
 **What survives a restart.** Settings, alert state, history, and the port-error history do. The latest readings are saved every 20 seconds, and for the first two minutes after a start the App may show readings up to 10 minutes old (marked as saved) while fresh ones come in; a long outage is not treated as "just a restart". History keeps 30 days as state changes only. While the App was off, every item reads Unknown for that gap, never Healthy and never Failed. Availability figures leave Unknown time out.
 
 Secrets (device logins, SMTP password, tokens) are stored in plain text in these files, readable only by the app (mode 0600), shown as dots in the editor and never logged. Protect the config folder.
+
+## Logs
+
+Settings, Advanced, Logs opens the log page. `logs/mb.log` is the normal log (5 files of 1 MB, nothing older than 14 days); `logs/debug.log` holds debug lines (5 files of 10 MB, 3 days) and is written only while the Debug switch is on, which turns itself off after 24 hours and deletes nothing. A line is `<id> <time> <LEVEL> <source> <text>`. Levels: **error** is only for the App itself failing at its job (a module that will not start or keeps timing out, an alert undeliverable after every try, a backup or update that fails); a monitored thing failing is a **warning**. Every error also puts a note on the bell with a link to the Logs page. Every check state change is written (a flapping check writes every flap); the page folds repeats. One source may write 120 lines a minute (1,200 for debug); the rest are dropped and one "Suppressed N similar lines" warning says so. Passwords, tokens, community strings and the path of any web address are removed before a line is written. The weekly full backup carries `mb.log` (copied to `data/app/log-copy/`), never `debug.log`, and a settings backup carries no log. The page reads `/api/logs` (newest first, `since=<id>` for live updates), `/api/logs/download` and `POST /api/logs/debug`. Code: `applog.py`.
 
 ## Where each rule lives in the code
 
