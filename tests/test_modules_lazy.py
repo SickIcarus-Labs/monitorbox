@@ -105,6 +105,20 @@ class StartedOnce(unittest.TestCase):
         self.assertEqual(m.started, ["snmp"])
 
 
+class ShuttingDown(unittest.TestCase):
+    def test_a_module_stopped_for_a_restart_is_not_started_again(self):
+        """At every update the log said "snmp stopped unexpectedly; starting it again": a graph still finishing found the module
+        the app had just stopped and started a fresh copy. Once the app is closing, nothing is started again."""
+        m = Fake({"snmp": {"active": "1"}})
+        m.start_all()
+        m.stop_all = modules.Modules.stop_all.__get__(m)
+        m.running["snmp"].stop = lambda: None
+        m.stop_all()
+        m.running["snmp"].alive = lambda: False
+        self.assertIsNone(m._revive("snmp"))
+        self.assertEqual(m.started, ["snmp"], "not started a second time")
+
+
 class LazyStart(unittest.TestCase):
     def setUp(self):
         self.m = Fake({"snmp": {"active": "1"}, "scrypted": {"active": "1"}, "wol": {"active": "1"}})

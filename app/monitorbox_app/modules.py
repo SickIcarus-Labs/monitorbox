@@ -271,6 +271,8 @@ class Modules:
 
     def _revive(self, mid):
         """A module that died (a crash in its device library, say) is started again, at most every few seconds."""
+        if getattr(self, "closing", False):
+            return None                         # shutting down (an update or restart): a module that stopped was stopped by us, not a crash
         if mid in self.starting and time.monotonic() - self.boot < STARTUP_HOLD:
             return self._await_start(mid)
         if time.monotonic() - self.last_try.get(mid, -1e9) < self.retry_after or not self.lock.acquire(blocking=False):
@@ -424,5 +426,6 @@ class Modules:
         return res
 
     def stop_all(self):
-        for p in self.running.values():
+        self.closing = True                     # from here on nothing is started again: the app is going away
+        for p in list(self.running.values()):
             p.stop()

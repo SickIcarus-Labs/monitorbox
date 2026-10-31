@@ -1185,7 +1185,7 @@ class App:
         return self.last_map
 
     def annotate_ports(self, m):
-        """Adds what the port watch knows to each map port and uplink (only while it is switched on): `watch` = {learning, rising, perHour, was, known}."""
+        """Adds what the port watch knows to each map port and uplink (only while it is switched on): `watch` = {learning, rising, count (in the last 15 minutes), was, known}."""
         on = self.portwatch.enabled()
         m["portwatch"] = {"on": on}
         used = set()          # the ports the map shows: those with something on them, and both ends of each cable between devices (the same ports the watch counts)
@@ -2969,6 +2969,7 @@ class App:
         try:
             self.httpd.serve_forever()
         finally:
+            self.modules.closing = True          # first: a graph or check still finishing must not start a module we are about to stop ("stopped unexpectedly" at every update)
             self._save_history()
             self.graphs.stop()
             self.lansampler.stop()

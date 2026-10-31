@@ -22,14 +22,14 @@ class Judge(unittest.TestCase):
         j = portwatch.judge(q)
         self.assertFalse(j["learning"])
         self.assertEqual(j["rising"], [])
-        self.assertEqual(j["perHour"]["errors"], 360)
+        self.assertEqual(j["count"]["errors"], 90)      # #331: counts over the 15 minutes, no longer scaled up to an hour
 
     def test_a_quiet_port_that_suddenly_throws_errors_is_rising(self):
         # 45 quiet minutes, then 400 errors in the last 15
         q = self.series(5, [(0, 0, 0)] * 10 + [(150, 0, 0), (300, 0, 0), (400, 0, 0)])
         j = portwatch.judge(q)
         self.assertEqual(j["rising"], ["errors"])
-        self.assertEqual(j["perHour"]["errors"], 1600)
+        self.assertEqual(j["count"]["errors"], 400)      # #331: counts over the 15 minutes, no longer scaled up to an hour
         self.assertEqual(j["was"]["errors"], 0)
 
     def test_a_steady_trickle_that_gets_much_worse_is_rising_but_a_little_worse_is_not(self):
@@ -230,12 +230,33 @@ class Watch(unittest.TestCase):
             rx = 0 if m < 45 else (m - 45) * 700            # receive errors climb, transmit errors stay a trickle
             w.feed([dev("Broad Leaf", **{"SFP+ 2": (rx, 0 if m < 45 else (m - 45) * 2, 0, 0, 0)})], ["gw"], now=m * 60)
         st = w.state([w.key("gw", "SFP+ 2")])
-        self.assertEqual(st["split"]["errors"], {"rx": 42000, "tx": 120})
+        self.assertEqual(st["split"]["errors"], {"rx": 10500, "tx": 30})      # #331: counts over the 15 minutes, no longer scaled up to an hour
         self.assertEqual(st["traffic"], {"avgBps": 4_100_000_000, "peakBps": 9_200_000_000})
         ok, detail, _, extra = w.check()
         self.assertTrue(extra.get("warn"))
-        self.assertIn("42,000 receive, 120 transmit", detail)
+        self.assertIn("10,530 in the last 15 min: 10,500 receive, 30 transmit, none before)", detail)
         self.assertIn("carrying about 4.1 Gbit/s (peak 9.2 Gbit/s)", detail)
+
+    def test_a_short_burst_reads_as_the_real_count_and_window_not_an_hourly_rate(self):
+        """#331, 2026-10-30 2:45am: about 130 receive errors in 15 minutes on the busy 5 GbE internet uplink read "about 532 an hour"."""
+        w = portwatch.PortWatch(self.paths)
+        w.set_enabled(True)
+        for m in range(0, 61):
+            rx = 0 if m < 46 else min(133, (m - 45) * 10)
+            w.feed([dev("Broad Leaf", **{"SFP+ 1": (rx, 0, 0, 0, 0)})], ["gw"], now=m * 60)
+        st = w.state([w.key("gw", "SFP+ 1")])
+        self.assertEqual(st["count"]["errors"], 133)
+        self.assertEqual(st["split"]["errors"], {"rx": 133, "tx": 0})
+        ok, detail, _, extra = w.check()
+        self.assertTrue(extra.get("warn"))
+        self.assertIn("errors rising (133 in the last 15 min: 133 receive, 0 transmit", detail)
+        self.assertNotIn("an hour", detail)
+
+    def test_one_in_reads_like_people_say_it(self):
+        self.assertEqual(portwatch.one_in(1 / 8123), "about 1 in 8,100 packets")
+        self.assertEqual(portwatch.one_in(0.5), "about 1 in 2 packets")
+        self.assertEqual(portwatch.one_in(1 / 2_000_000), "under 1 in a million packets")
+        self.assertEqual(portwatch.one_in(0), "")
 
     def test_a_port_says_what_the_other_end_of_its_link_is_doing(self):
         w = portwatch.PortWatch(self.paths)
@@ -247,7 +268,7 @@ class Watch(unittest.TestCase):
             w.feed([dev("Broad Leaf", **{"SFP+ 2": (rx, 0, 0, 0, 0)}), dev("Aggregation", **{"Port 3": (0, 0, 0, 0, 0)})], ["gw", "agg"], now=m * 60)
         far = w.state([a])["other"]
         self.assertEqual((far["label"], far["state"], far["split"]["errors"]), ("Aggregation, Port 3", "figures", {"rx": 0, "tx": 0}))
-        self.assertIn("other end (Aggregation, Port 3): 0 receive, 0 transmit an hour", w.check()[1])
+        self.assertIn("other end (Aggregation, Port 3): 0 receive, 0 transmit in the last 15 min", w.check()[1])
         self.assertIsNone(w.state([w.key("gw", "SFP+ 1")]) and w.state([w.key("gw", "SFP+ 1")])["other"], "a port that is not one end of a link between devices has no other end")
         # the other end gave no counters at all
         w2 = portwatch.PortWatch(self.paths); w2.set_peers({a: (b, "Aggregation, Port 3")})
@@ -385,7 +406,7 @@ class Watch(unittest.TestCase):
         page = self.w.page()
         self.assertEqual(page["rising"], [])
         row = next(r for r in page["quiet"] if r["key"] == key)
-        self.assertEqual(row["perHour"]["errors"], 780)
+        self.assertEqual(row["count"]["errors"], 195)      # #331: counts over the 15 minutes, no longer scaled up to an hour
         self.assertAlmostEqual(row["shares"]["errors"], 13 / 8_500_013, places=9)
         st = self.w.state([key])
         self.assertEqual(st["rising"], [])
@@ -471,7 +492,7 @@ class Watch(unittest.TestCase):
         self.assertNotIn(self.w.key("sw2", "Port 1"), self.w.series)
         pair = self.w.state([self.w.key("sw1", "Port 1"), self.w.key("sw1", "Port 2")])
         one = self.w.state([self.w.key("sw1", "Port 1")])
-        self.assertEqual(pair["perHour"]["errors"], 2 * one["perHour"]["errors"])
+        self.assertEqual(pair["count"]["errors"], 2 * one["count"]["errors"])
 
     def test_settings_survive_a_save_and_each_port_keeps_its_own_mark(self):
         a, b, c = self.w.key("sw-aaa", "Port 1"), self.w.key("sw-bbb", "Port 2"), self.w.key("sw-ccc", "Port 3")
@@ -1186,7 +1207,7 @@ class SnmpOnly(unittest.TestCase):
         found = self.w.findings()
         self.assertEqual([(f["label"], f["kinds"]) for f in found], [("NAS, eth0", ["drops"])])
         self.assertGreater(found[0]["share"], 0.05)
-        self.assertIn("% of packets", self.w.check()[1])
+        self.assertIn(" packets", self.w.check()[1]); self.assertIn("about 1 in ", self.w.check()[1])      # #331: counts over the 15 minutes, no longer scaled up to an hour
 
     def test_a_server_cards_receive_drops_are_discarded_frames_not_loss_and_do_not_alert(self):
         # #315: Arrrrr3's eno3 discards about 650 frames a second the kernel has no use for; real loss would show as receive errors

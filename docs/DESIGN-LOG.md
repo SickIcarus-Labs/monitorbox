@@ -1179,3 +1179,7 @@ Setup (`add_network`) put the DNS servers and their "DNS" group item in a group 
 ## 1.9.18: the DNS move missed servers with a Pi-hole page check
 
 1.9.17's move only took items whose checks were DNS lookups or pings. Turnberry's DNS servers also carried the Pi-hole admin page check that discovery adds, so nothing moved, and the move said nothing either way. Now any item in the DNS group that has a DNS check moves (with the group item that gathers them); an item with no DNS check still stays. The move writes an info line when it moves items and a warning when it cannot.
+
+## Port errors in real counts (#331, 1.9.20)
+
+On 2026-10-30 at about 2:45am the internet uplink showed "errors rising (about 532 an hour)". The gateway's own counters showed 405 errors in about 750 million packets: a short burst, multiplied by four because the watch compared 15-minute windows and reported them as hourly rates. The trigger was right; the wording made a burst sound like an hour-long fault. The port watch now reports what it saw (the count in the last 15 minutes, receive and transmit, and the share of packets as "about 1 in N packets"), and the earlier pace it compares against is also a 15-minute count. The trigger (floors, five times the earlier pace, the share of packets) is unchanged.
