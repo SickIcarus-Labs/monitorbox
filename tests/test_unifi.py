@@ -25,6 +25,21 @@ class UnifiChecks(unittest.TestCase):
     def run_check(self, kind, **params):
         return M.run_check(kind, params, self.conn)
 
+    def test_a_slow_flow_search_does_not_hold_up_the_status_checks(self):
+        # 2026-10-31 3:32 AM: a check queued behind a 10-page flow search for over 22 s and its device went Unknown
+        import threading
+        self.assertEqual(self.run_check("device", name="Garage")["state"], "healthy")
+        cl = next(iter(M.CLIENTS.values()))
+        with cl.flow_lock:                                           # as if the flow log were being searched right now
+            t0 = time.monotonic()
+            self.assertEqual(self.run_check("device", name="Garage")["state"], "healthy")
+            self.assertLess(time.monotonic() - t0, 2, "a check does not wait for the flow lane")
+        self.c.flows = {"traffic": {}, "search": lambda body: (200, {"data": [{"id": "f1"}], "has_next": False})}
+        done = []
+        with cl.lock:                                                # and the other way round: the flow log does not wait for a status read
+            th = threading.Thread(target=lambda: done.append(cl.flows(60)), daemon=True); th.start(); th.join(5)
+        self.assertTrue(done, "the flow search ran on its own lane")
+
     def test_the_module_calls_itself_unifi_network(self):
         self.assertEqual(M.handle({"method": "describe", "params": {}})["title"], "UniFi Network")
 

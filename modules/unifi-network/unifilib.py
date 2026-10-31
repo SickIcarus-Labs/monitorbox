@@ -37,7 +37,9 @@ class Client:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
         self.opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), urllib.request.ProxyHandler({}))
-        self.lock = threading.Lock()
+        self.lock = threading.Lock()          # the status reads (devices, health, tunnels, clients): quick, shared by every check
+        self.flow_lock = threading.Lock()     # the slow reads (flow log, traffic, the look report): their own lane, so a check never waits behind a 10-page flow search
+        self.login_lock = threading.Lock()    # one login at a time, whichever lane needs it
         self.cookie, self.prefix, self.login_failed, self.csrf = None, None, None, None     # prefix: "/proxy/network" on UniFi OS
         self.cache = {}
         self.unreachable = None      # (when, message) of the last time the controller did not answer
@@ -67,6 +69,10 @@ class Client:
             raise UnifiError(msg)
 
     def _login(self):
+        with self.login_lock:
+            self._login_now()
+
+    def _login_now(self):
         if self.login_failed and time.time() - self.login_failed[0] < LOGIN_BACKOFF:
             raise UnifiError(self.login_failed[1] + " (not retrying for a minute, so the account is not locked out)")
         creds = {"username": self.username, "password": self.password}
@@ -131,7 +137,7 @@ class Client:
         """Per-client internet usage over the last `seconds` (GET v2/api/site/<site>/traffic: bytes up and down per client and application, counted at the gateway).
         A read like the others, with its own method because it takes a time window."""
         seconds = max(60, min(int(seconds), 3600))
-        with self.lock:
+        with self.flow_lock:
             hit = self.cache.get(("usage", seconds))
             if hit and time.time() - hit[0] < CACHE_SECONDS * 2:
                 return hit[1]
@@ -164,7 +170,7 @@ class Client:
         """The gateway's flow log for the last `seconds` (the search behind Insights, Flows: POST v2/api/site/<site>/traffic-flows, a read-only search; UniFi OS wants the
         login's CSRF token on it). Newest first, a page at a time. Returns the raw flow records; unifichecks.flow_summary boils them down."""
         seconds = max(60, min(int(seconds), 3600))
-        with self.lock:
+        with self.flow_lock:
             hit = self.cache.get(("flows", seconds))
             if hit and time.time() - hit[0] < CACHE_SECONDS * 2:
                 return hit[1]
@@ -216,7 +222,7 @@ class Client:
                 ("GET", "v2/api/site/{site}/traffic/categories", None, None),
                 ("GET", "v2/api/site/{site}/traffic/categories", window, None)]
         out = []
-        with self.lock:
+        with self.flow_lock:
             for method, tpl, query, body in plan:
                 if (method, tpl) not in LOOK_ALLOWED:
                     raise UnifiError(f"refusing {method} {tpl} (this module is read-only)")

@@ -14,7 +14,7 @@ Four kinds of check need no module. Each one answers "worked", "did not work" or
 | --- | --- | --- |
 | **Ping** | Sends one ICMP echo and waits (2 s by default). Needs the container's raw-network permission; without it the answer is "could not be checked", never "down". | 5 s |
 | **Port (TCP)** | Opens a TCP connection to a host and port (3 s by default). Says whether the port is open, refused or timed out. | 5 s |
-| **Web (HTTP)** | Fetches a web address (5 s by default). Healthy means a status code you accept (200 to 399 unless you change it). Optional: a piece of text the page must contain, so a login page or a different app on the same port does not read as healthy. A private-network address with HTTPS skips certificate checking, because a device's own certificate is almost always self-signed and can never match a bare address; names on the internet are checked fully. | 30 s |
+| **Web (HTTP)** | Fetches a web address (10 s by default, so a page on a busy server still gets its answer). Healthy means a status code you accept (200 to 399 unless you change it). Optional: a piece of text the page must contain, so a login page or a different app on the same port does not read as healthy. A private-network address with HTTPS skips certificate checking, because a device's own certificate is almost always self-signed and can never match a bare address; names on the internet are checked fully. | 30 s |
 | **DNS** | Asks one named DNS server to resolve a name (google.com unless you change it) and says whether that server answers. | 5 s |
 
 A check that is failing is looked at again every 3 seconds, so recovery shows quickly. Every check can have its own interval and timeout.

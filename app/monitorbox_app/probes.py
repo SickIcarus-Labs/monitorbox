@@ -107,7 +107,7 @@ def _lan_ip_host(url):
         return False
 
 
-def http(url, timeout=5.0, expect=None, insecure=False, contains=None):
+def http(url, timeout=10.0, expect=None, insecure=False, contains=None):
     """expect: allowed status codes (default 200-399). contains: text the page must include, so a login page
     or a different app answering on the same port does not read as healthy."""
     ctx = None
@@ -197,7 +197,7 @@ def run(check):
     if t == "tcp":
         return tcp(check["target"], check["port"], check.get("timeout", 3.0))
     if t == "http":
-        return http(check["url"], check.get("timeout", 5.0), check.get("expect"), check.get("insecure", False), check.get("contains"))
+        return http(check["url"], check.get("timeout", 10.0), check.get("expect"), check.get("insecure", False), check.get("contains"))
     if t == "dns":
         return dns(check["server"], check.get("name", "google.com"), check.get("timeout", 3.0), check.get("port", 53))
     return None, f"unknown check type {t}", None
