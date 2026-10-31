@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.17** DNS servers now sit in the **Internet** card instead of a card of their own. New boxes set them up there, and a box set up earlier moves them there once by itself (the DNS servers and the DNS group only; anything else you filed under DNS stays put).
 ## 1.9.15 to 1.9.16 (stable, October 31)
 
 - **1.9.16** (#336) [highlight: Fixed Settings and other pages sometimes failing to load through a proxy.] MonitorBox's web server could only hold 5 new connections waiting at once (the standard default). When a page asked for eight or nine things together while the Pi was busy, the extra connections were refused: through Caddy that showed as "502", and on its own as a page stuck loading. It now holds 128. On the owner's Pi the kernel had counted 14,697 refused connections.
