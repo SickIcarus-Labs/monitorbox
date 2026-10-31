@@ -110,6 +110,13 @@ class Judge(unittest.TestCase):
         self.assertEqual(j["rising"], ["errors"])
         self.assertAlmostEqual(j["shares"]["errors"], 1500 / 301_500, places=6)
 
+    def test_the_error_bar_is_one_in_ten_thousand(self):
+        self.assertEqual(portwatch.ERROR_SHARE, 0.0001)
+        j = portwatch.judge(self.errors_with_packets(500, 1_000_000))                    # 0.05%: under the drops bar, over the errors bar
+        self.assertEqual(j["rising"], ["errors"])
+        busy = portwatch.judge(self.errors_with_packets(62, 42_000_000), speed=2500)     # the owner's WAN on 2026-10-30: 434 errors in 297.8 million packets in 35 min
+        self.assertEqual(busy["rising"], [])
+
     def test_errors_without_packet_counts_keep_the_old_rule(self):
         q = self.series(5, [(0, 0, 0)] * 10 + [(500, 0, 0), (1000, 0, 0), (1500, 0, 0)])
         j = portwatch.judge(q)
