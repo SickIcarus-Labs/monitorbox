@@ -141,6 +141,7 @@ def call_json(address, identity, key, method, path, obj=None, timeout=8, who="Th
 
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
+    request_queue_size = 128      # Python's default of 5 overflowed on the main server under bursts (#336); a managing box's page bursts here too
 
     def __init__(self, addr, handler, owner):
         self.owner = owner
