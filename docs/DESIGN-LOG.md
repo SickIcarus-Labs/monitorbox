@@ -1175,3 +1175,7 @@ The cause of Settings not loading. Caddy's log showed bursts of requests to the 
 ## 1.9.17: DNS lives in the Internet card
 
 Setup (`add_network`) put the DNS servers and their "DNS" group item in a group called DNS, which drew a separate card with no icon; Broad Leaf's had long been under Internet, Turnberry's were not. The owner chose Broad Leaf's layout as the standard (2026-10-31): DNS is part of "can we reach the internet". Setup now uses the Internet group, and `dns_under_internet` (run with the other config upgrades on every reload) moves an older box's DNS server items (only DNS checks, or DNS and ping) and the group item that gathers them. Anything else filed under DNS is left alone, and it does nothing the second time.
+
+## 1.9.18: the DNS move missed servers with a Pi-hole page check
+
+1.9.17's move only took items whose checks were DNS lookups or pings. Turnberry's DNS servers also carried the Pi-hole admin page check that discovery adds, so nothing moved, and the move said nothing either way. Now any item in the DNS group that has a DNS check moves (with the group item that gathers them); an item with no DNS check still stays. The move writes an info line when it moves items and a warning when it cannot.
