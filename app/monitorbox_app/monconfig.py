@@ -499,27 +499,27 @@ EACH_OWN = ("camera", "device", "tunnel")
 
 def dns_under_internet(paths):
     """DNS lives in the Internet card (2026-10-31: the owner's Broad Leaf layout made the standard). Setup used to put the DNS servers in a "DNS" group of
-    their own, which drew a separate card. Move them: a DNS server item (only DNS checks, or DNS and ping), and the "DNS" group item that gathers them.
-    Anything else someone filed under "DNS" is left alone. Does nothing the second time. Returns whether it changed anything."""
+    their own, which drew a separate card. Move them: every item there that looks up names (it has a DNS check, whatever else it checks: Turnberry's also
+    check their Pi-hole admin page), and the "DNS" group item that gathers them. An item with no DNS check stays. Does nothing the second time.
+    Returns the ids it moved."""
     import copy
     cur = get_monitoring(paths)
     mon = copy.deepcopy(cur["monitoring"])
     nodes = mon.get("nodes", [])
     def dns_leaf(n):
-        types = {c.get("type") for c in n.get("checks") or []}
-        return n.get("kind") != "aggregate" and "dns" in types and types <= {"dns", "ping"}
+        return n.get("kind") != "aggregate" and any(c.get("type") == "dns" for c in n.get("checks") or [])
     leaves = {n["id"] for n in nodes if n.get("group") == "DNS" and dns_leaf(n)}
-    changed = False
+    moved = []
     for n in nodes:
         if n.get("group") != "DNS":
             continue
         if n["id"] in leaves or (n.get("kind") == "aggregate" and n.get("children") and all(c in leaves or c not in {x["id"] for x in nodes} for c in n["children"])
                                 and any(c in leaves for c in n["children"])):
             n["group"] = "Internet"
-            changed = True
-    if changed:
+            moved.append(n["id"])
+    if moved:
         save_monitoring(paths, mon, cur["revision"])
-    return changed
+    return moved
 
 
 def split_shared_items(paths):

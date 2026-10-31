@@ -469,9 +469,11 @@ class App:
         except Exception:
             pass
         try:
-            monconfig.dns_under_internet(self.paths)         # DNS servers set up before 1.9.17 had a card of their own
-        except Exception:
-            pass
+            moved = monconfig.dns_under_internet(self.paths)     # DNS servers set up before 1.9.17 had a card of their own
+            if moved:
+                applog.info("config", f"moved {len(moved)} DNS item{'s' if len(moved) != 1 else ''} into the Internet card")
+        except Exception as e:
+            applog.warning("config", f"could not move the DNS items into the Internet card: {type(e).__name__}: {str(e)[:200]}")
         nodes, err = monconfig.all_nodes(self.paths)
         mon = monconfig.load_config(self.paths).get("monitoring", {})
         self.monitor.configure(nodes, err, mon.get("confirm") if isinstance(mon, dict) and not err else None)
