@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+## 1.9.7 to 1.9.12 (stable, October 30)
+
 - **1.9.12** Errors and packet drops that stay below the alert line are now shown instead of hidden. The Port errors page has a **Below the alert line** list, and the network map adds a grey line to the port, for example "780 errors an hour (0.00015% of packets), below the alert line". Nothing about alerting changes.
 - **1.9.11** Fixed a port starting over at "learning" when its error count dipped for a moment. UniFi sometimes reports a port's errors a little lower than before (402, then 325) while the port is busy; the port watch read that as the device restarting and threw away the port's history, three times in one evening on the WAN port. When the packet counts keep going up, the old figure is now held until the counter passes it, so nothing is lost and no errors are invented. A real restart, where the packet counts start over too, still starts the port again.
 - **1.9.10** Port errors now count from 0.01% of the packets (1 in 10,000), down from 0.1%. That is about where a single download starts to slow, so a cable or module that is starting to fail is reported sooner, while a busy link with a few hundred errors an hour stays quiet. Packet drops stay at 0.1%.
