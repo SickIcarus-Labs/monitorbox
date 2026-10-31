@@ -45,12 +45,17 @@ class HeatLimit(unittest.TestCase):
         self.d = tempfile.mkdtemp(prefix="mb-heat-")
         self.paths = Paths(self.d)
         monconfig.save_connections(self.paths, [{"id": "unifi-1", "module": "unifi-network", "host": "192.0.2.7", "username": "fake-user-4", "password": "fake-pass-5"},
-                                                {"id": "prot-1", "module": "unifi-protect", "host": "192.0.2.8", "username": "fake-user-6", "password": "fake-pass-7"}], 0)
+                                                {"id": "prot-1", "module": "unifi-protect", "host": "192.0.2.8", "username": "fake-user-6", "password": "fake-pass-7"},
+                                                {"id": "snmp-1", "module": "snmp", "host": "192.0.2.10", "user": "fake-user-8", "authPassword": "fake-pass-9"}], 0)
         mc = lambda i, conn, check, params: {"id": i, "type": "module", "module": "unifi-network" if conn == "unifi-1" else "unifi-protect", "connection": conn, "check": check, "params": params}
         nodes = [{"id": "t1", "name": "UniFi Core temperature", "group": "Network", "checks": [mc("c1", "unifi-1", "temperature", {"name": "Core"})]},
                  {"id": "d1", "name": "Protect drive A", "group": "Cameras", "checks": [mc("c2", "prot-1", "drive", {"slot": 1})]},
                  {"id": "dev", "name": "UniFi Core", "group": "Network", "checks": [mc("c3", "unifi-1", "device", {"name": "Core"})]},
-                 {"id": "pi", "name": "Pi", "group": "Servers", "checks": [{"type": "ping", "target": "192.0.2.9"}]}]
+                 {"id": "pi", "name": "Pi", "group": "Servers", "checks": [{"type": "ping", "target": "192.0.2.9"}]},
+                 {"id": "nas", "name": "NAS", "group": "Servers", "checks": [
+                     {"id": "up", "type": "module", "module": "snmp", "connection": "snmp-1", "check": "uptime", "params": {}},
+                     {"id": "da", "type": "module", "module": "snmp", "connection": "snmp-1", "check": "row", "params": {"preset": "qnap-disk", "name": "SERIAL-A"}},
+                     {"id": "db", "type": "module", "module": "snmp", "connection": "snmp-1", "check": "row", "params": {"preset": "qnap-disk", "name": "SERIAL-B"}}]}]
         monconfig.save_monitoring(self.paths, {"builtinInternet": True, "nodes": nodes}, monconfig.get_monitoring(self.paths)["revision"])
 
     def tearDown(self):
@@ -68,6 +73,18 @@ class HeatLimit(unittest.TestCase):
         monconfig.set_limit(self.paths, "t1", None)
         self.assertEqual(self.params("t1"), {"name": "Core"})
         self.assertEqual(self.params("d1")["max_c"], 50.5, "each item has its own limit")
+
+    def test_each_disk_of_a_nas_has_its_own_limit(self):
+        # 2026-10-30: Goliath's disks are checks inside one system, so a limit is set per disk, like a Protect drive's
+        disks = lambda: {c["id"]: c["params"] for c in next(x for x in monconfig.get_monitoring(self.paths)["monitoring"]["nodes"] if x["id"] == "nas")["checks"]}
+        monconfig.set_limit(self.paths, "nas", 68, check="da")
+        self.assertEqual(disks()["da"], {"preset": "qnap-disk", "name": "SERIAL-A", "max_c": 68})
+        self.assertNotIn("max_c", disks()["db"], "the other disk keeps the built-in limit")
+        monconfig.set_limit(self.paths, "nas", None, check="da")
+        self.assertNotIn("max_c", disks()["da"])
+        for bad in ("up", "nope"):
+            with self.assertRaises(monconfig.Invalid, msg=bad):
+                monconfig.set_limit(self.paths, "nas", 60, check=bad)
 
     def test_bad_limits_and_nodes_without_a_temperature_check_are_refused_and_leave_nothing_behind(self):
         for bad in (19, 151, "70", True, -5):

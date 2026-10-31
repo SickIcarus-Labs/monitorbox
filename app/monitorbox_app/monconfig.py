@@ -869,13 +869,21 @@ def set_confirm(paths, nid, failures, seconds):
 HEAT_CHECKS = {"temperature": 80, "drive": 55}      # the module checks that have a temperature limit, and the limit used when none is set (degrees C)
 
 
-def set_limit(paths, nid, max_c):
-    """Give one device's or drive's temperature check its own warning limit in degrees C, or None to use the built-in one again."""
+def is_disk_check(c):
+    """An SNMP disk row (a NAS disk by serial number): its temperature limit is 55 for a hard drive and 70 for an SSD unless set."""
+    return c.get("type") == "module" and c.get("check") == "row" and (c.get("params") or {}).get("preset") == "qnap-disk"
+
+
+def set_limit(paths, nid, max_c, check=None):
+    """Give one device's or drive's temperature check its own warning limit in degrees C, or None to use the built-in one again.
+    `check`: the id of one check on that system (one disk of a NAS); without it every temperature check of the system is set."""
     import copy
     cur = get_monitoring(paths)
     mon = copy.deepcopy(cur["monitoring"])
     node = next((n for n in mon.get("nodes", []) if n.get("id") == nid and n.get("kind") != "aggregate"), None)
-    checks = [c for c in (node or {}).get("checks", []) if c.get("type") == "module" and c.get("check") in HEAT_CHECKS]
+    checks = [c for c in (node or {}).get("checks", []) if (c.get("type") == "module" and c.get("check") in HEAT_CHECKS) or is_disk_check(c)]
+    if check is not None:
+        checks = [c for c in checks if c.get("id") == check]
     if not checks:
         raise Invalid([f"'{nid}' has no temperature check to set a limit on."])
     if max_c is not None:
