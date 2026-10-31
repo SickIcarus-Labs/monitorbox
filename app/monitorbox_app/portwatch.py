@@ -28,6 +28,7 @@ MIN_HISTORY = 1800        # readings of a port needed before it can be called ri
 RISE = 5                  # the recent pace must be at least this many times the earlier pace
 FLOOR = {"errors": 20, "drops": 10000, "flaps": 3}     # new in the window, at least, before it is worth a line, on a 1 Gbit link; errors and drops scale with the link speed (below)
 DROP_SHARE = 0.001        # packet drops are only worth a line when they are at least this share of the packets (0.1%), where the port's packet counts are known
+ERROR_SHARE = 0.001       # the same for errors (owner's choice, 2026-10-30): a few hundred errors an hour on a link moving gigabytes is a sliver of the traffic
 FLOOR_MIN = {"errors": 20, "drops": 1000}               # ... but never lower than this, however slow the link
 WORDS = {"errors": "errors", "drops": "packet drops", "flaps": "link drops"}
 KINDS = ("errors", "drops", "flaps")
@@ -87,10 +88,19 @@ def floor_for(kind, speed_mbps=None):
 def drop_share(last, cut, tx_only=False):
     """The share of packets dropped between two readings: the worse of receive and transmit (drops / (packets + drops)). None when either reading has no packet counts
     (an older saved reading, a device that does not report them) or a counter went backwards."""
+    return _share(last, cut, ((7, 9),) if tx_only else ((6, 8), (7, 9)))
+
+
+def error_share(last, cut):
+    """The same for errors: the worse of receive errors and transmit errors, each against the packets in that direction."""
+    return _share(last, cut, ((4, 8), (5, 9)))
+
+
+def _share(last, cut, pairs):
     if len(last) < 10 or len(cut) < 10:
         return None
     worst = 0.0
-    for d, pk in (((7, 9),) if tx_only else ((6, 8), (7, 9))):
+    for d, pk in pairs:
         dd, pp = last[d] - cut[d], last[pk] - cut[pk]
         if dd < 0 or pp < 0:
             return None
@@ -104,7 +114,7 @@ def judge(q, flaps=True, speed=None, server=False):
     -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}
     `server`: this is a server's network card. Its receive drops are frames the kernel discarded because nothing wanted them (unknown protocol or VLAN), not loss: a card that really
     loses frames shows receive errors, which are counted as ever. So only its transmit drops count as drops."""
-    out = {"learning": True, "rising": [], "perHour": {}, "was": {}, "split": {}, "share": None}
+    out = {"learning": True, "rising": [], "perHour": {}, "was": {}, "split": {}, "share": None, "shares": {}}
     if len(q) < 2:
         return out
     now, first = q[-1][0], q[0][0]
@@ -130,10 +140,13 @@ def judge(q, flaps=True, speed=None, server=False):
         if out["learning"] or new < floor_for(kind, speed):
             continue
         if was is None or new * 3600 / RECENT >= RISE * was:
-            if kind == "drops":
-                out["share"] = drop_share(q[-1], cut, tx_only=(ci == 7))
-                if out["share"] is not None and out["share"] < DROP_SHARE:
-                    continue                                          # plenty of drops, but a sliver of the traffic (a server's network card discards frames it does not want): not a problem
+            if kind in ("drops", "errors"):
+                sh = drop_share(q[-1], cut, tx_only=(ci == 7)) if kind == "drops" else error_share(q[-1], cut)
+                out["shares"][kind] = sh
+                if kind == "drops":
+                    out["share"] = sh
+                if sh is not None and sh < (DROP_SHARE if kind == "drops" else ERROR_SHARE):
+                    continue                                          # plenty of them, but a sliver of the traffic (a busy link, a server's card discarding frames it does not want): not a problem
             out["rising"].append(kind)
     return out
 
@@ -641,7 +654,7 @@ class PortWatch:
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
             j = judge(q, self._links(k), self._speed(k), self._is_server(k))
             if j["rising"] and k not in known:
-                out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "share": j["share"], "other": self.other_end(k),
+                out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "share": j["share"], "shares": j.get("shares", {}), "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
         return out
 
@@ -669,7 +682,7 @@ class PortWatch:
             per, was, split = f["perHour"], f["was"], f["split"]
             what = " and ".join(f"{WORDS[k]} rising (about {per[k]:,} an hour"
                                 + (f": {split[k]['rx']:,} receive, {split[k]['tx']:,} transmit" if k in split else "")
-                                + (f", {f['share'] * 100:.2g}% of packets" if k == "drops" and f.get("share") is not None else "")
+                                + (f", {(f.get('shares') or {}).get(k) * 100:.2g}% of packets" if (f.get('shares') or {}).get(k) is not None else "")
                                 + (f", was {was[k]:,}" if was[k] is not None else "") + ")" for k in f["kinds"])
             busy, other = f["traffic"], f["other"]
             kind = next((k for k in f["kinds"] if k in SPLIT), None)

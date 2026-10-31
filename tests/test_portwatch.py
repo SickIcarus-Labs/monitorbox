@@ -90,6 +90,32 @@ class Judge(unittest.TestCase):
         self.assertEqual(j["rising"], ["drops"])
         self.assertAlmostEqual(j["share"], 200_000 / 50_200_000, places=6)
 
+    def errors_with_packets(self, rx_err_per_5min, rx_packets_per_5min):
+        rows, re_, rp, tp = [], 0, 0, 0
+        for i in range(13):
+            re_ += rx_err_per_5min if i >= 10 else 0
+            rp += rx_packets_per_5min
+            tp += 1000
+            rows.append([i * 300, re_, 0, 0, re_, 0, 0, 0, rp, tp])
+        return rows
+
+    def test_errors_that_are_a_sliver_of_a_busy_links_traffic_are_not_a_problem(self):
+        # 2026-10-30: about 200 receive errors an hour on a WAN link moving a big download raised Port errors
+        j = portwatch.judge(self.errors_with_packets(500, 50_000_000), speed=2500)       # 0.001% of the packets
+        self.assertEqual(j["rising"], [])
+        self.assertLess(j["shares"]["errors"], portwatch.ERROR_SHARE)
+
+    def test_errors_that_are_a_real_share_of_the_traffic_are_rising_and_say_so(self):
+        j = portwatch.judge(self.errors_with_packets(500, 100_000))                      # 0.5% of the packets
+        self.assertEqual(j["rising"], ["errors"])
+        self.assertAlmostEqual(j["shares"]["errors"], 1500 / 301_500, places=6)
+
+    def test_errors_without_packet_counts_keep_the_old_rule(self):
+        q = self.series(5, [(0, 0, 0)] * 10 + [(500, 0, 0), (1000, 0, 0), (1500, 0, 0)])
+        j = portwatch.judge(q)
+        self.assertEqual(j["rising"], ["errors"])
+        self.assertIsNone(j["shares"].get("errors"))
+
     def test_a_packet_counter_that_went_backwards_is_not_a_share(self):
         q = self.with_packets(200_000, 50_000_000)
         q[-1][8] = 5                                                        # the device restarted its packet counter
