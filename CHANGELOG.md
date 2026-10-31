@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.19** (#334) Each module now starts once when MonitorBox restarts. The LAN sampler or the graphs could ask for UniFi Network or SNMP a moment before the start-up batch launched it, start their own copy, and then the batch started it again and stopped the first, so its checks went Unknown for a few seconds at every restart. They now wait for the batch, and the batch leaves a module alone that is already running.
+
 ## 1.9.17 to 1.9.18 (stable, October 31)
 
 - **1.9.18** The move of DNS into the Internet card (1.9.17) now also moves DNS servers that check something else too, such as their Pi-hole admin page (Turnberry's did, so they stayed in their own card). The log now says when DNS items were moved, or why they could not be.
