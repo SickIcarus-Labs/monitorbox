@@ -447,3 +447,44 @@ class Warn(unittest.TestCase):
         n = leaf("pair", checks=2, rule="any")
         res = {f"pair/c{i}": {"ok": True, "warn": True, "detail": "w", "ms": 1, "at": "t", "since": "s"} for i in range(2)}
         self.assertEqual(engine.evaluate([n], res)["nodes"]["pair"]["state"], "degraded")
+
+
+class UnreachableSource(unittest.TestCase):
+    """2026-10-30: a busy UniFi console turned 31 items Unknown and the list showed 31 identical entries. One source, one entry."""
+    def mod(self, i, name, module="unifi-network", conn="udm", group="Network"):
+        n = leaf(i, name, group=group)
+        n["checks"] = [{"id": "c0", "type": "module", "module": module, "connection": conn, "check": "device"}]
+        return n
+
+    def res(self, ids, ok=None, detail="cannot reach the UniFi controller at https://192.0.2.1 (timed out)"):
+        return {f"{i}/c0": {"ok": ok, "detail": detail, "ms": None, "at": "t", "since": "s"} for i in ids}
+
+    def test_items_behind_a_source_that_does_not_answer_show_as_one_entry(self):
+        nodes = [self.mod("sw", "Switch"), self.mod("ap", "Hallway"), self.mod("gw", "Gateway")]
+        snap = engine.evaluate(nodes, self.res(["sw", "ap", "gw"]))
+        self.assertEqual(len(snap["attention"]), 1)
+        a = snap["attention"][0]
+        self.assertEqual((a["name"], a["state"]), ("UniFi Network", "unknown"))
+        self.assertEqual(sorted(a["ids"]), ["ap", "gw", "sw"])
+        self.assertIn("192.0.2.1", a["detail"])
+        self.assertEqual({snap["nodes"][i]["state"] for i in ("sw", "ap", "gw")}, {"unknown"}, "each item keeps its own state")
+        self.assertIn("3 things", snap["banner"]["subline"], "the banner still counts the items")
+
+    def test_two_sources_are_two_entries_and_a_single_item_stays_as_it_is(self):
+        nodes = [self.mod("sw", "Switch"), self.mod("ap", "Hallway"), self.mod("cam", "Doorbell", module="unifi-protect", group="Cameras"),
+                 self.mod("cam2", "Garage", module="unifi-protect", group="Cameras"), self.mod("pt", "Portainer", module="portainer", conn="goliath")]
+        snap = engine.evaluate(nodes, self.res(["sw", "ap", "cam", "cam2", "pt"]))
+        self.assertEqual(sorted(a["name"] for a in snap["attention"]), ["Portainer", "UniFi Network", "UniFi Protect"])
+        self.assertNotIn("ids", next(a for a in snap["attention"] if a["name"] == "Portainer"))
+
+    def test_down_items_and_items_with_other_checks_are_not_folded_in(self):
+        mixed = self.mod("nas", "NAS")
+        mixed["checks"].append({"id": "c1", "type": "ping", "target": "x"})
+        nodes = [self.mod("sw", "Switch"), self.mod("ap", "Hallway"), self.mod("gw", "Gateway"), mixed]
+        res = self.res(["sw", "ap", "nas"])
+        res.update(self.res(["gw"], ok=False, detail="offline"))
+        res["nas/c1"] = {"ok": None, "detail": "ping not permitted", "ms": None, "at": "t", "since": "s"}
+        snap = engine.evaluate(nodes, res)
+        names = sorted(a["name"] for a in snap["attention"])
+        self.assertEqual(names, ["Gateway", "NAS", "UniFi Network"])
+        self.assertEqual(sorted(next(a for a in snap["attention"] if a["name"] == "UniFi Network")["ids"]), ["ap", "sw"])
