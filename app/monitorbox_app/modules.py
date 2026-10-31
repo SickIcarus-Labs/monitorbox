@@ -194,6 +194,9 @@ class Modules:
 
             def one(mid, version):
                 try:
+                    p = self.running.get(mid)
+                    if p is not None and p.alive() and getattr(p, "version", version) == version:
+                        return                                  # already up (started on demand): starting it again would stop it (#334)
                     self._start(mid, version)
                 except Exception as e:
                     applog.error("modules", f"{mid} {version} did not start: {e}")
@@ -256,8 +259,20 @@ class Modules:
                 del self.cards[k]
             self.last_try.pop(mid, None)
 
+    def _await_start(self, mid):
+        """A module the start-up batch is bringing up is waited for, never started a second time (#334: the LAN sampler or the
+        graphs asked first, started their own copy, and the batch then replaced it, so its checks blinked Unknown)."""
+        while mid in self.starting and time.monotonic() - self.boot < STARTUP_HOLD:
+            p = self.running.get(mid)
+            if p is not None and p.alive():
+                return p
+            time.sleep(0.1)
+        return self.running.get(mid)
+
     def _revive(self, mid):
         """A module that died (a crash in its device library, say) is started again, at most every few seconds."""
+        if mid in self.starting and time.monotonic() - self.boot < STARTUP_HOLD:
+            return self._await_start(mid)
         if time.monotonic() - self.last_try.get(mid, -1e9) < self.retry_after or not self.lock.acquire(blocking=False):
             return self.running.get(mid)
         try:

@@ -76,6 +76,35 @@ class Together(unittest.TestCase):
         self.assertLessEqual(peak[0], modules.START_AT_ONCE, "but not all eight at once (CI starved them on a small runner, #1.4.0)")
 
 
+class StartedOnce(unittest.TestCase):
+    """#334: at every restart the LAN sampler (or the graphs) asked for a module before the start-up batch got to it, started its
+    own copy, and the batch then started it again and stopped the first, so its checks blinked Unknown. Each module starts once."""
+    def test_a_call_while_the_batch_is_starting_it_waits_and_the_module_starts_once(self):
+        import threading, time
+        m = Fake({"unifi-network": {"active": "1"}})
+        real = m._start
+
+        def slow(mid, version):
+            time.sleep(0.3)
+            real(mid, version)
+        m._start = slow
+        m.mark_starting()                                   # as the app does, before anything runs
+        got = []
+        early = threading.Thread(target=lambda: got.append(m.call("unifi-network", "status", {})), name="lansampler")
+        early.start()                                       # asks before the batch has launched it
+        time.sleep(0.05)
+        m.start_all()
+        early.join(5)
+        self.assertEqual(m.started, ["unifi-network"], "started once, by the batch")
+        self.assertEqual(got, [{"state": "healthy", "detail": "ok"}], "the early caller got its answer once the module was up")
+
+    def test_the_batch_leaves_a_module_alone_that_is_already_running(self):
+        m = Fake({"snmp": {"active": "1"}})
+        m._start("snmp", "1")                               # already up, started on demand
+        m.start_all()
+        self.assertEqual(m.started, ["snmp"])
+
+
 class LazyStart(unittest.TestCase):
     def setUp(self):
         self.m = Fake({"snmp": {"active": "1"}, "scrypted": {"active": "1"}, "wol": {"active": "1"}})
