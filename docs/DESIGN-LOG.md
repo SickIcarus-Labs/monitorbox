@@ -1125,3 +1125,10 @@ The line under the Settings page titles reads "MonitorBox 0.83.8 · image 1.0.1 
 ## 0.83.9: new boxes follow the stable channel (#118)
 
 A box with nothing chosen yet now follows `stable` (before: `dev`): the launcher and App defaults, and the example `deploy/docker-compose.yml`. A box whose owner has chosen a channel keeps it (the choice is in the config, and it wins over the default). Launcher VERSION 1.0.2, since the launcher code changed.
+
+## 1.9.7: a busy console no longer turns everything Unknown
+
+On 2026-10-30 a large download through the owner's UDM Pro pushed its load to about 47 (almost all of it packet handling). Routing kept working, the console's web side stayed slow but answering, and every UniFi Network and Protect read timed out at 8 seconds: 31 items went Unknown together for over six minutes. Two changes:
+
+- The UniFi Network (0.2.26) and Protect (0.1.7) modules wait 15 seconds for an answer (was 8). The App waits up to 20 seconds (plus 2) for a module check (was 10), so it does not give up before the module does. A console that really is gone still fails fast: after one timeout every call fails at once for 10 seconds.
+- Unknown after a healthy reading is now held by the same grace as a failure (default 2 in a row over 60 seconds, site or per system). Until then the item stays healthy with a heads-up line ("…, confirming"). This replaces "Unknown is never held back" from the grace-period entry: that rule meant one missed answer showed on screen at once. Unknown is still never turned into Failed, history still records every raw answer, and with the grace set to 1 and 0 Unknown shows at once as before. Something that was not healthy (down, degraded, or never read) shows Unknown at once.

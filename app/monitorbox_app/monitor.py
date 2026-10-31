@@ -6,7 +6,8 @@
   a healthy thing stays healthy with a heads-up line, so alerts and the screen do not see it. Warnings (Degraded) are held the same way. Default
   2 failures and 60 seconds. History is NOT held back: it records what each check actually answered (`raw`), and the bars and History page
   hide stretches shorter than the grace seconds when drawn, so the setting only ever changes what is shown.
-- "unknown" (could not be checked here) shows at once and is never turned into "failed"
+- "unknown" (could not be checked here) is never turned into "failed". After a healthy reading it waits out the same grace as a failure
+  (a busy console that misses an answer stays healthy with a heads-up); otherwise, or once the grace has passed, it shows at once
 - check_now() runs checks immediately and shows the answer without hold-down
 - snapshot() = engine.evaluate(...) on the latest results; wait_for_change() lets the web layer push
 """
@@ -234,6 +235,23 @@ class Monitor:
                 task["fails"] += 1                      # not shown yet: look again soon
                 task["due"] = now + RECHECK_AFTER
                 return
+            if ok is None and not manual and prev is not None and prev["ok"] is True and not prev.get("warn"):
+                # could not be checked, after a healthy reading: held by the same grace as a failure, so a busy console that misses one
+                # answer (or a module restarting) does not turn everything behind it Unknown. Looked at again at the normal pace.
+                task["ustreak"] = task.get("ustreak", 0) + 1
+                task.setdefault("ustreak_since", now)
+                need_n, need_s = self._grace(task)
+                if task["ustreak"] < need_n or now - task["ustreak_since"] < need_s:
+                    task["fails"], task["streak"] = 0, 0
+                    task.pop("streak_since", None)
+                    task["due"] = now + interval
+                    self.results[key] = {**prev, "notice": True, "at": _iso(now),
+                                         "detail": f"could not check just now, confirming ({task['ustreak']} of {need_n} in a row, {int(now - task['ustreak_since'])} s of {int(need_s)} s): {detail}"}
+                    self._bump()
+                    return
+            elif ok is not None:
+                task["ustreak"] = 0
+                task.pop("ustreak_since", None)
             task["fails"] = 0 if ok is not False else task["fails"] + 1
             bad = ok is False or (ok is True and warn)  # a warning is held the same way as a failure
             if bad:                                     # the grace period (2 in a row and 60 seconds unless changed)

@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.7** (with UniFi Network 0.2.26 and UniFi Protect 0.1.7) A busy UniFi console no longer turns every UniFi item and camera Unknown at once. The UniFi modules now wait up to 15 seconds for an answer (was 8), and something that was healthy and then cannot be checked waits out the same grace as a failure (2 in a row over 60 seconds by default) before it shows Unknown; until then it stays healthy with a heads-up line. With the grace set to 1 and 0, Unknown still shows at once.
+
 ## 1.9.0 to 1.9.6 (stable, October 30)
 
 - **1.9.6** (#336) For finding why Settings sometimes will not load: the performance report now lists requests that are still waiting (a request that never finishes used to be missing from it), and the debug log notes any request that took over a second.

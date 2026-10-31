@@ -74,7 +74,7 @@ Every state is also written as text, never colour alone. A status change reaches
 
 ### Confirmation (hold-down)
 
-A blip should not reach the screen or a phone. When a check first fails, the App looks again about 2 seconds later before believing it. Then a failure (or a warning) must also last: by default **2 failures in a row over at least 60 seconds** before the thing turns Down or Degraded. Until then it stays healthy, with a heads-up line under the green headline such as "failed just now, confirming (1 of 2 in a row, 12 s of 60 s)". You can change the site-wide setting (1 to 20 failures, 0 to 3600 seconds) and override it per system. A success shows at once. Unknown shows at once and is never turned into Failed.
+A blip should not reach the screen or a phone. When a check first fails, the App looks again about 2 seconds later before believing it. Then a failure (or a warning) must also last: by default **2 failures in a row over at least 60 seconds** before the thing turns Down or Degraded. Until then it stays healthy, with a heads-up line under the green headline such as "failed just now, confirming (1 of 2 in a row, 12 s of 60 s)". You can change the site-wide setting (1 to 20 failures, 0 to 3600 seconds) and override it per system. A success shows at once. Unknown is never turned into Failed; after a healthy reading it waits out the same grace (heads-up "…, confirming"), otherwise it shows at once.
 
 History is not held back. It records what each check actually answered, and the bars hide stretches shorter than the grace period when drawn.
 

@@ -86,7 +86,7 @@ def _aggregate_state(node, states):
 POWER_URGENT = {"shutting down": "is shutting down", "low battery": "has a low battery", "on battery": "is running on battery"}
 
 
-_CONFIRMING = re.compile(r"^(?:failed|warning) just now, confirming \([^)]*\): (.*)$", re.S)
+_CONFIRMING = re.compile(r"^(?:failed|warning|could not check) just now, confirming \([^)]*\): (.*)$", re.S)
 
 
 def plain_notice(text):
