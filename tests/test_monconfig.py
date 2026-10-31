@@ -406,6 +406,27 @@ class FirstRunNetwork(unittest.TestCase):
         # the built-in internet checks now hang under the gateway
         self.assertEqual(next(x for x in monconfig.all_nodes(self.paths)[0] if x["id"] == "internet")["dependsOn"], ["gateway"])
 
+    def test_dns_goes_in_the_internet_card(self):
+        # 2026-10-31: Turnberry's DNS had a card of its own while Broad Leaf's was under Internet; the owner chose Internet as the standard
+        monconfig.add_network(self.paths, "192.0.2.1", ["192.0.2.53", "192.0.2.54"])
+        n = self.nodes()
+        self.assertEqual({n[i]["group"] for i in ("dns-192-0-2-53", "dns-192-0-2-54", "dns")}, {"Internet"})
+
+    def test_a_box_set_up_before_moves_its_dns_into_the_internet_card_once(self):
+        ck = lambda ip: [{"id": "dns", "type": "dns", "server": ip, "name": "google.com"}, {"id": "ping", "type": "ping", "target": ip}]
+        nodes = [{"id": "dns-9", "name": "DNS .9", "group": "DNS", "checks": ck("192.0.2.9")},
+                 {"id": "dns-4", "name": "DNS .4", "group": "DNS", "checks": ck("192.0.2.4")},
+                 {"id": "dns", "name": "DNS", "group": "DNS", "kind": "aggregate", "children": ["dns-9", "dns-4"], "rule": "any"},
+                 {"id": "pihole-web", "name": "Pi-hole admin", "group": "DNS", "checks": [{"type": "http", "url": "http://192.0.2.9/admin/"}]}]
+        monconfig.save_monitoring(self.paths, {"builtinInternet": True, "nodes": nodes}, monconfig.get_monitoring(self.paths)["revision"])
+        self.assertTrue(monconfig.dns_under_internet(self.paths))
+        n = self.nodes()
+        self.assertEqual({i: n[i]["group"] for i in n}, {"dns-9": "Internet", "dns-4": "Internet", "dns": "Internet", "pihole-web": "DNS"},
+                         "the DNS servers and their group move; a web page someone filed under DNS stays where it is")
+        rev = monconfig.get_monitoring(self.paths)["revision"]
+        self.assertFalse(monconfig.dns_under_internet(self.paths))
+        self.assertEqual(monconfig.get_monitoring(self.paths)["revision"], rev, "nothing is saved the second time")
+
     def test_running_it_twice_changes_nothing(self):
         monconfig.add_network(self.paths, "192.0.2.1", ["192.0.2.53"])
         rev = monconfig.get_monitoring(self.paths)["revision"]
