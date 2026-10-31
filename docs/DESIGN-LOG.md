@@ -1144,3 +1144,7 @@ Root-cause grouping (#191) follows the dependencies between items, but a provide
 ## 1.9.10: errors count from 0.01% of the packets
 
 0.1% (1.9.8) was too forgiving for errors: at that level a link is already plainly bad. The owner's own WAN, during a full-rate download on 2026-10-30, showed 434 receive errors in 297.8 million packets over 35 minutes (about 0.00015%) and the download was unaffected. 0.01% is about where a single TCP stream starts to slow, which is a sensible line for "worth knowing", and it is still about 70 times above that busy-but-fine link. Drops stay at 0.1%: they are usually congestion, not a fault.
+
+## 1.9.11: a dipping error count is not a restart
+
+On 2026-10-30 UniFi reported SFP+ 1's receive errors falling (402 to 325, 618 to 613, 836 to 829) while its packet counts kept climbing. Any fall was read as a device restart, so the port's history was thrown away three times in 35 minutes and it sat at "learning", unable to alert. A restart sets every counter back, packets included. So when the packet counts kept going up, a fallen error or drop count is held at its old figure until the counter passes it again: nothing is invented (unlike the 1.7.25 drops carry-on, no offset is added, because the dip here is temporary) and nothing is lost. The dip is still counted on the Port errors page and logged once. Without packet counts the old rules stand.
