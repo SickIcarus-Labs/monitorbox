@@ -18,6 +18,17 @@ from .ui import PAGE
 RESTART_EXIT = 75
 
 
+LISTEN_QUEUE = 128     # connections the kernel may hold for the server to pick up (Python's default is 5)
+
+
+class Server(ThreadingHTTPServer):
+    """The web server. With Python's default queue of 5, a page firing eight or nine requests at once through a proxy while the Pi was busy overflowed it:
+    the kernel refused the extra connections, Caddy logged "connection reset by peer" and answered 502, and nothing reached MonitorBox's log.
+    Seen 2026-10-31: the Pi's TcpExtListenOverflows counter stood at 14,697 (#336)."""
+    request_queue_size = LISTEN_QUEUE
+    daemon_threads = True
+
+
 
 BRAND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brand")
 BRAND_ROUTES = {"/favicon.ico": ("favicon-64.png", "image/png"), "/favicon.svg": ("mark.svg", "image/svg+xml"),
@@ -2926,7 +2937,7 @@ class App:
 
         self.apply_start_files()
         applog.setup(self.paths.p("logs"), version(), self.cfg()["channel"]).on_error = lambda source, text: autonotes.add_problem(self.paths, source, text, time.time())
-        self.httpd = ThreadingHTTPServer(("0.0.0.0", self.port), H)
+        self.httpd = Server(("0.0.0.0", self.port), H)
         self.sync_site_nodes()
         self.ensure_port_node()
         self.reload_monitoring()
