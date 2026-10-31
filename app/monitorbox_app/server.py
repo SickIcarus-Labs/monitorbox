@@ -2767,7 +2767,7 @@ class App:
                         return self.send(200, out)
                     if path == "/api/limit":
                         try:
-                            out = monconfig.set_limit(app.paths, str(body.get("id", "")), body.get("max_c"))
+                            out = monconfig.set_limit(app.paths, str(body.get("id", "")), body.get("max_c"), str(body["check"]) if body.get("check") is not None else None)
                         except monconfig.Invalid as e:
                             return self.send(400, {"error": "; ".join(e.errors), "errors": e.errors})
                         except monconfig.Conflict as e:

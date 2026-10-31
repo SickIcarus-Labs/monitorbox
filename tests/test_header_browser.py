@@ -659,6 +659,25 @@ class Header(T.SnmpE2E):
             b.close()
 
     @unittest.skipIf(sync_playwright is None, "playwright not installed")
+    def test_edit_monitoring_has_one_limit_per_nas_disk(self):
+        c = self.start(); self.configure(c, [], [])
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1000, "height": 900})
+            pg.goto(f"http://127.0.0.1:{self.port}/"); pg.wait_for_selector("input[type=password]")
+            pg.fill("input[type=password]", T.PASSWORD); pg.keyboard.press("Enter"); pg.wait_for_selector(".head em")
+            pg.evaluate("""()=>{window._calls=[];const d=(id,name,extra)=>({id,type:'module',check:'row',label:'Disk '+name,params:{preset:'qnap-disk',name,...extra}});
+              const mon={confirm:{},nodes:[{id:'nas',name:'NAS',group:'Servers',checks:[{id:'up',type:'module',check:'uptime',params:{}},d('da','SERIAL-A',{max_c:68}),d('db','SERIAL-B',{})]}]};
+              const o=api;api=(p,b)=>p==='config/monitoring'?Promise.resolve({monitoring:mon,revision:1}):(p==='confirm'||p==='limit')?(window._calls.push([p,b]),Promise.resolve({})):o(p,b)}""")
+            pg.evaluate("editMonitoring('nas')"); pg.wait_for_selector(".me-d")
+            self.assertEqual(pg.locator("#me-t").count(), 0, "a NAS has no single limit, one per disk instead")
+            self.assertEqual(pg.locator(".me-d").evaluate_all("es=>es.map(e=>[e.dataset.c,e.value])"), [["da", "68"], ["db", ""]])
+            pg.locator(".me-d").nth(1).fill("72"); pg.click("#me-ok"); pg.wait_for_selector("#medit", state="detached")
+            calls = pg.evaluate("window._calls")
+            self.assertIn(["limit", {"id": "nas", "check": "db", "max_c": 72}], calls)
+            self.assertFalse(any(c[0] == "limit" and c[1].get("check") == "da" for c in calls), "an unchanged disk is left alone")
+            b.close()
+
+    @unittest.skipIf(sync_playwright is None, "playwright not installed")
     def test_an_installed_module_that_is_idle_still_offers_uninstall(self):
         """Regression: a module that is installed but not running ("idle until something uses it") had no Uninstall button."""
         c = self.start(); self.configure(c, [], [])
