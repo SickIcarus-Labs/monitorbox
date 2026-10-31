@@ -376,6 +376,27 @@ class Watch(unittest.TestCase):
         self.assertFalse(self.w.state([key])["learning"])
         self.assertEqual(self.w.resets[key][:2], [1, "errors"], "it is still counted and shown, once")
 
+    def test_errors_below_the_alert_line_are_still_shown_with_their_share(self):
+        # 2026-10-30: the WAN's errors stayed below the line and showed nowhere; the owner wants to see them
+        self.w.set_enabled(True)
+        key = self.w.key("gw", "SFP+ 1")
+        for m in range(46):
+            self.pkts(m * 13, m * 8_500_000, m * 60)            # about 780 errors an hour in 510 million packets
+        page = self.w.page()
+        self.assertEqual(page["rising"], [])
+        row = next(r for r in page["quiet"] if r["key"] == key)
+        self.assertEqual(row["perHour"]["errors"], 780)
+        self.assertAlmostEqual(row["shares"]["errors"], 13 / 8_500_013, places=9)
+        st = self.w.state([key])
+        self.assertEqual(st["rising"], [])
+        self.assertAlmostEqual(st["shares"]["errors"], 13 / 8_500_013, places=9)
+
+    def test_a_clean_port_is_not_listed_below_the_line(self):
+        self.w.set_enabled(True)
+        for m in range(46):
+            self.pkts(0, m * 8_500_000, m * 60)
+        self.assertEqual(self.w.page()["quiet"], [])
+
     def test_errors_and_packets_both_falling_is_still_a_restart(self):
         self.w.set_enabled(True)
         key = self.w.key("gw", "SFP+ 1")
