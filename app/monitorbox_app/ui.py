@@ -164,8 +164,10 @@ async function api(path,body){if(body!==undefined)SXC=null;let r;try{r=await fet
 /* a read that must not hang: Settings asks for nine things at once and waits for all of them, so one request stuck on a dead connection (after the box restarted, or behind a proxy)
    held the page for as long as the browser cared to wait. It gives up after APIQ_MS and asks once more, on a fresh connection. Only for plain reads, never for a change. */
 let APIQ_MS=window.APIQ_MS||12000;
-async function apiq(path){const once=async()=>{const ac=new AbortController(),t=setTimeout(()=>ac.abort(),window.APIQ_MS||APIQ_MS);
-  try{const r=await fetch(U(path),{signal:ac.signal});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}finally{clearTimeout(t)}};
+let APIQ_FAILS=[];   /* what went wrong with each read, so a page that cannot load can say which request and how (#336) */
+async function apiq(path){const once=async()=>{const ac=new AbortController(),t0=Date.now(),t=setTimeout(()=>ac.abort(),window.APIQ_MS||APIQ_MS);
+  try{const r=await fetch(U(path),{signal:ac.signal});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}
+  catch(e){APIQ_FAILS.push(path+': '+(e&&e.status?'HTTP '+e.status:e&&e.name==='AbortError'?'no answer in '+Math.round((Date.now()-t0)/1000)+' s':(e&&e.message)||'failed'));throw e}finally{clearTimeout(t)}};
  try{return await once()}catch(e){if(e&&e.status)throw e;return await once()}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const SDOT={green:'#34d399',yellow:'#fbbf24',red:'#f87171',blue:'#60a5fa',unknown:'#7a8699'};
@@ -1467,7 +1469,16 @@ async function settingsData(fresh){const k=SITE;
  if(!s)return {s:null};if(bad)throw bad;
  if(tz)BOXTZ=tz.timezone||'';
  const d={s,v,mon,conn,ab,bk,al,si};if(s)SXC={k,at:Date.now(),d};return d}
-async function renderSettings(){
+/* Settings never sits on "Loading settings…" for good (#336): when it cannot load it tries once more, then says which request failed and how, offers Try again,
+   and writes the same to the box's log, so the next time it happens the cause is on record even though the box never saw the request. */
+async function renderSettings(){const t0=Date.now();APIQ_FAILS=[];
+ try{return await renderSettingsNow()}catch(e){
+  if(e&&e.status===401)return boot();
+  if(!location.hash.startsWith('#/settings'))return;
+  const what=(APIQ_FAILS.length?[...new Set(APIQ_FAILS)].join('; '):String((e&&e.message)||e)).slice(0,600);
+  try{await fetch('/api/browser-report',{method:'POST',headers:{'Content-Type':'application/json','X-MB':'1'},body:JSON.stringify({what:'Settings did not load',detail:what,seconds:Math.round((Date.now()-t0)/1000),visible:document.visibilityState})})}catch(_){}
+  const m=mpage();if(m)m.innerHTML=`<div class=box style="margin-top:1rem"><p style="margin-top:0"><b>Settings did not load.</b></p><p class=sub>${esc(what)}</p><button class="btn" onclick="renderSettings()">Try again</button></div>`}}
+async function renderSettingsNow(){
  document.body.dataset.s='green';const tok=++rsTok,onUpd=location.hash.startsWith('#/settings/updates');
  if(!(!onUpd&&SXC&&SXC.k===SITE&&Date.now()-SXC.at<20000)&&!$('#m').dataset.set&&mpage())mpage().innerHTML='<p class=sub style="padding:1.2rem 0">Loading settings…</p>';   /* something on screen at once, so a second tap is not needed */
  const D=await settingsData(onUpd);       /* the Updates page never reuses a stale answer: what is waiting can change at any moment */if(tok!==rsTok)return;
