@@ -397,6 +397,26 @@ class Watch(unittest.TestCase):
             self.pkts(0, m * 8_500_000, m * 60)
         self.assertEqual(self.w.page()["quiet"], [])
 
+    def test_a_one_error_wobble_keeps_the_history_even_when_the_packet_count_wobbles_too(self):
+        # 2026-10-30 22:22: SFP+ 1's errors went 924 to 923 and its history was thrown away again
+        self.w.set_enabled(True)
+        key = self.w.key("gw", "SFP+ 1")
+        for m in range(41):
+            self.pkts(m * 10, m * 1_000_000, m * 60)
+        before = len(self.w.series[key])
+        self.pkts(399, 39_999_000, 41 * 60)                   # errors and packets both a hair lower than the last reading
+        self.assertEqual(len(self.w.series[key]), before + 1, "nothing was thrown away")
+        self.assertEqual(self.w.series[key][-1][1], 400)
+        self.assertFalse(self.w.state([key])["learning"])
+
+    def test_a_wobble_with_no_packet_counts_also_keeps_the_history(self):
+        self.w.set_enabled(True)
+        self.run_minutes(40, lambda m: 1000 + m * 10)
+        key = self.w.key("sw1", "Port 5")
+        before = len(self.w.series[key])
+        self.w.feed([dev("Core switch", **{"Port 5": (1395, 0, 0, 0, 0)})], ["sw1"], now=41 * 60)
+        self.assertEqual(len(self.w.series[key]), before + 1)
+
     def test_errors_and_packets_both_falling_is_still_a_restart(self):
         self.w.set_enabled(True)
         key = self.w.key("gw", "SFP+ 1")

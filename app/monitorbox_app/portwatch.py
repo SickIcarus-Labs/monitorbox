@@ -38,6 +38,9 @@ SAVE_EVERY = 300          # seconds between saves of the history; it is kept thi
 FIRST_READINGS = 180      # seconds after a start that the first counters are waited for before the check says it cannot read any
 
 
+DIP_KEEPS = 0.5          # a counter that falls but keeps at least half of what it had wobbled; a restart takes it (and the packet counts) back to about nothing
+
+
 SPLIT = {"errors": (4, 5), "drops": (6, 7)}      # which stored columns are the receive and transmit parts
 
 
@@ -314,11 +317,12 @@ class PortWatch:
                     q = self.series.setdefault(k, deque())
                     if not q:
                         self._trace(now, f"start {self._nm(k)} row={row[1:]} raw={raw} off={off}")
-                    if (q and len(q[-1]) >= 10 and None not in pk and pk[0] >= q[-1][8] and pk[1] >= q[-1][9] and row[3] >= q[-1][3]
-                            and any(a[n] < q[-1][4 + n] for n in range(4))):
-                        # an error or drop count fell while the packet counts kept going up, so the device did not restart: its counter dipped
-                        # (UniFi reported SFP+ 1's receive errors 402, then 325, during a download on 2026-10-30). Hold the old figure until the
-                        # counter passes it again, so no history is lost and no error is invented.
+                    if (q and len(q[-1]) >= 8 and row[3] >= q[-1][3] and any(a[n] < q[-1][4 + n] for n in range(4))
+                            and all(a[n] >= q[-1][4 + n] * DIP_KEEPS for n in range(4))
+                            and not (len(q[-1]) >= 10 and None not in pk and any(pk[n] < q[-1][8 + n] * DIP_KEEPS for n in range(2)))):
+                        # an error or drop count fell a little, and nothing fell a long way (a restart sends every counter back to about nothing):
+                        # the counter wobbled (UniFi reported SFP+ 1's receive errors 402 then 325, and 924 then 923, on 2026-10-30). Hold the old
+                        # figure until the counter passes it again, so no history is lost and no error is invented.
                         if not self.held.get(k):
                             fell = [KINDS[0] if n < 2 else KINDS[1] for n in range(4) if a[n] < q[-1][4 + n]][0]
                             r = self.resets.setdefault(k, [0, fell, 0.0, None, None])
