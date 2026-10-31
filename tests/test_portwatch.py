@@ -355,6 +355,36 @@ class Watch(unittest.TestCase):
         self.w.feed([dev("Core switch", **{"Port 5": (40 * 1000 + 9, 0, 3420, 0, 0)})], ["sw1"], now=43 * 60)
         self.assertEqual(self.w.series[key][-1][2] - q[-2][2], 10, "later real drops still count")
 
+    def pkts(self, err, packets, now):
+        d = dev("Gateway", **{"SFP+ 1": (err, 0, 0, 0, 0)})
+        d["ports"][0].update(rx_packets=packets, tx_packets=packets // 2)
+        self.w.feed([d], ["gw"], now=now)
+
+    def test_an_error_count_that_dips_while_traffic_keeps_counting_keeps_the_history(self):
+        # 2026-10-30: UniFi reported SFP+ 1's receive errors as 402, then 325, mid-download; the history was thrown away three times that evening
+        self.w.set_enabled(True)
+        key = self.w.key("gw", "SFP+ 1")
+        for m in range(41):
+            self.pkts(m * 10, m * 1_000_000, m * 60)
+        before = len(self.w.series[key])
+        self.pkts(325, 41_000_000, 41 * 60)                   # dipped from 400
+        self.pkts(390, 42_000_000, 42 * 60)                   # still under the old figure
+        self.pkts(415, 43_000_000, 43 * 60)                   # past it again
+        q = self.w.series[key]
+        self.assertEqual(len(q), before + 3, "nothing was thrown away")
+        self.assertEqual([r[1] for r in list(q)[-3:]], [400, 400, 415], "the old figure is held until the counter passes it: no errors invented, none lost")
+        self.assertFalse(self.w.state([key])["learning"])
+        self.assertEqual(self.w.resets[key][:2], [1, "errors"], "it is still counted and shown, once")
+
+    def test_errors_and_packets_both_falling_is_still_a_restart(self):
+        self.w.set_enabled(True)
+        key = self.w.key("gw", "SFP+ 1")
+        for m in range(41):
+            self.pkts(m * 10, m * 1_000_000, m * 60)
+        self.pkts(2, 5_000, 41 * 60)
+        self.assertEqual(len(self.w.series[key]), 1)
+        self.assertTrue(self.w.state([key])["learning"])
+
     def test_the_log_shows_the_raw_values_when_only_the_drop_counter_falls(self):
         from monitorbox_app import applog
         d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)

@@ -180,6 +180,7 @@ class PortWatch:
         self.switches = set()     # ids of SNMP devices that are switches (their ports are not server cards: see judge())
         self.client_ports = set() # keys of ports on an SNMP-only switch that look like a client's (no neighbour, at most one address behind them): packet and link drops are not a problem there
         self.flap_ports = set()   # keys of ports whose link drops count: uplinks, links between switches, and servers (set from the map)
+        self.held = {}            # key -> True while a dipped counter is being held at its old figure (so the log says so once)
         self.resets = {}          # key -> [times its counter went backwards (so its history started again), which counter, when]: shown on the page, to explain a port that never finishes learning
         self.links = {}           # key -> {"up": bool, "since": when it last changed, "expected": it has been up for an hour, so its going away is news}
         self.restore()
@@ -308,6 +309,21 @@ class PortWatch:
                     q = self.series.setdefault(k, deque())
                     if not q:
                         self._trace(now, f"start {self._nm(k)} row={row[1:]} raw={raw} off={off}")
+                    if (q and len(q[-1]) >= 10 and None not in pk and pk[0] >= q[-1][8] and pk[1] >= q[-1][9] and row[3] >= q[-1][3]
+                            and any(a[n] < q[-1][4 + n] for n in range(4))):
+                        # an error or drop count fell while the packet counts kept going up, so the device did not restart: its counter dipped
+                        # (UniFi reported SFP+ 1's receive errors 402, then 325, during a download on 2026-10-30). Hold the old figure until the
+                        # counter passes it again, so no history is lost and no error is invented.
+                        if not self.held.get(k):
+                            fell = [KINDS[0] if n < 2 else KINDS[1] for n in range(4) if a[n] < q[-1][4 + n]][0]
+                            r = self.resets.setdefault(k, [0, fell, 0.0, None, None])
+                            r[0], r[1], r[2], r[3], r[4] = r[0] + 1, fell, now, q[-1][1 if fell == "errors" else 2], row[1 if fell == "errors" else 2]
+                            self._trace(now, f"{fell} dipped {self._nm(k)} was={list(q[-1])[1:8]} now={row[1:]} packets={pk} (held, carried on)")
+                        self.held[k] = True
+                        a = [max(a[n], q[-1][4 + n]) for n in range(4)]
+                        row = [now, a[0] + a[1], a[2] + a[3], fl or 0, a[0], a[1], a[2], a[3]]
+                    else:
+                        self.held.pop(k, None)
                     if q and row[2] < q[-1][2] and row[1] >= q[-1][1] and row[3] >= q[-1][3]:
                         # only the drop counter fell (some NIC drivers shrink it by themselves): carry on from where it was, so the errors and link history and the learning survive
                         r = self.resets.setdefault(k, [0, "drops", 0.0, None, None])
