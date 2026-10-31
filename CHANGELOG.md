@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.16** (#336) When MonitorBox hits an error answering a request, it now answers with a plain error and writes the request and where it failed to the log (the bell says so too). Before, it just dropped the connection with nothing logged, so a proxy such as Caddy answered "502" and the cause was invisible. Settings also says when a 502 came from a proxy rather than from MonitorBox.
 - **1.9.15** (#336) Settings no longer sits on "Loading settings…" for good. When a read gets no answer it is asked again; if that fails too, the page now says which request failed and how ("versions: no answer in 12 s") with a **Try again** button, and the same line goes into the log under "browser". The box never sees a request that is stuck in the browser, so this is how the cause gets on record.
 
 ## 1.9.14 (stable, October 31)

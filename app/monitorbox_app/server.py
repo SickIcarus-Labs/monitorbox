@@ -2240,6 +2240,16 @@ class App:
                 self.send(421, {"error": "wrong address"})
                 return True
 
+            def failed(self, e):
+                import traceback
+                where = traceback.extract_tb(e.__traceback__)[-1]
+                applog.error("app", f"request {perfstats.request_key(self.command, self.path)} failed: {type(e).__name__}: {str(e)[:200]} "
+                                    f"(at {os.path.basename(where.filename)} line {where.lineno})")
+                try:
+                    self.send(500, {"error": f"MonitorBox hit an error answering this ({type(e).__name__}); it is in the log"})
+                except Exception:
+                    pass                                                   # the answer had already started: the connection just ends
+
             def do_GET(self):
                 t0 = time.monotonic()
                 tok = None if perfstats.skip(self.path) else perfstats.begin(perfstats.request_key("GET", self.path))
@@ -2247,6 +2257,10 @@ class App:
                     if self.wrong_host():
                         return
                     return self._get()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass                                                   # the browser went away: nothing to answer
+                except Exception as e:                                     # a request that failed used to drop the connection with no answer and no trace:
+                    self.failed(e)                                         # a proxy then said 502 and nothing was logged (#336)
                 finally:
                     if tok is not None:
                         ms = perfstats.end(tok)
@@ -2261,6 +2275,10 @@ class App:
                     if self.wrong_host():
                         return
                     return self._post()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass                                                   # the browser went away: nothing to answer
+                except Exception as e:                                     # a request that failed used to drop the connection with no answer and no trace:
+                    self.failed(e)                                         # a proxy then said 502 and nothing was logged (#336)
                 finally:
                     if tok is not None:
                         ms = perfstats.end(tok)
