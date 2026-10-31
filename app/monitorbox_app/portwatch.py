@@ -88,6 +88,17 @@ def floor_for(kind, speed_mbps=None):
     return max(FLOOR_MIN[kind], round(FLOOR[kind] * scale))
 
 
+def one_in(share):
+    """A share of packets as people say it: "about 1 in 56,000 packets" (two significant figures), or "under 1 in a million"."""
+    if not share or share <= 0:
+        return ""
+    n = 1 / share
+    if n >= 1_000_000:
+        return "under 1 in a million packets" if n > 1_500_000 else "about 1 in a million packets"
+    n = int(float(f"{n:.2g}"))
+    return f"about 1 in {max(n, 1):,} packets"
+
+
 def drop_share(last, cut, tx_only=False):
     """The share of packets dropped between two readings: the worse of receive and transmit (drops / (packets + drops)). None when either reading has no packet counts
     (an older saved reading, a device that does not report them) or a counter went backwards."""
@@ -114,10 +125,11 @@ def _share(last, cut, pairs):
 
 def judge(q, flaps=True, speed=None, server=False):
     """How one port is doing, from its readings [[t, errors, drops, flaps], ...] (oldest first).
-    -> {"learning": bool, "rising": [kinds], "perHour": {kind: new per hour over the last 15 minutes}, "was": {kind: earlier per hour}}
+    -> {"learning": bool, "rising": [kinds], "count": {kind: how many in the last 15 minutes}, "was": {kind: the most in any earlier 15 minutes}}
+    Counts are what was seen in the window, never scaled up to an hour (#331: a 15-minute burst of 133 read as "about 532 an hour").
     `server`: this is a server's network card. Its receive drops are frames the kernel discarded because nothing wanted them (unknown protocol or VLAN), not loss: a card that really
     loses frames shows receive errors, which are counted as ever. So only its transmit drops count as drops."""
-    out = {"learning": True, "rising": [], "perHour": {}, "was": {}, "split": {}, "share": None, "shares": {}}
+    out = {"learning": True, "rising": [], "count": {}, "was": {}, "split": {}, "share": None, "shares": {}}
     if len(q) < 2:
         return out
     now, first = q[-1][0], q[0][0]
@@ -131,20 +143,20 @@ def judge(q, flaps=True, speed=None, server=False):
             continue                                              # a client port drops whenever a laptop sleeps, and a TV in standby backs up its port: only uplinks, links between switches and servers are worth a line
         ci = 7 if kind == "drops" and server and len(q[-1]) >= 8 and len(cut) >= 8 else i      # the column that is judged: a server card's drops are its transmit drops
         new = q[-1][ci] - cut[ci]
-        out["perHour"][kind] = round(new * 3600 / RECENT)
+        out["count"][kind] = new
         if kind in SPLIT and len(q[-1]) >= 8 and len(cut) >= 8:     # receive and transmit apart: a bad link shows as receive errors, a backed-up port as transmit drops
             a, b = SPLIT[kind]
-            out["split"][kind] = {"rx": round((q[-1][a] - cut[a]) * 3600 / RECENT), "tx": round((q[-1][b] - cut[b]) * 3600 / RECENT)}
+            out["split"][kind] = {"rx": q[-1][a] - cut[a], "tx": q[-1][b] - cut[b]}
         if kind in ("drops", "errors") and kind not in out["shares"]:
             out["shares"][kind] = drop_share(q[-1], cut, tx_only=(ci == 7)) if kind == "drops" else error_share(q[-1], cut)   # shown even when it stays below the line
         worst = _worst(q, cut[0], ci)
         if worst is None and span_before >= 60:
             worst = cut[ci] - q[0][ci]                                  # less than one stretch of history: what there was
-        was = None if worst is None else worst * 3600 / RECENT
+        was = worst
         out["was"][kind] = None if was is None else round(was)
         if out["learning"] or new < floor_for(kind, speed):
             continue
-        if was is None or new * 3600 / RECENT >= RISE * was:
+        if was is None or new >= RISE * was:
             if kind in ("drops", "errors"):
                 sh = drop_share(q[-1], cut, tx_only=(ci == 7)) if kind == "drops" else error_share(q[-1], cut)
                 out["shares"][kind] = sh
@@ -222,9 +234,9 @@ class PortWatch:
             if k in known:
                 off.append({**row, "kinds": j["rising"]})
             elif j["rising"]:
-                rising.append({**row, "label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "learning": False})
-            elif any(j["perHour"].get(kind) for kind in ("errors", "drops")):
-                quiet.append({**row, "label": self.named(k, label), "perHour": {kind: j["perHour"][kind] for kind in ("errors", "drops") if j["perHour"].get(kind)},
+                rising.append({**row, "label": self.named(k, label), "kinds": j["rising"], "count": j["count"], "learning": False})
+            elif any(j["count"].get(kind) for kind in ("errors", "drops")):
+                quiet.append({**row, "label": self.named(k, label), "count": {kind: j["count"][kind] for kind in ("errors", "drops") if j["count"].get(kind)},
                               "shares": {kind: v for kind, v in j["shares"].items() if v is not None}, "learning": j["learning"]})
         stale = sorted(k for k in known if k not in snap)
         for k in stale:
@@ -661,18 +673,18 @@ class PortWatch:
             js = [judge(list(self.series[k]), self._links(k), self._speed(k), self._is_server(k)) for k in keys if k in self.series]
         if not js:
             return None
-        per = {kind: sum(j["perHour"].get(kind, 0) for j in js) for kind in KINDS}
+        per = {kind: sum(j["count"].get(kind, 0) for j in js) for kind in KINDS}
         was = {kind: (None if any(j["was"].get(kind) is None for j in js) else sum(j["was"][kind] for j in js)) for kind in KINDS}
         rising = sorted({kind for j in js for kind in j["rising"]}, key=KINDS.index)
         split = {kind: {side: sum(j["split"][kind][side] for j in js if kind in j["split"]) for side in ("rx", "tx")} for kind in SPLIT if any(kind in j["split"] for j in js)}
         busy = self.traffic(list(keys), RECENT) if self.traffic else None
         other = self.other_end(keys[0]) if len(keys) == 1 else None
         shares = {kind: max(v) for kind in ("errors", "drops") if (v := [j["shares"][kind] for j in js if j["shares"].get(kind) is not None])}
-        return {"other": other, "learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was, "split": split, "traffic": busy, "shares": shares,
+        return {"other": other, "learning": all(j["learning"] for j in js), "rising": rising, "count": per, "was": was, "split": split, "traffic": busy, "shares": shares,
                 "known": any(k in known for k in keys)}
 
     def findings(self):
-        """[{label, kinds, perHour, was, split, traffic}] for ports that are rising and not marked known."""
+        """[{label, kinds, count, was, split, traffic}] for ports that are rising and not marked known."""
         known = self.known()
         with self.lock:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
@@ -680,7 +692,7 @@ class PortWatch:
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
             j = judge(q, self._links(k), self._speed(k), self._is_server(k))
             if j["rising"] and k not in known:
-                out.append({"label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "was": j["was"], "split": j["split"], "share": j["share"], "shares": j.get("shares", {}), "other": self.other_end(k),
+                out.append({"label": self.named(k, label), "kinds": j["rising"], "count": j["count"], "was": j["was"], "split": j["split"], "share": j["share"], "shares": j.get("shares", {}), "other": self.other_end(k),
                             "traffic": self.traffic([k], RECENT) if self.traffic else None})
         return out
 
@@ -705,16 +717,16 @@ class PortWatch:
             return True, f"all {n} ports look normal", None, {}
         parts = []
         for f in found[:3]:
-            per, was, split = f["perHour"], f["was"], f["split"]
-            what = " and ".join(f"{WORDS[k]} rising (about {per[k]:,} an hour"
+            per, was, split = f["count"], f["was"], f["split"]
+            what = " and ".join(f"{WORDS[k]} rising ({per[k]:,} in the last 15 min"
                                 + (f": {split[k]['rx']:,} receive, {split[k]['tx']:,} transmit" if k in split else "")
-                                + (f", {(f.get('shares') or {}).get(k) * 100:.2g}% of packets" if (f.get('shares') or {}).get(k) is not None else "")
-                                + (f", was {was[k]:,}" if was[k] is not None else "") + ")" for k in f["kinds"])
+                                + (f", {one_in(f['shares'][k])}" if (f.get('shares') or {}).get(k) else "")
+                                + ((", none before" if not was[k] else f", earlier at most {was[k]:,} in 15 min") if was[k] is not None else "") + ")" for k in f["kinds"])
             busy, other = f["traffic"], f["other"]
             kind = next((k for k in f["kinds"] if k in SPLIT), None)
             far = ""
             if other and kind:
-                far = (f" · other end ({other['label']}): " + (f"{other['split'][kind]['rx']:,} receive, {other['split'][kind]['tx']:,} transmit an hour" if other["state"] == "figures"
+                far = (f" · other end ({other['label']}): " + (f"{other['split'][kind]['rx']:,} receive, {other['split'][kind]['tx']:,} transmit in the last 15 min" if other["state"] == "figures"
                                                           else "still learning" if other["state"] == "learning" else "no counters"))
             parts.append(f"{f['label']}: {what}" + (f", carrying about {bps_words(busy['avgBps'])} (peak {bps_words(busy['peakBps'])})" if busy else "") + far)
         more = f" (and {len(found) - 3} more)" if len(found) > 3 else ""
