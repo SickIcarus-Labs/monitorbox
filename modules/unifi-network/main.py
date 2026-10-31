@@ -33,7 +33,7 @@ def client(conn):
     key = (conn.get("base_url") or conn.get("host"), conn.get("username"), conn.get("password"), conn.get("site"), bool(conn.get("verify_tls")))
     with CLIENTS_LOCK:
         if key not in CLIENTS:
-            CLIENTS[key] = U.Client(key[0], key[1], key[2], key[3], key[4], conn.get("timeout", 8))
+            CLIENTS[key] = U.Client(key[0], key[1], key[2], key[3], key[4], conn.get("timeout", 15))
         return CLIENTS[key]
 
 

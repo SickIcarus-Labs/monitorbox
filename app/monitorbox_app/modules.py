@@ -28,6 +28,9 @@ def current(ids):
     return [i for i in ids if i not in RETIRED]
 
 
+MODULE_CHECK_WAIT = 20   # seconds a module check may take: a busy UniFi console can take 10 s or more to answer one request (the modules wait 15 s)
+
+
 class ModuleProcess:
     def __init__(self, mid, version, directory, entry):
         self.id, self.version = mid, version
@@ -353,7 +356,7 @@ class Modules:
         t0 = time.monotonic()
         try:
             res = p.call("check", {"check": spec.get("check"), "params": spec.get("params", {}),
-                                   "connection": conn}, timeout=spec.get("timeout", 10) + 2)
+                                   "connection": conn}, timeout=spec.get("timeout", MODULE_CHECK_WAIT) + 2)
         except Exception as e:
             return None, f"the {mid} module did not answer: {e}", None, {}
         ms = round((time.monotonic() - t0) * 1000, 1)

@@ -23,7 +23,7 @@ class ProtectError(Exception):
 
 
 class Client:
-    def __init__(self, base_url, username, password, verify_tls=False, timeout=8):
+    def __init__(self, base_url, username, password, verify_tls=False, timeout=15):
         if not base_url:
             raise ProtectError("this connection has no 'host' or 'base_url'")
         if not username or not password:

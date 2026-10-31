@@ -257,8 +257,30 @@ class GraceTests(unittest.TestCase):
         self.assertEqual(n["state"], "healthy"); self.assertIn("confirming", n["notice"])
         self.assertEqual(engine.plain_notice(n["notice"]), "unhealthy, confirming", "the line under the banner is plain and carries no counts, whatever the monitor wrote")
 
-    def test_unknown_is_never_held_back(self):
-        self.assertEqual(self.run_series([(True, "ok", 1.0), (None, "cannot check", None)], confirm={"failures": 9})[-1], "unknown")
+    def test_unknown_after_a_healthy_reading_waits_out_the_grace_like_a_failure(self):
+        # A busy UniFi console that misses answers for a moment must not turn every item behind it Unknown (2026-10-30, a big download on the gateway).
+        ok, unk = (True, "ok", 1.0), (None, "cannot reach the UniFi controller (The read operation timed out)", None)
+        blip = self.run_series([ok, unk, unk, ok])                              # default 2 in a row and 60 s: a short miss never shows
+        self.assertNotIn("unknown", blip)
+        long = self.run_series([ok] + [unk] * 14)                               # 6 s apart: past 60 s it is shown, and never as failed
+        self.assertEqual(long[1], "healthy"); self.assertEqual(long[-1], "unknown"); self.assertNotIn("failed", long)
+
+    def test_during_the_unknown_wait_there_is_a_plain_heads_up(self):
+        clock = Clock(); answers = iter([(True, "ok", 1.0), (None, "cannot reach the console", None)])
+        m = monitor.Monitor(runner=lambda c: next(answers), clock=clock, inline=True)
+        m.configure([node("fs", "f")])
+        for _ in range(2):
+            m.run_due(); clock.t += 20
+        n = m.snapshot()["nodes"]["fs"]
+        self.assertEqual(n["state"], "healthy")
+        self.assertEqual(engine.plain_notice(n["notice"]), "cannot reach the console, confirming")
+
+    def test_unknown_shows_at_once_with_the_wait_off_or_when_nothing_was_healthy_before(self):
+        unk = (None, "cannot check", None)
+        self.assertEqual(self.run_series([(True, "ok", 1.0), unk], confirm={"failures": 1, "seconds": 0})[-1], "unknown")
+        self.assertEqual(self.run_series([unk])[-1], "unknown", "a first reading is shown as it is")
+        down = (False, "no answer", None)
+        self.assertEqual(self.run_series([down, down, unk])[-1], "unknown", "something already down that can no longer be checked is not held")
 
 
 class Truth(unittest.TestCase):
