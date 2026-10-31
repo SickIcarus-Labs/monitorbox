@@ -513,9 +513,9 @@ function render(){if(!SITE&&snap&&snap.banner){locBanner=snap.banner}renderHeade
  delete $('#m').dataset.set;if(!snap){$('#m').innerHTML='<p class=sub>Loading…</p>';return}
  document.body.dataset.s=snap.banner.status;
  const b=snap.banner;
- const att=snap.attention.map(a=>`<div class=item onclick="openDrawer('${esc(a.group).replace(/'/g,'')}','${esc(a.id)}')">
-   ${chip(a.state,a.label)}<div class=grow><b>${esc(a.name)}</b><div class=sub>${a.check?esc(a.check)+': ':''}${esc(a.detail)}${a.affects.length?` · Also affecting ${esc(a.affects.slice(0,4).join(', '))}${a.affects.length>4?' and '+(a.affects.length-4)+' more':''}`:''}</div></div>
-   <small>${since(a.label,a.since)}</small><button class="btn sm" onclick="event.stopPropagation();checkNow('${esc(a.id)}')">Check now</button></div>`).join('');
+ const att=snap.attention.map(a=>`<div class=item onclick="openDrawer('${esc(a.group).replace(/'/g,'')}','${esc((a.ids||[a.id])[0])}')">
+   ${chip(a.state,a.label)}<div class=grow><b>${esc(a.name)}</b><div class=sub>${a.check?esc(a.check)+': ':''}${esc(a.detail)}${a.affects.length?` · ${a.ids?'Affecting':'Also affecting'} ${esc(a.affects.slice(0,4).join(', '))}${a.affects.length>4?' and '+(a.affects.length-4)+' more':''}`:''}</div></div>
+   <small>${since(a.label,a.since)}</small><button class="btn sm" onclick="event.stopPropagation();checkNow(${esc(JSON.stringify(a.ids||a.id))})">Check now</button></div>`).join('');
  const sumCard=(c,i)=>`<button class=card onclick="openDrawer(${i})"><div class=r><span class=t>${cIco(c.name)}${esc(c.name)}</span>${chip(c.state,c.label)}</div>
    <div class=big>${esc(c.big)}</div><div class=strip data-c="${esc(sk(c))}" aria-label="Last 24 hours, tap for what happened" onclick="event.stopPropagation();stripTap(event,${i})">${stripHtml(c)}</div><div class=sub>${esc(c.line)}</div></button>`;
  const cards=view==='detail'?(lastCols=colsFor(),denseGrid(snap.cards.map((c,i)=>{const r=cardRows(c);return{html:detailCard(c,i),w:2+r.loose.length+r.sections.length+r.groups.length}}))):snap.cards.map(sumCard).join('');
@@ -876,7 +876,7 @@ async function graphTop(i){const g=grCfg[i],t=await askText('Where the graph top
  const n=t.trim()===''?null:parseInt(t,10);if(n!==null&&(!(n>0)||String(n)!==t.trim())){alert('Enter a whole number of Mbit/s, such as 2500.');return}
  try{await saveGraphs(grCfg.map((x,k)=>{if(k!==i)return x;const y={...x};if(n===null)delete y.maxMbps;else y.maxMbps=n;return y}));graphSettings()}catch(e){alert(e.message)}}
 async function graphMove(i,d){const l=[...grCfg],j=i+d;if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];try{await saveGraphs(l);graphSettings()}catch(e){alert(e.message)}}
-async function checkNow(id){try{await api('check-now',{id})}catch(e){}}
+async function checkNow(id){try{for(const one of [].concat(id))await api('check-now',{id:one})}catch(e){}}     // a source that does not answer stands for several items: check each
 
 /* ---------- drill-down drawer ---------- */
 function dropGp(){if(grPanel!==null){grPanel=null;grPData=null;const d=$('#dr');if(d)d.innerHTML=''}}

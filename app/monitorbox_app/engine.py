@@ -23,6 +23,22 @@ HEALTHY, DEGRADED, FAILED, UNKNOWN, PENDING = "healthy", "degraded", "failed", "
 LABEL = {FAILED: "Down", DEGRADED: "Degraded", UNKNOWN: "Unknown", HEALTHY: "Healthy", PENDING: "Checking"}
 GROUP_ORDER = ["Servers", "Network", "Internet", "Power", "Cameras", "Services"]
 _SEVERITY = {FAILED: 3, DEGRADED: 2, UNKNOWN: 1, HEALTHY: 0, PENDING: 0}
+SOURCE_NAMES = {"unifi-network": "UniFi Network", "unifi-protect": "UniFi Protect", "portainer": "Portainer", "scrypted": "Scrypted", "snmp": "SNMP", "nut": "UPS (NUT)"}
+
+
+def _unreachable_source(node, results):
+    """(module, connection) when every check this item has an answer for is a module check on that one connection and none could be checked;
+    else None. Such items are Unknown because their source did not answer, not because of anything about them."""
+    key, any_r = None, False
+    for c in node.get("checks") or []:
+        r = results.get(f"{node['id']}/{c['id']}")
+        if r is None:
+            continue
+        k = (c.get("module"), c.get("connection"))
+        if not k[0] or not k[1] or r["ok"] is not None or (key is not None and k != key):
+            return None
+        key, any_r = k, True
+    return key if any_r else None
 
 
 def _leaf_state(node, results):
@@ -281,6 +297,26 @@ def evaluate(nodes, results, now_iso=""):
         attention.append({"id": n["id"], "name": n["name"], "group": n["group"], "critical": o["critical"], "state": s, "label": LABEL[s],
                           "detail": detail, "since": o["since"], "check": bad if len(src.get("checks", [])) > 1 else "",
                           "affects": [by_id[a]["name"] for a in o["affects"]]})
+    # --- one entry per source that does not answer: when two or more items are Unknown only because the same connection (a UniFi console,
+    # a Portainer server) cannot be reached, the list shows the connection once with what it takes along. Each item keeps its own state.
+    by_src = {}
+    for a in attention:
+        if a["state"] == UNKNOWN and not a["id"].startswith(("site-", "managed-by-")) and a["id"] in by_id:
+            k = _unreachable_source(by_id[a["id"]], results)
+            if k:
+                by_src.setdefault(k, []).append(a)
+    for (mod, conn), members in by_src.items():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda a: (not a["critical"], a["name"].lower()))
+        details = {a["detail"] for a in members}
+        gone = {id(a) for a in members}
+        attention = [a for a in attention if id(a) not in gone]
+        attention.append({"id": f"source-{mod}-{conn}", "name": SOURCE_NAMES.get(mod, mod), "group": members[0]["group"],
+                          "critical": any(a["critical"] for a in members), "state": UNKNOWN, "label": LABEL[UNKNOWN],
+                          "detail": details.pop() if len(details) == 1 else f"cannot check {len(members)} items through this connection",
+                          "since": min((a["since"] for a in members if a["since"]), default=None), "check": "",
+                          "affects": [a["name"] for a in members], "ids": [a["id"] for a in members]})
     attention.sort(key=lambda a: (-_SEVERITY[a["state"]], not a["critical"], a["name"].lower()))
 
     visible = [n for n in nodes if counts_for_banner(n) and eff[n["id"]] != PENDING and n["id"] not in muted]
@@ -325,7 +361,7 @@ def evaluate(nodes, results, now_iso=""):
         status, headline = "yellow", "Something's not right"
         sub = who(shaky, "is having trouble", "are having trouble", len(any_down)) + ". Nothing is down."
     elif any_unknown:
-        k = len(attention) or len(any_unknown)
+        k = sum(len(a.get("ids") or [a]) for a in attention) or len(any_unknown)
         status, headline = "blue", "Something needs a look"
         sub = (f"MonitorBox cannot check {k} {plural(k, 'thing', 'things')} right now. Nothing is known to be broken.")
     elif pending and not visible:
