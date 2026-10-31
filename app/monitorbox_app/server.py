@@ -2819,6 +2819,11 @@ class App:
                             return self.send(409, {"error": str(e)})
                         app.reload_monitoring()
                         return self.send(200, {"revision": rev})
+                    if path == "/api/browser-report":           # a page that could not load says why (#336): the box never saw the request that failed
+                        what = str(body.get("what") or "a page")[:80]
+                        detail = str(body.get("detail") or "")[:600]
+                        applog.warning("browser", f"{what} after {body['seconds'] if isinstance(body.get('seconds'), int) else '?'} s (page {str(body.get('visible') or '?')[:10]}): {detail}")
+                        return self.send(200, {})
                     if path == "/api/logs/debug":
                         if not applog.get():
                             raise ValueError("The log is not running.")

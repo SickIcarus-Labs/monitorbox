@@ -8,6 +8,10 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.15** (#336) Settings no longer sits on "Loading settings…" for good. When a read gets no answer it is asked again; if that fails too, the page now says which request failed and how ("versions: no answer in 12 s") with a **Try again** button, and the same line goes into the log under "browser". The box never sees a request that is stuck in the browser, so this is how the cause gets on record.
+
+## 1.9.14 (stable, October 31)
+
 - **1.9.14** (with UniFi Network 0.2.27) Three fixes for short blips overnight. Web checks now wait up to 10 seconds for a page (was 5), so a service on a busy server, such as Radarr on Goliath during the nightly backup, is not marked Degraded. The UniFi flow log is read on its own lane, so status checks never wait behind it (UniFi Aggregation went Unknown for a minute at 3:32). And a port's history is kept when an error or drop count goes down a little (924 to 923); only a fall to less than half, as a restart does, starts the port again.
 ## 1.9.13 (stable, October 30)
 
