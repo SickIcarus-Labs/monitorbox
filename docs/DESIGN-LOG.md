@@ -1140,3 +1140,7 @@ On 2026-10-30 the WAN port raised Port errors at about 196 receive errors an hou
 ## 1.9.9: one entry per source that does not answer
 
 Root-cause grouping (#191) follows the dependencies between items, but a provider such as a UniFi console or a Portainer server is a connection, not an item, so when it stopped answering on 2026-10-30 every UniFi device and camera was its own root: 31 identical entries. The engine now groups Unknown items whose every answered check is a module check on one connection that could not be checked: two or more become one attention entry named after the source ("UniFi Network", "UniFi Protect"), with the shared detail, the items it affects and their ids (Check now checks each). Items keep their own state; the banner still counts items; something down, degraded, or with checks of another kind is never folded in. An alert for Unknown, when ticked, is one message for the source. UniFi Network and Protect on the same console are two connections, so they are two entries.
+
+## 1.9.10: errors count from 0.01% of the packets
+
+0.1% (1.9.8) was too forgiving for errors: at that level a link is already plainly bad. The owner's own WAN, during a full-rate download on 2026-10-30, showed 434 receive errors in 297.8 million packets over 35 minutes (about 0.00015%) and the download was unaffected. 0.01% is about where a single TCP stream starts to slow, which is a sensible line for "worth knowing", and it is still about 70 times above that busy-but-fine link. Drops stay at 0.1%: they are usually congestion, not a fault.
