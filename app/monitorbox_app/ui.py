@@ -167,7 +167,7 @@ let APIQ_MS=window.APIQ_MS||12000;
 let APIQ_FAILS=[];   /* what went wrong with each read, so a page that cannot load can say which request and how (#336) */
 async function apiq(path){const once=async()=>{const ac=new AbortController(),t0=Date.now(),t=setTimeout(()=>ac.abort(),window.APIQ_MS||APIQ_MS);
   try{const r=await fetch(U(path),{signal:ac.signal});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw Object.assign(new Error(j.error||r.status),{status:r.status,data:j});return j}
-  catch(e){APIQ_FAILS.push(path+': '+(e&&e.status?'HTTP '+e.status:e&&e.name==='AbortError'?'no answer in '+Math.round((Date.now()-t0)/1000)+' s':(e&&e.message)||'failed'));throw e}finally{clearTimeout(t)}};
+  catch(e){APIQ_FAILS.push(path+': '+(e&&e.status?'HTTP '+e.status+(e.data&&e.data.error?' ('+String(e.data.error).slice(0,80)+')':' (no answer from MonitorBox: the reply came from a proxy)'):e&&e.name==='AbortError'?'no answer in '+Math.round((Date.now()-t0)/1000)+' s':(e&&e.message)||'failed'));throw e}finally{clearTimeout(t)}};
  try{return await once()}catch(e){if(e&&e.status)throw e;return await once()}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const SDOT={green:'#34d399',yellow:'#fbbf24',red:'#f87171',blue:'#60a5fa',unknown:'#7a8699'};
