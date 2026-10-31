@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.8** Port errors are now judged against the traffic, the same as packet drops. Where the device reports packet counts, errors raise the Port errors item only when they are at least 0.1% of the packets in the same 15 minutes, and the line says the share. A few hundred errors an hour on a link moving a big download no longer raise it. Devices without packet counts keep the old rule.
 - **1.9.7** (with UniFi Network 0.2.26 and UniFi Protect 0.1.7) A busy UniFi console no longer turns every UniFi item and camera Unknown at once. The UniFi modules now wait up to 15 seconds for an answer (was 8), and something that was healthy and then cannot be checked waits out the same grace as a failure (2 in a row over 60 seconds by default) before it shows Unknown; until then it stays healthy with a heads-up line. With the grace set to 1 and 0, Unknown still shows at once.
 
 ## 1.9.0 to 1.9.6 (stable, October 30)
