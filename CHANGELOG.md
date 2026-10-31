@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+## 1.9.15 to 1.9.16 (stable, October 31)
+
 - **1.9.16** (#336) [highlight: Fixed Settings and other pages sometimes failing to load through a proxy.] MonitorBox's web server could only hold 5 new connections waiting at once (the standard default). When a page asked for eight or nine things together while the Pi was busy, the extra connections were refused: through Caddy that showed as "502", and on its own as a page stuck loading. It now holds 128. On the owner's Pi the kernel had counted 14,697 refused connections.
 - **1.9.15** (#336) Settings no longer sits on "Loading settings…" for good. When a read gets no answer it is asked again; if that fails too, the page now says which request failed and how ("versions: no answer in 12 s") with a **Try again** button, and the same line goes into the log under "browser". The box never sees a request that is stuck in the browser, so this is how the cause gets on record.
 
