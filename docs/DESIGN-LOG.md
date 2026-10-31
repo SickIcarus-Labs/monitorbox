@@ -1148,3 +1148,7 @@ Root-cause grouping (#191) follows the dependencies between items, but a provide
 ## 1.9.11: a dipping error count is not a restart
 
 On 2026-10-30 UniFi reported SFP+ 1's receive errors falling (402 to 325, 618 to 613, 836 to 829) while its packet counts kept climbing. Any fall was read as a device restart, so the port's history was thrown away three times in 35 minutes and it sat at "learning", unable to alert. A restart sets every counter back, packets included. So when the packet counts kept going up, a fallen error or drop count is held at its old figure until the counter passes it again: nothing is invented (unlike the 1.7.25 drops carry-on, no offset is added, because the dip here is temporary) and nothing is lost. The dip is still counted on the Port errors page and logged once. Without packet counts the old rules stand.
+
+## 1.9.12: errors below the alert line are shown
+
+The 0.01% error line (1.9.10) made the WAN's real but harmless errors quiet, and quiet meant invisible: the page and the map only showed figures for a port that was rising. The owner wants to see them ("keeps the numbers but never alerts", #194). `judge` now works out the share of packets for errors and drops on every port, not only rising ones; `page()` lists ports with any errors or drops in the last 15 minutes under `quiet`, and `state()` carries the shares to the map. Display only: what alerts is unchanged.

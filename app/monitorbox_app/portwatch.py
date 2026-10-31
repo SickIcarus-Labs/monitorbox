@@ -132,6 +132,8 @@ def judge(q, flaps=True, speed=None, server=False):
         if kind in SPLIT and len(q[-1]) >= 8 and len(cut) >= 8:     # receive and transmit apart: a bad link shows as receive errors, a backed-up port as transmit drops
             a, b = SPLIT[kind]
             out["split"][kind] = {"rx": round((q[-1][a] - cut[a]) * 3600 / RECENT), "tx": round((q[-1][b] - cut[b]) * 3600 / RECENT)}
+        if kind in ("drops", "errors") and kind not in out["shares"]:
+            out["shares"][kind] = drop_share(q[-1], cut, tx_only=(ci == 7)) if kind == "drops" else error_share(q[-1], cut)   # shown even when it stays below the line
         worst = _worst(q, cut[0], ci)
         if worst is None and span_before >= 60:
             worst = cut[ci] - q[0][ci]                                  # less than one stretch of history: what there was
@@ -210,7 +212,7 @@ class PortWatch:
         known = self._marked()
         with self.lock:
             snap = {k: (self.labels.get(k, k), list(q)) for k, q in self.series.items()}
-        rising, off = [], []
+        rising, off, quiet = [], [], []
         for k, (label, q) in sorted(snap.items(), key=lambda x: x[1][0]):
             j = judge(q, self._links(k), self._speed(k), self._is_server(k))
             row = {"key": k, "label": label, "alert": k not in known}
@@ -218,6 +220,9 @@ class PortWatch:
                 off.append({**row, "kinds": j["rising"]})
             elif j["rising"]:
                 rising.append({**row, "label": self.named(k, label), "kinds": j["rising"], "perHour": j["perHour"], "learning": False})
+            elif any(j["perHour"].get(kind) for kind in ("errors", "drops")):
+                quiet.append({**row, "label": self.named(k, label), "perHour": {kind: j["perHour"][kind] for kind in ("errors", "drops") if j["perHour"].get(kind)},
+                              "shares": {kind: v for kind, v in j["shares"].items() if v is not None}, "learning": j["learning"]})
         stale = sorted(k for k in known if k not in snap)
         for k in stale:
             off.append({"key": k, "label": k.split("|", 1)[-1] if "|" in k else k, "alert": False, "kinds": []})
@@ -243,7 +248,7 @@ class PortWatch:
         cardkeys = set().union(*self.cards.values()) if self.cards else set()
         return {"on": self.enabled(), "ready": bool(self.shown), "ports": len(counted), "cards": len([k for k in counted if k in cardkeys]), "inUse": inuse, "onLinks": links, "watched": watched, "suspect": [{"from": next((snap[k][0].rsplit(", ", 1)[0] for k in sorted(snap) if k.startswith(sid + "|")), sid), "id": sid, "why": self.why[sid]} for sid in sorted(self.switch_like) if self.why.get(sid)],
                 "others": {"count": len(others), "names": others[:40], "where": where, "unifiNames": self.unifi_names},
-                "rising": rising, "off": off, "down": down}
+                "rising": rising, "quiet": quiet, "off": off, "down": down}
 
     def known(self):
         """Ports marked as a known issue, and the far end of each of those links (a known problem on a cable is known from both sides)."""
@@ -658,7 +663,8 @@ class PortWatch:
         split = {kind: {side: sum(j["split"][kind][side] for j in js if kind in j["split"]) for side in ("rx", "tx")} for kind in SPLIT if any(kind in j["split"] for j in js)}
         busy = self.traffic(list(keys), RECENT) if self.traffic else None
         other = self.other_end(keys[0]) if len(keys) == 1 else None
-        return {"other": other, "learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was, "split": split, "traffic": busy,
+        shares = {kind: max(v) for kind in ("errors", "drops") if (v := [j["shares"][kind] for j in js if j["shares"].get(kind) is not None])}
+        return {"other": other, "learning": all(j["learning"] for j in js), "rising": rising, "perHour": per, "was": was, "split": split, "traffic": busy, "shares": shares,
                 "known": any(k in known for k in keys)}
 
     def findings(self):
