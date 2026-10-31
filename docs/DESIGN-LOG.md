@@ -1152,3 +1152,7 @@ On 2026-10-30 UniFi reported SFP+ 1's receive errors falling (402 to 325, 618 to
 ## 1.9.12: errors below the alert line are shown
 
 The 0.01% error line (1.9.10) made the WAN's real but harmless errors quiet, and quiet meant invisible: the page and the map only showed figures for a port that was rising. The owner wants to see them ("keeps the numbers but never alerts", #194). `judge` now works out the share of packets for errors and drops on every port, not only rising ones; `page()` lists ports with any errors or drops in the last 15 minutes under `quiet`, and `state()` carries the shares to the map. Display only: what alerts is unchanged.
+
+## 1.9.13: NAS disk temperature limits (SNMP 0.3.13)
+
+On 2026-10-30 an SSD in Goliath read "status Good, 55 °C" while shown Degraded: the line never said the temperature was the reason, and 55 °C (a hard drive's limit) is low for an SSD under heavy load. Now the line says "(hot, limit N °C)" when it is the reason; a disk the NAS describes as solid state (maker, model or interface naming SSD, NVMe, solid state or M.2, read from the QNAP disk table's columns 3, 4 and 6) gets 70 °C instead of 55 °C and says "SSD"; and each disk check can carry `max_c` (older `temp_warn` still works), set per disk in Edit monitoring like a Protect drive's limit. `set_limit` takes an optional check id because a NAS's disks are checks inside one system, not systems of their own. A disk whose kind cannot be told keeps 55 °C, and its own limit covers it. A temperature of -1 (no reading) is no longer shown.

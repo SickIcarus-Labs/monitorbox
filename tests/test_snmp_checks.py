@@ -339,6 +339,32 @@ class ByName(unittest.TestCase):
         self.assertEqual(r["state"], "degraded")          # never silently green for a status we do not know
         self.assertIn("unrecognised", r["detail"])
 
+    def disk(self, temp, model="ST20000NM007D", iface="SATA", **params):
+        Q = C.Q
+        self.agent.mib = {f"{Q}.2.1.5.1": "S7YCNJ0L231814Z", f"{Q}.2.1.7.1": "Good", f"{Q}.2.1.8.1": temp,
+                          f"{Q}.2.1.3.1": "Samsung" if "SSD" in model else "Seagate", f"{Q}.2.1.4.1": model, f"{Q}.2.1.6.1": iface}
+        return C.run_check("row", {"preset": "qnap-disk", "name": "S7YCNJ0L231814Z", **params}, conn(self.agent, "q"))
+
+    def test_a_warm_hard_drive_says_why_it_is_degraded(self):
+        r = self.disk(57)
+        self.assertEqual(r["state"], "degraded")
+        self.assertEqual(r["detail"], "S7YCNJ0L231814Z: status Good, 57 °C (hot, limit 55 °C)")
+        self.assertEqual(self.disk(54)["detail"], "S7YCNJ0L231814Z: status Good, 54 °C")
+
+    def test_an_ssd_gets_a_higher_limit(self):
+        # 2026-10-30: Goliath's SSD went Degraded at 55-57 °C with "status Good" during a heavy download
+        r = self.disk(57, model="Samsung SSD 870 EVO 4TB")
+        self.assertEqual((r["state"], r["detail"]), ("healthy", "S7YCNJ0L231814Z: status Good, SSD, 57 °C"))
+        self.assertEqual(self.disk(70, model="Samsung SSD 870 EVO 4TB")["state"], "degraded")
+        self.assertEqual(self.disk(60, model="WD Red SN700", iface="NVMe")["state"], "healthy", "an NVMe disk is an SSD whatever its model says")
+
+    def test_a_disks_own_limit_wins(self):
+        self.assertEqual(self.disk(57, model="Samsung SSD 870 EVO 4TB", max_c=50)["detail"], "S7YCNJ0L231814Z: status Good, SSD, 57 °C (hot, limit 50 °C)")
+        self.assertEqual(self.disk(60, max_c=65)["state"], "healthy")
+
+    def test_no_temperature_reading_is_not_shown(self):
+        self.assertEqual(self.disk(-1)["detail"], "S7YCNJ0L231814Z: status Good")
+
     def test_discover_lists_current_names(self):
         self.agent.mib = volume_rows([(3, "/data", 100, 1000), (9, "/scratch", 5, 1000)])
         ifn, oper = "1.3.6.1.2.1.31.1.1.1.1", "1.3.6.1.2.1.2.2.1.8"

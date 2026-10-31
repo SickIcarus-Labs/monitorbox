@@ -15,12 +15,23 @@ PRESETS = {                      # named-row shortcuts: what to look the name up
     "qnap-pool": {"batch": "Storage pools", "name_column": f"{Q}.7.1.2", "status_column": f"{Q}.7.1.5", "capacity_column": f"{Q}.7.1.3", "free_column": f"{Q}.7.1.4",
                   "ok": [0], "warn": [-1, -2], "bad": [-3, -5, -6], "what": "Storage pool"},
     "qnap-raid": {"batch": "RAID groups", "name_column": f"{Q}.5.1.3", "status_column": f"{Q}.5.1.4", "what": "RAID group"},
-    "qnap-disk": {"batch": "Disks", "name_column": f"{Q}.2.1.5", "status_column": f"{Q}.2.1.7", "temp_column": f"{Q}.2.1.8", "what": "Disk (by serial number)"},
+    "qnap-disk": {"batch": "Disks", "name_column": f"{Q}.2.1.5", "status_column": f"{Q}.2.1.7", "temp_column": f"{Q}.2.1.8", "what": "Disk (by serial number)",
+                  "kind_columns": [f"{Q}.2.1.3", f"{Q}.2.1.4", f"{Q}.2.1.6"]},     # maker, model, interface: read to tell an SSD from a hard drive
     "qnap-volume": {"batch": "Shared folders", "name_column": f"{Q}.9.1.2", "status_column": f"{Q}.9.1.5", "capacity_column": f"{Q}.9.1.3", "free_column": f"{Q}.9.1.4",
                     "what": "Volume / shared folder"},
 }
 OK_WORDS = {"good", "ready", "normal", "ok", "online", "healthy", "optimal", "active", "0"}
 WARN_WORDS = {"warning", "degraded", "rebuilding", "resyncing", "syncing", "verifying", "scrubbing", "initializing"}
+DISK_HOT_C = 55        # a hard drive is warm from here
+SSD_HOT_C = 70         # an SSD runs warmer by design and is warm from here
+SSD_WORDS = ("ssd", "nvme", "solid state", "m.2")
+
+
+def is_ssd(texts):
+    """True when anything the device says about the disk (maker, model, interface) names it as solid state."""
+    return any(w in t.lower() for t in texts for w in SSD_WORDS)
+
+
 BAD_WORDS = {"error", "abnormal", "failed", "offline", "inactive", "critical", "faulty", "missing", "-1"}
 
 _sessions, _index, _lock = {}, {}, threading.Lock()
@@ -173,7 +184,7 @@ def row(sess, p, conn):
     name = spec.get("name")
     if not spec.get("name_column") or not spec.get("status_column") or name in (None, ""):
         return res("unknown", "a row check needs 'name', 'name_column' and 'status_column' (or a 'preset')")
-    cols = [spec["status_column"]] + [spec[k] for k in ("capacity_column", "free_column", "temp_column") if spec.get(k)]
+    cols = [spec["status_column"]] + [spec[k] for k in ("capacity_column", "free_column", "temp_column") if spec.get(k)] + list(spec.get("kind_columns") or [])
     try:
         idx, v = by_name(sess, conn.get("id"), spec["name_column"], str(name), cols)
     except _Missing as m:
@@ -193,8 +204,13 @@ def row(sess, p, conn):
         pct = 100 * (cap - free) / cap
         parts.append(f"{pct:.0f}% used ({size(cap - free)} of {size(cap)})")
     temp = v.get(spec.get("temp_column"))
-    if isinstance(temp, int):
-        parts.append(f"{temp} °C")
+    ssd = is_ssd([L.text(x) for x in (v.get(c) for c in spec.get("kind_columns") or []) if isinstance(x, bytes)])
+    if ssd:
+        parts.append("SSD")
+    limit = spec.get("max_c") or spec.get("temp_warn") or (SSD_HOT_C if ssd else DISK_HOT_C)
+    hot = isinstance(temp, int) and temp >= limit
+    if isinstance(temp, int) and temp >= 0:
+        parts.append(f"{temp} °C" + (f" (hot, limit {limit:g} °C)" if hot else ""))
     detail = ", ".join(parts)
     if raw in okset or str(raw) in okset:
         state = "healthy"
@@ -209,7 +225,7 @@ def row(sess, p, conn):
             state = "failed"
         elif pct >= spec.get("warn_used", spec.get("warn", 85) if isinstance(spec.get("warn"), (int, float)) else 85):
             state = "degraded"
-    if state == "healthy" and isinstance(temp, int) and temp >= spec.get("temp_warn", 55):
+    if state == "healthy" and hot:
         state = "degraded"
     return res(state, detail)
 

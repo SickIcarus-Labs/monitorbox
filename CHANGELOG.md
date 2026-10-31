@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.13** (with SNMP 0.3.13) A NAS disk that is too warm now says why it is Degraded: "status Good, 57 °C (hot, limit 55 °C)". SSDs get a higher built-in limit, 70 °C instead of 55 °C, and say "SSD" on their line. Each disk can have its own limit: open the system, Edit monitoring, Disk temperature limits (empty uses the built-in one), the same as a UniFi Protect drive.
+
 ## 1.9.7 to 1.9.12 (stable, October 30)
 
 - **1.9.12** Errors and packet drops that stay below the alert line are now shown instead of hidden. The Port errors page has a **Below the alert line** list, and the network map adds a grey line to the port, for example "780 errors an hour (0.00015% of packets), below the alert line". Nothing about alerting changes.

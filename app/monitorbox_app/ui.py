@@ -1199,7 +1199,8 @@ async function syncCfg(){const cur=await api('config/monitoring');setRev(cur.rev
    An empty box uses this site's setting (Settings, Alerts), which is 2 failures and 60 seconds until it has been changed. More settings can join here later. */
 async function editMonitoring(id){let r,mon;try{r=await api('config/monitoring');mon=r.monitoring}catch(e){alert(e.message);return}
  const nd=(mon.nodes||[]).find(x=>x.id===id),df=mon.confirm||{},dn=df.failures??2,ds=df.seconds??60;
- const hk=nd&&(nd.checks||[]).find(k=>k.type==='module'&&(k.check==='temperature'||k.check==='drive')),heat=hk?{def:hk.check==='drive'?55:80,cur:(hk.params||{}).max_c}:null;   /* a device or drive temperature check also has its warning limit here */
+ const hk=nd&&(nd.checks||[]).find(k=>k.type==='module'&&(k.check==='temperature'||k.check==='drive')),heat=hk?{def:hk.check==='drive'?55:80,cur:(hk.params||{}).max_c}:null,
+  disks=nd?(nd.checks||[]).filter(k=>k.type==='module'&&k.check==='row'&&(k.params||{}).preset==='qnap-disk'):[];   /* a NAS's disks: one limit each */   /* a device or drive temperature check also has its warning limit here */
  if(!nd){alert('This system has no settings of its own to change.');return}
  const o=document.createElement('div');o.id='medit';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');
  o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:10vh 16px 16px;overflow:auto';
@@ -1209,13 +1210,16 @@ async function editMonitoring(id){let r,mon;try{r=await api('config/monitoring')
   <div class=fld><label class=sub>Failures in a row (1 to 20)<input id=me-n type=number min=1 max=20 step=1 inputmode=numeric placeholder="${dn}" value="${esc(v(nd.confirmFailures))}"></label></div>
   <div class=fld><label class=sub>Seconds it must keep failing (0 to 3600)<input id=me-s type=number min=0 max=3600 step=1 inputmode=numeric placeholder="${ds}" value="${esc(v(nd.confirmSeconds))}"></label></div>
   ${heat?`<div class=fld><label class=sub>Warn when hotter than (°C, 20 to 150; empty uses ${heat.def})<input id=me-t type=number min=20 max=150 step=1 inputmode=numeric placeholder="${heat.def}" value="${esc(v(heat.cur))}"></label></div>`:''}
+  ${disks.length?`<details${disks.length<=4?' open':''}><summary class=sub>Disk temperature limits (${disks.length})</summary><p class=sub style="margin:.3rem 0">Warn when a disk is hotter than this (°C, 20 to 150). Empty uses the built-in limit: 55 for a hard drive, 70 for an SSD.</p>
+   ${disks.map((k,i)=>`<div class=fld><label class=sub>${esc(k.label||(k.params||{}).name||k.id)}<input class=me-d data-c="${esc(k.id)}" data-was="${esc(v((k.params||{}).max_c))}" type=number min=20 max=150 step=1 inputmode=numeric placeholder="auto" value="${esc(v((k.params||{}).max_c))}"></label></div>`).join('')}</details>`:''}
   <p id=me-msg class=sub></p><div class=row style="margin-top:.6rem"><button class="btn pri big" id=me-ok>Save</button><button class="btn big" id=me-no>Cancel</button></div></div>`;
  const done=()=>o.remove();o.querySelector('#me-no').onclick=done;
  o.addEventListener('keydown',e=>{if(e.key==='Escape')done()});o.addEventListener('click',e=>{if(e.target===o)done()});
  o.querySelector('#me-ok').onclick=async()=>{const m=o.querySelector('#me-msg'),a=o.querySelector('#me-n').value.trim(),b=o.querySelector('#me-s').value.trim();
   const num=x=>x===''?null:Number(x);if([a,b].some(x=>Number.isNaN(num(x)))){m.textContent='Please enter whole numbers, or leave a box empty.';return}
-  const tv=o.querySelector('#me-t');if(tv&&Number.isNaN(num(tv.value.trim()))){m.textContent='Please enter a number of degrees, or leave it empty.';return}
-  try{await api('confirm',{id,failures:num(a),seconds:num(b)});if(tv)await api('limit',{id,max_c:num(tv.value.trim())});done()}catch(e){m.textContent=e.message}};
+  const tv=o.querySelector('#me-t'),ds=[...o.querySelectorAll('.me-d')];if((tv&&Number.isNaN(num(tv.value.trim())))||ds.some(d=>Number.isNaN(num(d.value.trim())))){m.textContent='Please enter a number of degrees, or leave it empty.';return}
+  try{await api('confirm',{id,failures:num(a),seconds:num(b)});if(tv)await api('limit',{id,max_c:num(tv.value.trim())});
+   for(const d of ds)if(d.value.trim()!==d.dataset.was)await api('limit',{id,check:d.dataset.c,max_c:num(d.value.trim())});done()}catch(e){m.textContent=e.message}};
  document.body.appendChild(o);o.querySelector('#me-n').focus()}
 async function setCritical(ids,on){try{await api('critical',{ids,critical:on});if(window.sv&&sv.mon&&$('#devs')){const keep=keepNow();await loadServers(keep)}}catch(e){alert(e.message)}}
 const critBox=(ids,label)=>{const ns=(sv.mon.nodes||[]).filter(n=>ids.includes(n.id));return ns.length?`<label class=row style="min-height:44px"><input type=checkbox ${ns.every(n=>n.critical)?'checked':''} onchange="setCritical(${esc(JSON.stringify(ids))},this.checked)"> ${esc(label)}</label>`:''};
