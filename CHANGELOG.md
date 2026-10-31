@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+## 1.9.19 to 1.9.20 (stable, October 31)
+
 - **1.9.20** (#331) [highlight: Port errors now say how many were seen and when, not a scaled-up hourly rate.] Port errors and packet drops now give the real count and the window: "errors rising (133 in the last 15 min: 133 receive, 0 transmit, about 1 in 56,000 packets)" instead of "about 532 an hour", which read like a fault lasting the whole hour when it was a short burst. The share of packets reads as "about 1 in N packets". The same wording is used on the front page, the Port errors page, a switch's or server's detail (including the other end of the link) and in alerts. What raises the alert has not changed.
 - **1.9.20** The log no longer says a module "stopped unexpectedly" when MonitorBox restarts for an update. A graph or check still finishing found the module MonitorBox had just stopped and started it again; nothing is started once MonitorBox is shutting down.
 - **1.9.19** (#334) Each module now starts once when MonitorBox restarts. The LAN sampler or the graphs could ask for UniFi Network or SNMP a moment before the start-up batch launched it, start their own copy, and then the batch started it again and stopped the first, so its checks went Unknown for a few seconds at every restart. They now wait for the batch, and the batch leaves a module alone that is already running.
