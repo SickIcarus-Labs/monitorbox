@@ -825,14 +825,30 @@ def client_gone(h):
     return False
 
 
+SAFE_TYPES = ("application/json", "text/event-stream", "text/plain", "image/jpeg", "image/png", "application/gzip", "application/x-gzip", "application/octet-stream")
+
+
+def safe_type(v):
+    """The other box's Content-Type, if it is one a MonitorBox API answers with; anything else (text/html, SVG, ...) is handed on as plain bytes.
+    A managed site that has gone bad must not be able to serve a page that runs on the main box's own address (#337)."""
+    base = str(v).split(";", 1)[0].strip().lower()
+    return v if base in SAFE_TYPES else "application/octet-stream"
+
+
 def relay(resp, h, conn=None, line_filter=None):
     """Copy an HTTP response to a handler's client (status, a few headers, body in pieces). A body of unknown length is an event
     stream: it is handed on as it arrives, and the copy ends within a second of the client going away."""
     h.send_response(resp.status)
     for k in RELAY_HEADERS:
         v = resp.getheader(k)
+        if v and k == "Content-Type":
+            v = safe_type(v)
+        if v and k == "Content-Disposition" and not v.strip().lower().startswith("attachment"):
+            v = None
         if v:
             h.send_header(k, v)
+    h.send_header("X-Content-Type-Options", "nosniff")
+    h.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox")     # an answer from another box is data, never a page that runs here (#337)
     n = resp.getheader("Content-Length")
     stream = n is None and not resp.chunked
     if n is not None:
