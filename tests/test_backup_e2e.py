@@ -192,6 +192,37 @@ class BackupE2E(unittest.TestCase):
         wait(lambda: self.config()["marker"] == "from-backup", what="restore applied")
         self.assertEqual(c.get("/recover/info")["last"], {"restore": name, "result": "ok"})
 
+    def test_recovery_is_for_the_home_network_only(self):
+        """#337: the recovery page takes the password, so through the reverse proxy (the internet, which is passkey-only) it shows nothing
+        and does nothing, and wrong passwords from home are slowed down like the App's own sign-in."""
+        os.makedirs(os.path.join(self.cfg, "config"))
+        paths = Paths(self.cfg)
+        Auth(paths).set_password(PASSWORD)
+        write_json(paths.config, {"schema": 4, "marker": "from-backup"})
+        name = backup.create(self.cfg, "config", "manual")
+        write_json(paths.config, {"schema": 4, "marker": "current"})
+        self.start_launcher()  # nothing published: the App is down
+        c = Client(self.port)
+        wait(lambda: (lambda i: i if i["status"] == "waiting" else None)(c.get("/recover/info")), what="recovery page")
+        fwd = {"X-Forwarded-For": "203.0.113.50", "X-Forwarded-Proto": "https"}
+        req = urllib.request.Request(c.base + "/recover/info", headers=fwd)
+        info = json.loads(urllib.request.urlopen(req).read())
+        self.assertTrue(info["outside"])
+        self.assertEqual((info["log"], info["backups"]), ("", []), "no log lines or backup names for a stranger")
+        body = json.dumps({"name": name, "password": PASSWORD}).encode()
+        self.assertEqual(self.raw(c, "/recover/restore", body, fwd)[0], 403, "the right password through the proxy still does nothing")
+        self.assertEqual(self.raw(c, "/recover/upload", b"x", {**fwd, "X-Password": PASSWORD})[0], 403)
+        self.assertEqual(self.config()["marker"], "current")
+        write_json(os.path.join(self.cfg, "config", "security.json"), {"trustedProxies": ["127.0.0.1"]})
+        self.assertEqual(self.raw(c, "/recover/restore", body)[0], 403, "a visit from the listed proxy is an outside one, headers or not")
+        os.unlink(os.path.join(self.cfg, "config", "security.json"))
+        wrong = json.dumps({"name": name, "password": "wrong password!"}).encode()
+        codes = [self.raw(c, "/recover/restore", wrong)[0] for _ in range(6)]
+        self.assertEqual(codes[:5], [403] * 5)
+        self.assertEqual(codes[5], 429, "slowed down after five wrong passwords")
+        self.assertEqual(self.raw(c, "/recover/restore", body)[0], 429, "even the right one waits its turn")
+        self.assertEqual(self.config()["marker"], "current")
+
     def test_bad_uploads_and_unknown_names_are_refused_with_the_app_up(self):
         self.publish(app="0.1.0", hello="0.1.0")
         self.start_launcher()
