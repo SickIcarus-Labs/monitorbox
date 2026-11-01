@@ -19,6 +19,10 @@ RESTART_EXIT = 75
 
 
 LISTEN_QUEUE = 128     # connections the kernel may hold for the server to pick up (Python's default is 5)
+SOCKET_WAIT = 60       # seconds a connection may sit silent (sending a request or reading an answer) before it is closed: a slow client cannot hold a thread for good (#337)
+OPEN_BODY = 64 * 1024              # the most a request may send before signing in (a password or a passkey answer is far smaller)
+JSON_BODY = 8 * 1024 * 1024        # the most any other JSON request may send (backups are uploaded separately, with their own limit)
+OPEN_POSTS = ("/api/setup", "/api/login", "/api/passkeys/login/options", "/api/passkeys/login/finish")
 
 
 class Server(ThreadingHTTPServer):
@@ -2016,6 +2020,7 @@ class App:
         app = self
 
         class H(BaseHTTPRequestHandler):
+            timeout = SOCKET_WAIT
             def log_message(self, *a): pass
 
             def token(self):
@@ -2071,6 +2076,8 @@ class App:
                     self.wfile.write(body)
                     return
                 slug = ICON_ALIASES.get(base[:-4], base[:-4]) if base.endswith(".svg") else ""
+                if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", slug):          # a bare name only: "../" must not reach a file outside the icons (#337)
+                    self.send_response(404); self.end_headers(); return
                 path = next((q for q in (os.path.join(ICON_DIR, c + ".svg") for c in (slug, slug.replace("-", "")))
                              if re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", os.path.basename(q)[:-4]) and os.path.isfile(q)), None)
                 if not path:
@@ -2483,7 +2490,7 @@ class App:
                     self.end_headers()
                     with open(p, "rb") as f:
                         while True:
-                            chunk = f.read(1 << 20)
+                            chunk = f.read(1 << 16)          # small pieces: each write must finish within the socket wait, even on a slow line
                             if not chunk:
                                 break
                             self.wfile.write(chunk)
@@ -2542,7 +2549,19 @@ class App:
             def _post(self):
                 if self.headers.get("X-MB") != "1":  # blocks cross-site form posts
                     return self.send(403, {"error": "forbidden"})
-                n = int(self.headers.get("Content-Length") or 0)
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    n = -1
+                if n < 0:
+                    self.close_connection = True
+                    return self.send(400, {"error": "bad length"})
+                if self.path not in OPEN_POSTS and not app.auth.valid(self.token()):      # nothing is read from a stranger beyond the sign-in calls (#337)
+                    self.close_connection = True
+                    return self.send(401, {"error": "sign in"})
+                if self.path != "/api/backups/upload" and not self.path.startswith("/api/site/") and n > (OPEN_BODY if self.path in OPEN_POSTS else JSON_BODY):
+                    self.close_connection = True
+                    return self.send(413, {"error": "That request is too large."})
                 if self.path.startswith("/api/site/"):
                     if not app.auth.valid(self.token()):
                         return self.send(401, {"error": "sign in"})
@@ -2556,23 +2575,23 @@ class App:
                 path = self.path
                 try:
                     if path == "/api/setup":
-                        if self.req().via_proxy:                  # a reset box must not be claimable by whoever finds it first on the internet
+                        if self.req().via_proxy or app.security.forwarded(self.headers):     # a reset box must not be claimable by whoever finds it first on the internet, even before a trusted proxy is set (#337)
                             return self.send(403, {"error": "Set the first password from your home network, not through the internet address."})
                         app.auth.set_password(body.get("password", ""))
                         return self.send(200, {"ok": True})
                     if path in ("/api/passkeys/login/options", "/api/passkeys/login/finish"):
                         r = self.req()
-                        w = app.security.lockout.wait(r.ip, r.via_proxy)
+                        w = app.security.lockout.wait(r.ip, False)          # per address only: a forged passkey cannot succeed, and junk answers must not lock the owner out (#337)
                         if w:
                             return self.send(429, {"error": f"Too many wrong tries. Try again in {max(1, (w + 59) // 60)} minute{'' if w <= 60 else 's'}.", "retryAfter": w})
                         try:
                             rp, origin = self.ceremony()
                             if path.endswith("options"):
-                                return self.send(200, app.passkeys.login_options(rp))
+                                return self.send(200, app.passkeys.login_options(rp, r.ip))
                             app.passkeys.login_finish(body.get("handle"), body.get("credential") or {}, rp, origin)
                         except ValueError as e:
                             if path.endswith("finish"):
-                                app.security.lockout.failed(r.ip, r.via_proxy)
+                                app.security.lockout.failed(r.ip, False)
                                 print(f"passkey sign-in failed from {r.ip}{' (through the proxy)' if r.via_proxy else ''}", file=sys.stderr, flush=True)
                             return self.send(401 if path.endswith("finish") else 400, {"error": str(e)})
                         app.security.lockout.ok(r.ip)

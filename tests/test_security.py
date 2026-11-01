@@ -37,10 +37,20 @@ class Unit(unittest.TestCase):
         self.assertEqual(r.ip, OUT)
         self.assertEqual(s.request("::ffff:" + PROXY, Hdr({"X-Forwarded-For": OUT})).via_proxy, True)
 
-    def test_a_proxy_visit_without_a_usable_address_is_not_trusted_as_one(self):
+    def test_a_proxy_visit_without_a_usable_address_is_never_a_home_visit(self):
+        # changed for #337: this used to expect via_proxy False for the garbage address, which made an unreadable forwarded visit count as
+        # coming from the home network (password sign-in, first-time setup). A visit the proxy passed on is now always an outside one.
         s = self.sec()
-        self.assertFalse(s.request(PROXY, Hdr({})).via_proxy)
-        self.assertFalse(s.request(PROXY, Hdr({"X-Forwarded-For": "not-an-address"})).via_proxy)
+        self.assertFalse(s.request(PROXY, Hdr({})).via_proxy, "no forwarding headers at all: the proxy's own machine, visiting directly")
+        r = s.request(PROXY, Hdr({"X-Forwarded-For": "not-an-address", "X-Forwarded-Proto": "https"}))
+        self.assertTrue(r.via_proxy)
+        self.assertEqual(r.ip, PROXY)
+        self.assertTrue(s.request(PROXY, Hdr({"X-Real-IP": "198.51.100.7"})).via_proxy, "forwarded some other way: still outside")
+
+    def test_forwarded_visits_from_an_unlisted_proxy_are_noticed(self):
+        s = self.sec()
+        self.assertTrue(s.forwarded(Hdr({"X-Forwarded-For": OUT})))
+        self.assertFalse(s.forwarded(Hdr({})))
 
     def test_public_name_is_enforced_only_through_the_proxy(self):
         s = self.sec(host="monitorbox.example.test")

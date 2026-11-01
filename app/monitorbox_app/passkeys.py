@@ -9,6 +9,8 @@ import base64, hashlib, hmac, json, os, secrets, struct, threading, time
 from .store import read_json, write_json
 
 CHALLENGE_TTL = 300
+PER_ASKER = 5             # challenges one address may have waiting at once
+MAX_PENDING = 200
 MAX_PASSKEYS = 20
 
 # ---- P-256 ECDSA verification (public data only, so nothing here has to be constant-time) ----
@@ -156,13 +158,23 @@ class Passkeys:
     def listing(self):
         return [{"id": c["id"], "name": c["name"], "created": c["created"], "lastUsed": c.get("lastUsed")} for c in self.data()["credentials"]]
 
-    def _challenge(self, kind):
+    def _challenge(self, kind, who=""):
+        """A new challenge. `who` is the asking address: one address can hold only a few at a time, and when the table is full the
+        address holding the most gives one up, so asking over and over pushes out only the asker's own requests, never the owner's (#337)."""
         now = time.time()
         with self.lock:
             self.pending = {k: v for k, v in self.pending.items() if v[2] > now}
-            if len(self.pending) > 200: self.pending.clear()
+            mine = sorted((k for k, v in self.pending.items() if v[3] == who), key=lambda k: self.pending[k][2])
+            while len(mine) >= PER_ASKER:
+                del self.pending[mine.pop(0)]
+            while len(self.pending) >= MAX_PENDING:
+                by = {}
+                for k, v in self.pending.items():
+                    by.setdefault(v[3], []).append(k)
+                top = max(by.values(), key=len)
+                del self.pending[min(top, key=lambda k: self.pending[k][2])]
             handle, ch = secrets.token_urlsafe(16), b64u(os.urandom(32))
-            self.pending[handle] = (kind, ch, now + CHALLENGE_TTL)
+            self.pending[handle] = (kind, ch, now + CHALLENGE_TTL, who)
         return handle, ch
 
     def _take(self, handle, kind):
@@ -214,9 +226,9 @@ class Passkeys:
         write_json(self.file, d)
         return name
 
-    def login_options(self, rp_id):
+    def login_options(self, rp_id, who=""):
         if not self.count(): raise ValueError("No passkeys have been added.")
-        handle, ch = self._challenge("login")
+        handle, ch = self._challenge("login", who)
         return {"handle": handle, "publicKey": {"challenge": ch, "rpId": rp_id, "timeout": 120000, "userVerification": "required", "allowCredentials": []}}
 
     def login_finish(self, handle, body, rp_id, origin):
