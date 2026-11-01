@@ -160,7 +160,8 @@ class Passkeys:
         now = time.time()
         with self.lock:
             self.pending = {k: v for k, v in self.pending.items() if v[2] > now}
-            if len(self.pending) > 200: self.pending.clear()
+            while len(self.pending) >= 200:                        # full (someone asking over and over): the oldest goes, not every request in flight (#337)
+                del self.pending[min(self.pending, key=lambda k: self.pending[k][2])]
             handle, ch = secrets.token_urlsafe(16), b64u(os.urandom(32))
             self.pending[handle] = (kind, ch, now + CHALLENGE_TTL)
         return handle, ch

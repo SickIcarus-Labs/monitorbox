@@ -111,11 +111,33 @@ class Security:
         if ip in c["trustedProxies"]:
             fwd = [norm_ip(x) for x in str(headers.get("X-Forwarded-For") or "").split(",") if x.strip()]
             real = fwd[-1] if fwd and fwd[-1] else None
+            proto = str(headers.get("X-Forwarded-Proto") or "").split(",")[-1].strip().lower()
+            fhost = str(headers.get("X-Forwarded-Host") or headers.get("Host") or "").split(",")[-1].split(":")[0].strip().lower()
             if real:
-                proto = str(headers.get("X-Forwarded-Proto") or "").split(",")[-1].strip().lower()
-                fhost = str(headers.get("X-Forwarded-Host") or headers.get("Host") or "").split(",")[-1].split(":")[0].strip().lower()
                 return Request(real, True, proto == "https", fhost)
+            if self.forwarded(headers):
+                return Request(ip, True, proto == "https", fhost)      # the proxy passed a visitor on but its address is unreadable: an outside visit, never a home one (#337)
+        elif self.forwarded(headers):
+            self._untrusted(ip)
         return Request(ip, False, False, host)
+
+    FORWARD_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP", "X-Forwarded-Proto", "X-Forwarded-Host")
+
+    @classmethod
+    def forwarded(cls, headers):
+        """The visit was passed on by a proxy (a header only a proxy adds is there)."""
+        return any(headers.get(h) for h in cls.FORWARD_HEADERS)
+
+    def _untrusted(self, ip):
+        """A proxy that is not listed as trusted is passing visits on: until it is listed, its visitors look like the home network. Said once per address."""
+        seen = self.__dict__.setdefault("_warned", set())
+        if ip not in seen and len(seen) < 50:
+            seen.add(ip)
+            try:
+                from . import applog
+                applog.warning("security", f"{ip} is passing visits on like a reverse proxy but is not listed as a trusted proxy. If it is your proxy, add it under Settings, Sign-in and security.")
+            except Exception:
+                pass
 
     def host_ok(self, req):
         """Through the proxy, only the owner's public name is answered (when one is set)."""
