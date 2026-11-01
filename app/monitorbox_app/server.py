@@ -2490,7 +2490,7 @@ class App:
                     self.end_headers()
                     with open(p, "rb") as f:
                         while True:
-                            chunk = f.read(1 << 20)
+                            chunk = f.read(1 << 16)          # small pieces: each write must finish within the socket wait, even on a slow line
                             if not chunk:
                                 break
                             self.wfile.write(chunk)
@@ -2587,7 +2587,7 @@ class App:
                         try:
                             rp, origin = self.ceremony()
                             if path.endswith("options"):
-                                return self.send(200, app.passkeys.login_options(rp))
+                                return self.send(200, app.passkeys.login_options(rp, r.ip))
                             app.passkeys.login_finish(body.get("handle"), body.get("credential") or {}, rp, origin)
                         except ValueError as e:
                             if path.endswith("finish"):

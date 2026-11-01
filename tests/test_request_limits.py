@@ -69,6 +69,20 @@ class BeforeSignIn(unittest.TestCase):
         c.close()
 
 
+class PasskeyChallenges(unittest.TestCase):
+    def test_asking_over_and_over_never_pushes_out_someone_elses_sign_in(self):
+        import tempfile
+        from monitorbox_app import passkeys
+        from monitorbox_app.store import Paths
+        p = passkeys.Passkeys(Paths(tempfile.mkdtemp()))
+        mine, _ = p._challenge("login", "203.0.113.9")                       # the owner starts a sign-in
+        for i in range(passkeys.MAX_PENDING * 3):
+            p._challenge("login", f"198.51.100.{i % 7}")                     # strangers ask hundreds of times
+        self.assertIn(mine, p.pending, "the owner's challenge is still there")
+        self.assertLessEqual(len(p.pending), passkeys.MAX_PENDING)
+        self.assertLessEqual(sum(1 for v in p.pending.values() if v[3] == "198.51.100.1"), passkeys.PER_ASKER)
+
+
 class PasskeyPause(unittest.TestCase):
     def test_junk_passkey_answers_do_not_pause_everyone(self):
         lk = security.Lockout(clock=lambda: 1000.0)
