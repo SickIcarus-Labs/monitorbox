@@ -1,6 +1,6 @@
 """Install the App named by the channel pointer, start it, roll back if unhealthy,
 and serve a recovery page whenever the App is not running."""
-import json, os, signal, subprocess, sys, threading, time, urllib.request
+import ipaddress, json, os, signal, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import artifacts, backup
@@ -18,6 +18,60 @@ def launcher_version():
         return None
 RESTART_EXIT = 75  # App exits with this to ask for a restart (after an update request)
 
+
+
+FORWARD_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP", "X-Forwarded-Proto", "X-Forwarded-Host")
+
+
+def _ip(x):
+    try:
+        a = ipaddress.ip_address(str(x).strip())
+    except ValueError:
+        return None
+    return str(getattr(a, "ipv4_mapped", None) or a)
+
+
+def recovery_outside(root, peer, headers):
+    """True for a visit through the owner's reverse proxy (an address listed in config/security.json) or one carrying a header only a proxy adds."""
+    if any(headers.get(h) for h in FORWARD_HEADERS):
+        return True
+    try:
+        with open(os.path.join(root, "config", "security.json")) as f:
+            proxies = {_ip(x) for x in (json.load(f).get("trustedProxies") or [])}
+    except (OSError, ValueError, AttributeError):
+        proxies = set()
+    return _ip(peer) in proxies
+
+
+class _Lock:
+    """Wrong recovery passwords: five free, then a wait that doubles (a minute, up to fifteen)."""
+    def __init__(self, clock=time.time):
+        self.clock, self.by, self.lock = clock, {}, threading.Lock()
+
+    def wait(self, ip):
+        with self.lock:
+            r = self.by.get(ip)
+            left = (r[2] - self.clock()) if r else 0
+        return int(left + 0.999) if left > 0 else 0
+
+    def failed(self, ip):
+        now = self.clock()
+        with self.lock:
+            r = self.by.get(ip)
+            if not r or now - r[1] > 900:
+                r = self.by[ip] = [0, now, 0]
+            r[0] += 1; r[1] = now
+            if r[0] >= 5:
+                r[2] = now + min(900, 60 * 2 ** (r[0] - 5))
+            if len(self.by) > 2000:
+                self.by = {k: v for k, v in self.by.items() if now - v[1] <= 900}
+
+    def ok(self, ip):
+        with self.lock:
+            self.by.pop(ip, None)
+
+
+RECOVERY_LOCK = _Lock()
 
 class Launcher:
     def __init__(self, root, releases_url, channel="stable", port=8080,
@@ -216,6 +270,7 @@ const say=t=>$('msg').textContent=t;
 const pwd=()=>$('pwv').value;
 async function load(){
   const r=await (await fetch('/recover/info')).json();
+  if(r.outside){ $('st').textContent=r.status; $('dt').textContent='Recovery works only from your home network: open MonitorBox there by its own address and port.'; $('list').textContent=''; $('up').disabled=true; return; }
   $('st').textContent=r.status; $('dt').textContent=r.detail; $('log').textContent=r.log;
   $('pw').style.display=r.passwordRequired?'block':'none';
   $('last').textContent=r.last&&r.last.restore!==undefined?('Last restore: '+(r.last.restore||'')+' - '+r.last.result):'';
@@ -250,7 +305,13 @@ load(); setInterval(load,5000);
         done = lambda: until() or launcher.restore_asked or launcher.stop
 
         class H(BaseHTTPRequestHandler):
+            timeout = 60                                  # a silent connection is closed, so it cannot hold a thread
             def log_message(self, *a): pass
+
+            def outside(self):
+                """A visit the reverse proxy passed on (or anything that looks forwarded). Recovery is for the home network only:
+                it takes the password, and the internet is passkey-only (#337)."""
+                return recovery_outside(launcher.L.root, self.client_address[0], self.headers)
 
             def reply(self, code, obj=None, body=None, ctype="application/json"):
                 body = body if body is not None else json.dumps(obj).encode()
@@ -265,6 +326,9 @@ load(); setInterval(load,5000);
                 if self.path == "/api/health":
                     return self.reply(503, {"ok": False, "launcher": launcher.status})
                 if self.path == "/recover/info":
+                    if self.outside():
+                        return self.reply(200, {"status": launcher.status, "detail": "", "log": "", "outside": True,
+                                                "passwordRequired": True, "backups": [], "last": None})
                     tail = ""
                     try:
                         with open(launcher.L.log) as f:
@@ -282,17 +346,27 @@ load(); setInterval(load,5000);
                 if self.headers.get("X-MB") != "1":
                     self.reply(403, {"error": "forbidden"})
                     return False
+                if self.outside():
+                    self.reply(403, {"error": "Recovery works only from your home network. Open MonitorBox there by its own address and port."})
+                    return False
+                ip = self.client_address[0]
+                w = RECOVERY_LOCK.wait(ip)
+                if w:
+                    self.reply(429, {"error": f"Too many wrong passwords. Try again in {max(1, (w + 59) // 60)} minute{'' if w <= 60 else 's'}."})
+                    return False
                 if not backup.password_ok(launcher.L.root, password):
+                    RECOVERY_LOCK.failed(ip)
                     time.sleep(0.5)
                     self.reply(403, {"error": "Wrong admin password."})
                     return False
+                RECOVERY_LOCK.ok(ip)
                 return True
 
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 if self.path == "/recover/restore":
                     try:
-                        body = json.loads(self.rfile.read(n) or b"{}")
+                        body = json.loads(self.rfile.read(max(0, min(n, 65536))) or b"{}")
                     except ValueError:
                         return self.reply(400, {"error": "bad json"})
                     if not self.allowed(body.get("password", "")):
