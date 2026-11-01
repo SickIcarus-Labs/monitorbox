@@ -8,6 +8,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.9.21** [highlight: Security fixes for boxes opened to the internet.] Names that come from devices and other systems (container labels, camera ids, machine names, a managed site's name) are now always treated as plain text by the buttons that use them, so a crafted name can never run in your signed-in browser. A site tab now only passes on the kinds of answer a MonitorBox gives (data, images, logs, backups), never a web page of its own.
 ## 1.9.19 to 1.9.20 (stable, October 31)
 
 - **1.9.20** (#331) [highlight: Port errors now say how many were seen and when, not a scaled-up hourly rate.] Port errors and packet drops now give the real count and the window: "errors rising (133 in the last 15 min: 133 receive, 0 transmit, about 1 in 56,000 packets)" instead of "about 532 an hour", which read like a fault lasting the whole hour when it was a short burst. The share of packets reads as "about 1 in N packets". The same wording is used on the front page, the Port errors page, a switch's or server's detail (including the other end of the link) and in alerts. What raises the alert has not changed.
