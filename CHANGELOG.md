@@ -8,9 +8,12 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+## 1.9.21 to 1.9.23 (stable, November 1)
+
 - **1.9.23** (image: launcher 1.0.4) The recovery page (shown only when MonitorBox itself will not start) now works only from your home network. Through your reverse proxy it shows no log lines or backup names and refuses restores and uploads, because it signs in with the password and the internet is passkey-only. Wrong passwords there are now slowed down like the normal sign-in. Re-pull the image to get it; MonitorBox tells you when.
 - **1.9.22** More security fixes for boxes opened to the internet. Before you sign in, MonitorBox now reads only small requests and closes connections that go quiet for a minute, so a stranger cannot tie up the Pi. Failed passkey tries only slow down the address they came from, so nobody can keep you from signing in with your passkey. A visit your proxy passes on always counts as an outside visit, even when the proxy's forwarded address cannot be read, and the first password can never be set through a proxy. If something is passing visits on like a proxy but is not listed under Settings, Sign-in and security, the log says so. Icons are served only by their own names.
 - **1.9.21** [highlight: Security fixes for boxes opened to the internet.] Names that come from devices and other systems (container labels, camera ids, machine names, a managed site's name) are now always treated as plain text by the buttons that use them, so a crafted name can never run in your signed-in browser. A site tab now only passes on the kinds of answer a MonitorBox gives (data, images, logs, backups), never a web page of its own.
+
 ## 1.9.19 to 1.9.20 (stable, October 31)
 
 - **1.9.20** (#331) [highlight: Port errors now say how many were seen and when, not a scaled-up hourly rate.] Port errors and packet drops now give the real count and the window: "errors rising (133 in the last 15 min: 133 receive, 0 transmit, about 1 in 56,000 packets)" instead of "about 532 an hour", which read like a fault lasting the whole hour when it was a short burst. The share of packets reads as "about 1 in N packets". The same wording is used on the front page, the Port errors page, a switch's or server's detail (including the other end of the link) and in alerts. What raises the alert has not changed.
@@ -21,6 +24,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 - **1.9.18** The move of DNS into the Internet card (1.9.17) now also moves DNS servers that check something else too, such as their Pi-hole admin page (Turnberry's did, so they stayed in their own card). The log now says when DNS items were moved, or why they could not be.
 - **1.9.17** DNS servers now sit in the **Internet** card instead of a card of their own. New boxes set them up there, and a box set up earlier moves them there once by itself (the DNS servers and the DNS group only; anything else you filed under DNS stays put).
+
 ## 1.9.15 to 1.9.16 (stable, October 31)
 
 - **1.9.16** (#336) [highlight: Fixed Settings and other pages sometimes failing to load through a proxy.] MonitorBox's web server could only hold 5 new connections waiting at once (the standard default). When a page asked for eight or nine things together while the Pi was busy, the extra connections were refused: through Caddy that showed as "502", and on its own as a page stuck loading. It now holds 128. On the owner's Pi the kernel had counted 14,697 refused connections.
@@ -29,6 +33,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 ## 1.9.14 (stable, October 31)
 
 - **1.9.14** (with UniFi Network 0.2.27) Three fixes for short blips overnight. Web checks now wait up to 10 seconds for a page (was 5), so a service on a busy server, such as Radarr on Goliath during the nightly backup, is not marked Degraded. The UniFi flow log is read on its own lane, so status checks never wait behind it (UniFi Aggregation went Unknown for a minute at 3:32). And a port's history is kept when an error or drop count goes down a little (924 to 923); only a fall to less than half, as a restart does, starts the port again.
+
 ## 1.9.13 (stable, October 30)
 
 - **1.9.13** (with SNMP 0.3.13) A NAS disk that is too warm now says why it is Degraded: "status Good, 57 °C (hot, limit 55 °C)". SSDs get a higher built-in limit, 70 °C instead of 55 °C, and say "SSD" on their line. Each disk can have its own limit: open the system, Edit monitoring, Disk temperature limits (empty uses the built-in one), the same as a UniFi Protect drive.
@@ -65,6 +70,7 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 - **1.7.24** (with UniFi Network 0.2.24, UniFi Protect 0.1.6, #328) When the UniFi console stops answering, every UniFi and Protect check now says so at once ("cannot reach the UniFi controller ... timed out") instead of each one waiting out its own timeout behind the one before and reading "the module did not answer". On Oct 29 a console that went quiet for about six minutes turned a hundred checks Unknown with that confusing message. They are still Unknown, never Failed; the wording and the recovery time are what change (one real try every 10 seconds).
 - **1.7.23** (with NUT 0.1.4, UniFi Protect 0.1.5, Wake on LAN 0.1.2, #328) More small fixes from the documentation pass. A NUT server that accepts the connection but never answers now says it did not answer in time, instead of "cannot reach". A UniFi Protect login that is accepted but returns no session now waits a minute before trying again, like any other failed login. Adding Protect from your UniFi Network login no longer copies the Network console's port. Wake on LAN now refuses an IPv6 broadcast address (the packet goes out over IPv4) and its "no wake settings" message names the real screen. The install guide and the Port errors page no longer say things the code has moved past.
 - **1.7.22** (with SNMP 0.3.10, Scrypted 0.2.3, Portainer 0.1.7, NUT 0.1.3, UniFi Network 0.2.23, UniFi Protect 0.1.4, #328) Small fixes found while writing the documentation. A VPN tunnel you paused on purpose in UniFi now shows as Degraded with the word "paused", not as Down. A UPS that reports both "on battery" and "low battery" is announced as the low battery. A garbled message can no longer stop the SNMP module. Portainer no longer follows a redirect with your access token; it tells you the address redirected. A Scrypted connection that asks for the certificate check is now really checked, even when another Scrypted connection does not ask. Error messages that said "Use Re-detect" now name the real button, "Pick what to watch".
+
 ## 1.7.10 to 1.7.21 (stable, October 29)
 
 - **1.7.21** (#324) The other site's tab now shows its "(managed by)" line expanded the first time it is opened. Before, it appeared only after tapping away and back, because the page asked the other site for its pairings at the next 10-second round.
