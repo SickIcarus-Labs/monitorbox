@@ -214,6 +214,24 @@ class UnifiChecks(unittest.TestCase):
         self.assertIn("PIA Cali", r["detail"])                               # says which tunnels do exist
         self.assertEqual(self.run_check("tunnel")["state"], "unknown")
 
+    def test_a_site_magic_link_with_the_same_name_does_not_hide_the_vpn_client(self):
+        # Broad Leaf, 2026-11-11, after UniFi Network 11.0.99: the Site Magic link to Tidewater is listed first under the same
+        # name as the WireGuard client, has no status, and turned a connected tunnel Unknown
+        self.c.networks.insert(0, {"_id": "sd1", "name": "Tidewater", "purpose": "site-vpn", "vpn_type": "sdwan-mesh-tunnel",
+                                   "enabled": True, "remote_vpn_subnets": ["192.168.1.0/24"], "ifname": "wgsts1000"})
+        r = self.run_check("tunnel", name="Tidewater")
+        self.assertEqual((r["state"], r["detail"]), ("healthy", "WireGuard · tunnel 192.168.4.4/32 · connected"))
+        d = M.handle({"method": "discover", "params": {"connection": self.conn}})
+        self.assertEqual([s["label"] for s in d["suggest"] if s["batch"] == "VPN tunnels"],
+                         ["UniFi VPN Ferndale", "UniFi VPN PIA Cali", "UniFi VPN Tidewater"])     # offered once, not twice
+        self.assertIn({"name": "Tidewater", "type": "Site Magic", "subnet": None, "status": None}, d["tunnels"])
+        # a Site Magic link on its own is not offered (it would sit at Unknown for good), and says why if watched anyway
+        self.c.networks[:] = [n for n in self.c.networks if n["_id"] != "t2"]
+        d = M.handle({"method": "discover", "params": {"connection": self.conn}})
+        self.assertNotIn("UniFi VPN Tidewater", [s["label"] for s in d["suggest"]])
+        r = self.run_check("tunnel", name="Tidewater")
+        self.assertEqual((r["state"], r["detail"]), ("unknown", "Site Magic · UniFi does not report the status of Site Magic links"))
+
     def test_a_controller_without_vpn_status_gives_unknown_not_a_false_green(self):
         self.c.vpn_status = False
         r = self.run_check("tunnel", name="PIA Cali")

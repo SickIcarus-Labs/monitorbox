@@ -205,7 +205,11 @@ def gateway_wans(devices):
 
 
 TUNNEL_PURPOSES = {"vpn-client": "VPN client", "site-vpn": "site-to-site"}
-TUNNEL_TYPES = {"wireguard-client": "WireGuard", "openvpn-client": "OpenVPN", "ipsec-vpn": "IPsec", "wireguard-site": "WireGuard"}
+TUNNEL_TYPES = {"wireguard-client": "WireGuard", "openvpn-client": "OpenVPN", "ipsec-vpn": "IPsec", "wireguard-site": "WireGuard",
+                "sdwan-mesh-tunnel": "Site Magic"}
+# UniFi Network 11 lists each Site Magic (SD-WAN) link as a site-to-site tunnel named after the other site, but its VPN status list
+# says nothing about them. Its name can match a real VPN client to that same site (Broad Leaf, 2026-11-11: "Turnberry" twice).
+SDWAN_TYPES = ("sdwan-mesh-tunnel",)
 
 
 def tunnels_of(networks):
@@ -234,7 +238,10 @@ def check_tunnel(params, networks, connections):
     mine = tunnels_of(networks)
     if not name:
         return {"state": "unknown", "detail": "this check needs a tunnel 'name'. Open the server and choose Pick what to watch."}
-    n = next((t for t in mine if str(t.get("name", "")).lower() == str(name).lower()), None)
+    same = [t for t in mine if str(t.get("name", "")).lower() == str(name).lower()]
+    # when two tunnels share the name, watch the one UniFi reports on (a Site Magic link and a VPN client to the same site)
+    same.sort(key=lambda t: (tunnel_status(t, connections) is None, t.get("vpn_type") in SDWAN_TYPES))
+    n = same[0] if same else None
     if not n:
         names = ", ".join(sorted(str(t.get("name")) for t in mine)) or "none"
         return {"state": "unknown", "detail": f"the controller has no VPN tunnel called '{name}' (it has: {names})"}
@@ -248,7 +255,10 @@ def check_tunnel(params, networks, connections):
         return {"state": "healthy", "detail": " · ".join(bits + ["connected"])}
     if st in ("disconnected", "down", "error", "failed"):
         return {"state": "failed", "detail": " · ".join(bits + [st])}
-    why = f"status '{st}'" if st else "UniFi did not report this tunnel's status"
+    if not st and n.get("vpn_type") in SDWAN_TYPES:
+        why = "UniFi does not report the status of Site Magic links"
+    else:
+        why = f"status '{st}'" if st else "UniFi did not report this tunnel's status"
     return {"state": "unknown", "detail": " · ".join(bits + [why])}
 
 
@@ -267,11 +277,15 @@ def discover(devices, health, networks=(), connections=None):
         up = uplink_of(d, devices)
         topo.append({"name": dev_name(d), "model": d.get("model"), "type": d.get("type"), "ip": d.get("ip"), "state": STATE_WORDS.get(d.get("state"), d.get("state")),
                      "uplink": up[0] if up else None, "uplink_mbps": up[1] if up else None})
-    tunnels = []
+    tunnels, offered = [], set()
     for n in sorted(tunnels_of(networks), key=lambda t: str(t.get("name", "")).lower()):
         name = str(n.get("name") or n.get("_id"))
-        sug.append({"label": f"UniFi VPN {name}", "check": "tunnel", "params": {"name": name}, "batch": "VPN tunnels"})
-        tunnels.append({"name": name, "type": tunnel_kind(n), "subnet": n.get("ip_subnet"), "status": tunnel_status(n, connections)})
+        st = tunnel_status(n, connections)
+        # a link UniFi never reports on would sit at Unknown for good, so it is listed but not offered as a check
+        if not (n.get("vpn_type") in SDWAN_TYPES and st is None) and name.lower() not in offered:
+            offered.add(name.lower())
+            sug.append({"label": f"UniFi VPN {name}", "check": "tunnel", "params": {"name": name}, "batch": "VPN tunnels"})
+        tunnels.append({"name": name, "type": tunnel_kind(n), "subnet": n.get("ip_subnet"), "status": st})
     for s in sug:        # the overview shares one item (the devices summary first); every device and tunnel is its own, so one that is off shows as Down by name
         s.update({"node": "UniFi" if s["batch"] == "Overview" else s["label"], "group": "Network", "rule": "primary"})
     return {"devices": topo, "tunnels": tunnels, "suggest": sug}
