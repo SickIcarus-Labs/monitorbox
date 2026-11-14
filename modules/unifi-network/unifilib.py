@@ -42,7 +42,24 @@ class Client:
         self.login_lock = threading.Lock()    # one login at a time, whichever lane needs it
         self.cookie, self.prefix, self.login_failed, self.csrf = None, None, None, None     # prefix: "/proxy/network" on UniFi OS
         self.cache = {}
-        self.unreachable = None      # (when, message) of the last time the controller did not answer
+        self.unreachable = None      # (when, message) of the last time the controller did not answer a status read
+        self.lane = threading.local()  # per thread: slow (a flow/usage/look read) and deadline (time.monotonic() the App stops waiting by, or None)
+
+    def _slow(self, deadline):
+        """For the slow reads: marks this thread's requests as slow and gives them the App's deadline. Use as `with self._slow(deadline):`."""
+        lane = self.lane
+
+        class Slow:
+            def __enter__(self):
+                lane.slow, lane.deadline = True, deadline
+
+            def __exit__(self, *exc):
+                lane.slow, lane.deadline = False, None
+        return Slow()
+
+    def time_left(self):
+        d = getattr(self.lane, "deadline", None)
+        return None if d is None else d - time.monotonic()
 
     def _request(self, method, path, body=None):
         if self.unreachable and time.time() - self.unreachable[0] < UNREACHABLE_FOR:
@@ -56,8 +73,13 @@ class Client:
             req.add_header("Cookie", self.cookie)
         if self.csrf and method != "GET":
             req.add_header("X-Csrf-Token", self.csrf)       # UniFi OS answers 403 to a POST (even a read-only search) without the token it gave at login
+        timeout, left = self.timeout, self.time_left()
+        if left is not None:
+            if left < 0.5:
+                raise UnifiError("ran out of time: MonitorBox stopped waiting for this answer")
+            timeout = min(timeout, left)
         try:
-            with self.opener.open(req, timeout=self.timeout) as r:
+            with self.opener.open(req, timeout=timeout) as r:
                 self.unreachable = None
                 return r.status, r.read(), r.headers
         except urllib.error.HTTPError as e:
@@ -65,7 +87,8 @@ class Client:
             return e.code, e.read(), e.headers
         except (OSError, ValueError) as e:
             msg = f"cannot reach the UniFi controller at {self.base} ({getattr(e, 'reason', e)})"
-            self.unreachable = (time.time(), msg)
+            if not getattr(self.lane, "slow", False):
+                self.unreachable = (time.time(), msg)   # only a status read decides the console is gone: a flow search the console is slow to answer must not turn the device checks Unknown
             raise UnifiError(msg)
 
     def _login(self):
@@ -133,11 +156,11 @@ class Client:
             self.cache[what] = (time.time(), data)
             return data
 
-    def usage(self, seconds):
+    def usage(self, seconds, deadline=None):
         """Per-client internet usage over the last `seconds` (GET v2/api/site/<site>/traffic: bytes up and down per client and application, counted at the gateway).
         A read like the others, with its own method because it takes a time window."""
         seconds = max(60, min(int(seconds), 3600))
-        with self.flow_lock:
+        with self.flow_lock, self._slow(deadline):
             hit = self.cache.get(("usage", seconds))
             if hit and time.time() - hit[0] < CACHE_SECONDS * 2:
                 return hit[1]
@@ -166,11 +189,13 @@ class Client:
 
     FLOW_PAGE, FLOW_PAGES = 200, 10          # up to 2000 of the newest flows per question
 
-    def flows(self, seconds):
+    def flows(self, seconds, deadline=None, info=None):
         """The gateway's flow log for the last `seconds` (the search behind Insights, Flows: POST v2/api/site/<site>/traffic-flows, a read-only search; UniFi OS wants the
-        login's CSRF token on it). Newest first, a page at a time. Returns the raw flow records; unifichecks.flow_summary boils them down."""
+        login's CSRF token on it). Newest first, a page at a time. Returns the raw flow records; unifichecks.flow_summary boils them down.
+        With a deadline it stops paging in time and returns the newest flows it has, setting info["partial"] (a partial answer is not cached)."""
         seconds = max(60, min(int(seconds), 3600))
-        with self.flow_lock:
+        info = {} if info is None else info
+        with self.flow_lock, self._slow(deadline):
             hit = self.cache.get(("flows", seconds))
             if hit and time.time() - hit[0] < CACHE_SECONDS * 2:
                 return hit[1]
@@ -178,13 +203,23 @@ class Client:
                 raise UnifiError("refusing the flow search (this module is read-only)")
             now, rows, size, page = int(time.time() * 1000), [], self.FLOW_PAGE, 0
             while page < self.FLOW_PAGES:
+                left = self.time_left()
+                if rows and left is not None and left < min(self.timeout, 5):     # probably not enough time for another page: say what we have
+                    info["partial"] = True
+                    return rows
                 body = {"timestampFrom": now - seconds * 1000, "timestampTo": now, "pageNumber": page, "pageSize": size}
                 for attempt in (1, 2):
                     if not self.cookie:
                         self._login()
                     if self.prefix != "/proxy/network":
                         raise UnifiError("this controller does not keep a flow log (the Flows page needs UniFi OS)")
-                    status, raw, _ = self._request("POST", f"{self.prefix}/v2/api/site/{self.site}/traffic-flows", body)
+                    try:
+                        status, raw, _ = self._request("POST", f"{self.prefix}/v2/api/site/{self.site}/traffic-flows", body)
+                    except UnifiError:
+                        if rows:                                # a later page did not come: the newest flows are still worth having
+                            info["partial"] = True
+                            return rows
+                        raise
                     if status == 401 and attempt == 1:
                         self.cookie = None                      # session expired: log in again, once
                         continue
@@ -208,7 +243,7 @@ class Client:
             self.cache[("flows", seconds)] = (time.time(), rows)
             return rows
 
-    def look(self):
+    def look(self, deadline=None):
         """For the flows look report only. UniFi does not publish the API behind Insights, Flows, so this asks the few read-only questions it may be built on and
         reports each answer's status and SHAPE (field names, types, counts and a couple of examples; see `shape`). Nothing is kept and nothing is changed."""
         now, hour = int(time.time() * 1000), 3600 * 1000
@@ -222,7 +257,7 @@ class Client:
                 ("GET", "v2/api/site/{site}/traffic/categories", None, None),
                 ("GET", "v2/api/site/{site}/traffic/categories", window, None)]
         out = []
-        with self.flow_lock:
+        with self.flow_lock, self._slow(deadline):
             for method, tpl, query, body in plan:
                 if (method, tpl) not in LOOK_ALLOWED:
                     raise UnifiError(f"refusing {method} {tpl} (this module is read-only)")

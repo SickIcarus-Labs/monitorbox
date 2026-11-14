@@ -3,6 +3,8 @@
 Protocol (one JSON object per line):
   App -> module : {"id": 1, "method": "hello", "params": {...}}
   module -> App : {"id": 1, "result": {...}}  or  {"id": 1, "error": "message"}
+Each request also carries "timeout" (seconds the App will wait), so a module can stop slow work in time; a module may add "took": {"wait": ms, "run": ms}
+to an answer (time queued, time working), which the Performance page shows. Modules that do neither are unaffected.
 A module may also send unasked lines {"event": "...", "session": "<id>", "message": {...}} (live video setup messages); they go to whoever
 listened for that session id (ModuleProcess.listen), and are dropped if nobody did.
 """
@@ -28,6 +30,7 @@ def current(ids):
     return [i for i in ids if i not in RETIRED]
 
 
+TALLY_LOCK = threading.Lock()
 MODULE_CHECK_WAIT = 20   # seconds a module check may take: a busy UniFi console can take 10 s or more to answer one request (the modules wait 15 s)
 
 
@@ -41,6 +44,7 @@ class ModuleProcess:
         self.lock = threading.Lock()      # guards writes to stdin and the table of waiting calls
         self.n = 0
         self.waiting = {}                 # id -> [event, message]
+        self.last = threading.local()     # per calling thread: what the module said about its last answer (took)
         self.dead = False
         self.listeners = {}               # session id -> callback(msg) for unasked event lines
         threading.Thread(target=self._read, daemon=True).start()
@@ -88,6 +92,7 @@ class ModuleProcess:
             self.listeners.pop(session, None)
 
     def call(self, method, params=None, timeout=5):
+        self.last.took = None
         w = [threading.Event(), None]
         with self.lock:
             if not self.alive():
@@ -96,7 +101,7 @@ class ModuleProcess:
             i = self.n
             self.waiting[i] = w
             try:
-                self.proc.stdin.write(json.dumps({"id": i, "method": method, "params": params or {}}) + "\n")
+                self.proc.stdin.write(json.dumps({"id": i, "method": method, "params": params or {}, "timeout": timeout}) + "\n")     # the timeout lets a module stop slow work in time (others ignore it)
                 self.proc.stdin.flush()
             except (OSError, ValueError):
                 self.waiting.pop(i, None)
@@ -110,6 +115,7 @@ class ModuleProcess:
         msg = w[1]
         if msg is None:
             raise RuntimeError("module exited")
+        self.last.took = msg.get("took") if isinstance(msg.get("took"), dict) else None      # a module that says how long it queued and ran (unifi-network); per thread, calls overlap
         if "error" in msg:
             raise RuntimeError(msg["error"])
         return msg.get("result")
@@ -320,8 +326,9 @@ class Modules:
         except TimeoutError:
             tm = self.__dict__.setdefault("timeouts", {})
             n = tm[mid] = tm.get(mid, 0) + 1
+            self.timed_out(mid, method, timeout)
             if n == 5:
-                applog.error("modules", f"{mid} has not answered {n} calls in a row (last: {method}).")
+                applog.error("modules", f"{mid} has not answered {n} calls in a row (last: {method}; timeouts since start: {self.recent_timeouts(mid)}).")
             raise
         finally:
             ms = (time.monotonic() - t0) * 1000
@@ -329,8 +336,27 @@ class Modules:
             who = f" for {c.get('name') or c.get('id')}" if isinstance(c, dict) and (c.get("name") or c.get("id")) else ""      # the device's name only: never its address or credentials
             applog.debug("modules", f"call {mid}.{method}{who} took {ms:.0f} ms")
             perfstats.record("module", f"{mid}.{method}", ms)
+            self.record_took(p, mid, method)
             if ms >= perfstats.SLOW_MS:
                 perfstats.slow(f"{mid}.{method}{who}", ms)
+
+    def timed_out(self, mid, method, waited):
+        """Counts timeouts per module and method, checks included, so a log line can say which kind of call stopped answering (the in-a-row count is all calls)."""
+        with TALLY_LOCK:                  # not self.lock: that is held while a module restarts
+            d = self.__dict__.setdefault("timeouts_by", {}).setdefault(mid, {})
+            d[method] = d.get(method, 0) + 1
+            perfstats.record("module", f"{mid}.{method} timed out", waited * 1000)     # its count is how many timed out; its time is how long the App waited
+
+    def recent_timeouts(self, mid):
+        d = self.__dict__.get("timeouts_by", {}).get(mid) or {}
+        return ", ".join(f"{k} {v}" for k, v in sorted(d.items(), key=lambda x: -x[1])) or "none"
+
+    @staticmethod
+    def record_took(p, mid, method):
+        """Time a module says a call spent waiting for a free thread: queueing in the module, as apart from the work itself."""
+        took = getattr(getattr(p, "last", None), "took", None)
+        if isinstance(took, dict) and isinstance(took.get("wait"), (int, float)):
+            perfstats.record("module", f"{mid}.{method} queued", took["wait"])
 
     def _ensure(self, mid):
         """Install a module that something now needs (a connection to a device of its kind). `on_need` is set by the App; it says
@@ -374,6 +400,10 @@ class Modules:
         try:
             res = p.call("check", {"check": spec.get("check"), "params": spec.get("params", {}),
                                    "connection": conn}, timeout=spec.get("timeout", MODULE_CHECK_WAIT) + 2)
+            self.record_took(p, mid, "check")
+        except TimeoutError as e:
+            self.timed_out(mid, "check", spec.get("timeout", MODULE_CHECK_WAIT) + 2)
+            return None, f"the {mid} module did not answer: {e}", None, {}
         except Exception as e:
             return None, f"the {mid} module did not answer: {e}", None, {}
         ms = round((time.monotonic() - t0) * 1000, 1)

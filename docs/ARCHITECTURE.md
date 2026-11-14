@@ -14,7 +14,7 @@ Docker host (host network)
 
 Only the launcher is in the image. The App and every module download into `/config` and update in place. The launcher stays tiny because it is the one part that must never break.
 
-**Module protocol:** the App starts each module as its own subprocess and exchanges JSON lines over stdin/stdout. A crash takes down only that module. Modules are written in Python or Node.
+**Module protocol:** the App starts each module as its own subprocess and exchanges JSON lines over stdin/stdout. Each request carries how long the App will wait, so a module can stop slow work in time (the UniFi Network module does, and keeps its device checks on threads apart from slow traffic questions). A crash takes down only that module. Modules are written in Python or Node.
 
 **What is not a module:** the app shell, onboarding, backup and restore, and the alert senders (email and Home Assistant), which are part of the App.
 

@@ -1183,3 +1183,18 @@ Setup (`add_network`) put the DNS servers and their "DNS" group item in a group 
 ## Port errors in real counts (#331, 1.9.20)
 
 On 2026-10-30 at about 2:45am the internet uplink showed "errors rising (about 532 an hour)". The gateway's own counters showed 405 errors in about 750 million packets: a short burst, multiplied by four because the watch compared 15-minute windows and reported them as hourly rates. The trigger was right; the wording made a burst sound like an hour-long fault. The port watch now reports what it saw (the count in the last 15 minutes, receive and transmit, and the share of packets as "about 1 in N packets"), and the earlier pace it compares against is also a 15-minute count. The trigger (floors, five times the earlier pace, the share of packets) is unchanged.
+
+## A slow flow log no longer starves the UniFi checks (#339, 1.9.24, UniFi Network 0.2.29)
+
+On 2026-11-14 at 10:24 the App logged that the UniFi module had not answered five calls in a row (last: flows), and about 20 UniFi items went Unknown for four minutes while the gateway's own checks and CPU were fine. It is the third "everything UniFi goes Unknown" event (after 2026-10-30 and 2026-10-31) and the first one the console itself does not explain.
+
+The module ran every request on one pool of four threads. The flow log, per-client usage and the look report all share one lock, so only one runs at a time and the rest sat holding threads. A flow search can be ten pages at up to 15 seconds each; the App stopped waiting after 30 seconds but the module carried on, and the background flow loop asked again about 50 seconds later. A few of those and no thread was left for the device checks. 0.2.27 had separated the locks, which stops a check waiting for the flow lock, but not for a thread. Separately, a flow page that timed out marked the whole console unreachable for 10 seconds, so checks read "cannot reach" even when the status reads were fine. And the graph side panel, when the flow log came back empty, asked for per-client usage, which waited behind the same flow search: 30 + 20 seconds, the 50.2 seconds seen on the Performance page.
+
+What changed:
+
+- **Two lanes in the module.** Checks and quick reads get four threads of their own. Traffic questions get one (the lock allowed only one anyway) and at most three waiting; one more is answered "busy" at once. Identical questions share one job and one answer.
+- **Deadlines.** Every request now carries the App's timeout. A flow search checks the time left before each page and returns the newest flows it has, marked partial, instead of running on; a partial answer is not cached. Work whose asker has already given up is not started. Status reads keep their 15-second timeout.
+- **Fast-fail from status reads only.** Only a status read that cannot reach the console sets the 10-second fast-fail.
+- **App.** One flow question per window at a time (others wait for that answer). The side panel skips the usage fallback after a flow timeout. Timeouts are counted per method (the five-in-a-row log line lists them), and the time a call queued in the module shows on the Performance page as "queued".
+
+Running the module as more than one process was considered and not needed: Python cannot stop a running thread, but stopping between pages does the same job here.
