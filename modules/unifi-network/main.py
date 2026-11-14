@@ -14,7 +14,7 @@
   discover {"connection": {...}} -> devices, which one hangs off which, and ready-made checks
 
 A controller that cannot be reached, or a login that is refused, is Unknown, never Failed."""
-import json, os, sys, threading
+import json, os, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -62,7 +62,8 @@ def tunnel_status(c):
         raise
 
 
-def handle(req):
+def handle(req, deadline=None):
+    """deadline: time.monotonic() by which the App wants an answer (None: no limit). The slow reads stop in time and say what they have."""
     m, a = req.get("method"), req.get("params", {})
     if m == "hello":
         return {"module": "unifi-network", "version": VERSION}
@@ -84,31 +85,105 @@ def handle(req):
         return C.lan_report(devices, clients, note)
     if m == "client_usage":
         sec = a.get("seconds") if isinstance(a.get("seconds"), int) else 300
-        return C.client_usage(client(a.get("connection") or {}).usage(sec), max(60, min(sec, 3600)))
+        return C.client_usage(client(a.get("connection") or {}).usage(sec, deadline), max(60, min(sec, 3600)))
     if m == "flows":
         sec = a.get("seconds") if isinstance(a.get("seconds"), int) else 300
-        return C.flow_summary(client(a.get("connection") or {}).flows(sec), max(60, min(sec, 3600)))
+        info = {}
+        out = C.flow_summary(client(a.get("connection") or {}).flows(sec, deadline, info), max(60, min(sec, 3600)))
+        if info.get("partial"):
+            out["partial"] = True                         # the newest flows only: the console was too slow to page through the rest in time
+        return out
     if m == "flows_look":
-        return {"attempts": client(a.get("connection") or {}).look()}
+        return {"attempts": client(a.get("connection") or {}).look(deadline)}
     if m == "discover":
         c = client(a.get("connection") or {})
         return C.discover(c.get("stat/device"), c.get("stat/health"), c.get("rest/networkconf"), tunnel_status(c))
     raise ValueError(f"unknown method {m}")
 
 
-def serve(req):
-    try:
-        out = {"id": req["id"], "result": handle(req)}
-    except U.UnifiError as e:
-        out = {"id": req["id"], "result": {"state": "unknown", "detail": str(e)}} if req.get("method") == "check" \
-            else {"id": req["id"], "error": str(e)}
-    except Exception as e:
-        out = {"id": req["id"], "error": str(e)}
+# Two lanes, so slow traffic questions can never use up the threads the device checks need (2026-11-14: they did, and ~20 items went Unknown).
+# Status: checks and the quick reads. Slow: the flow log, per-client usage and the look report. Those all take the client's flow_lock, so only one can run at a
+# time anyway: one thread is all that lane can use, and a short waiting line stops a pile-up while the console is slow.
+SLOW = ("flows", "client_usage", "flows_look")
+SLOW_WAITING = 3          # different slow questions that may wait behind the one running; one more answers "busy" at once
+MARGIN = 1.0              # answer this much before the App stops waiting, so a partial answer still reaches it
+STATUS_POOL = ThreadPoolExecutor(max_workers=4)
+SLOW_POOL = ThreadPoolExecutor(max_workers=1)
+JOBS, JOBS_LOCK = {}, threading.Lock()     # slow question (method and params) -> [(request id, deadline, arrived), ...]: identical questions share one job
+
+
+def reply(out):
     with OUT:
         print(json.dumps(out), flush=True)
 
 
+def answer(req, deadline=None):
+    """Runs one request and returns its answer line (without the id)."""
+    try:
+        return {"result": handle(req, deadline)}
+    except U.UnifiError as e:
+        return {"result": {"state": "unknown", "detail": str(e)}} if req.get("method") == "check" else {"error": str(e)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def deadline_of(req, arrived):
+    """When the App stops waiting for this request (it sends its timeout with each one), less a margin; None if it did not say."""
+    t = req.get("timeout")
+    return arrived + max(0.5, float(t) - MARGIN) if isinstance(t, (int, float)) and t > 0 else None
+
+
+def took(arrived, started):
+    return {"wait": round((started - arrived) * 1000), "run": round((time.monotonic() - started) * 1000)}
+
+
+def serve(req, arrived=None):
+    """A status request. One that waited past the App's patience is not run: nobody is listening for its answer."""
+    arrived = time.monotonic() if arrived is None else arrived
+    started, deadline = time.monotonic(), deadline_of(req, arrived)
+    if deadline is not None and started > deadline + MARGIN:
+        return
+    reply(dict(answer(req, deadline), id=req["id"], took=took(arrived, started)))
+
+
+def ask_slow(req, arrived):
+    key = req.get("method") + " " + json.dumps(req.get("params", {}), sort_keys=True)
+    with JOBS_LOCK:
+        if key in JOBS:                                   # the same question is already being asked: wait for that answer
+            JOBS[key].append((req["id"], deadline_of(req, arrived), arrived))
+            return
+        if len(JOBS) > SLOW_WAITING:
+            reply({"id": req["id"], "error": "the UniFi module is still busy with earlier traffic questions (the console is slow); try again shortly"})
+            return
+        JOBS[key] = [(req["id"], deadline_of(req, arrived), arrived)]
+    SLOW_POOL.submit(run_slow, key, req)
+
+
+def run_slow(key, req):
+    started = time.monotonic()
+    with JOBS_LOCK:
+        waiters = list(JOBS[key])
+    deadlines = [d for _, d, _ in waiters]
+    deadline = None if None in deadlines else max(deadlines)
+    if deadline is not None and started > deadline:      # everyone asking has given up: do not ask the console for nothing
+        out = None
+    else:
+        out = answer(req, deadline)
+    with JOBS_LOCK:
+        waiters = JOBS.pop(key, [])                       # anyone who joined while it ran gets the same answer
+    if out is not None:
+        for rid, _, arrived in waiters:
+            reply(dict(out, id=rid, took=took(arrived, started)))
+
+
+def receive(req):
+    arrived = time.monotonic()
+    if req.get("method") in SLOW:
+        ask_slow(req, arrived)
+    else:
+        STATUS_POOL.submit(serve, req, arrived)
+
+
 if __name__ == "__main__":
-    pool = ThreadPoolExecutor(max_workers=4)
     for line in sys.stdin:
-        pool.submit(serve, json.loads(line))
+        receive(json.loads(line))

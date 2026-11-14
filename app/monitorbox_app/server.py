@@ -14,6 +14,8 @@ from .auth import Auth
 from .modules import Modules
 from .store import Paths, read_json
 from .ui import PAGE
+FLOW_WAIT = 30                     # seconds the App waits for the gateway's flow log (the module stops paging in time and sends the newest flows it has)
+FLOW_GATES_LOCK = threading.Lock()
 
 RESTART_EXIT = 75
 
@@ -1391,8 +1393,8 @@ class App:
             if host and host in gateway_hosts:           # a connection to the gateway (or the UniFi console): the WAN graph. The map knows the gateway by its WAN address, the SNMP login uses its LAN one.
                 fr = self.flow_rows(win)
                 out["flows"] = sorted(self.flow_entries(fr["rows"], win), key=lambda f: -(f["down_bps"] + f["up_bps"]))[:15]
-                if not out["flows"]:                    # the flow log did not answer: say who is using the internet instead
-                    gw = self.gateway_usage(win)
+                if not out["flows"] and not fr.get("timed_out"):    # the flow log had nothing: say who is using the internet instead. Not when it timed out: the
+                    gw = self.gateway_usage(win)                     # usage read waits behind the same slow console, and the panel waited 30 s + 20 s for nothing
                     out["flows"] = [{"scope": "internet", "label": x["name"] + (" (wired)" if x["wired"] else " (wifi)"), "down_bps": x["down_bps"], "up_bps": x["up_bps"]} for x in gw["clients"][:15]]
                 out["why"] = "" if out["flows"] else "Nothing went through the gateway in that time." + (" The gateway's flow log said: " + "; ".join(fr["notes"]) if fr["notes"] else "")
                 return out
@@ -1499,16 +1501,34 @@ class App:
         hit = self.gw_cache.get(("flows", seconds))
         if hit and time.time() - hit[0] < 20:
             return hit[1]
-        conns = [c for c in monconfig.load_config(self.paths).get("connections", []) if isinstance(c, dict) and c.get("module") == "unifi-network"]
-        rows, notes = [], []
-        for c in conns:
-            try:
-                rows += self.modules.call(c["module"], "flows", {"connection": c, "seconds": seconds}, 30).get("flows", [])
-            except Exception as e:
-                notes.append(f"{c.get('id')}: {str(e)[:120]}")
-        out = {"seconds": seconds, "rows": rows, "notes": notes}
-        self.gw_cache[("flows", seconds)] = (time.time(), out)
-        return out
+        with FLOW_GATES_LOCK:
+            gate = self.__dict__.setdefault("flow_gates", {}).setdefault(seconds, threading.Lock())
+        # One question per window at a time: the background loop, a side panel and the Busiest client asking at once used to send three, and the
+        # module had to queue them all. Whoever comes second waits for the first answer (then cached) instead of asking again.
+        if not gate.acquire(timeout=FLOW_WAIT + 2):
+            return {"seconds": seconds, "rows": [], "notes": ["still waiting for the gateway's flow log"], "timed_out": True}
+        try:
+            hit = self.gw_cache.get(("flows", seconds))
+            if hit and time.time() - hit[0] < 20:
+                return hit[1]
+            conns = [c for c in monconfig.load_config(self.paths).get("connections", []) if isinstance(c, dict) and c.get("module") == "unifi-network"]
+            rows, notes, late = [], [], False
+            for c in conns:
+                try:
+                    r = self.modules.call(c["module"], "flows", {"connection": c, "seconds": seconds}, FLOW_WAIT)
+                    rows += r.get("flows", [])
+                    if r.get("partial"):
+                        notes.append(f"{c.get('id')}: the newest flows only (the gateway was slow to answer)")
+                except TimeoutError as e:
+                    late = True
+                    notes.append(f"{c.get('id')}: {str(e)[:120]}")
+                except Exception as e:
+                    notes.append(f"{c.get('id')}: {str(e)[:120]}")
+            out = {"seconds": seconds, "rows": rows, "notes": notes, "timed_out": late}
+            self.gw_cache[("flows", seconds)] = (time.time(), out)
+            return out
+        finally:
+            gate.release()
 
     @staticmethod
     def flow_entries(rows, seconds, ips=(), macs=()):
