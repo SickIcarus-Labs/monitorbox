@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+## 1.9.24 (stable, November 15)
+
 - **1.9.24** (with UniFi Network 0.2.29) (tracker #339) [highlight: A slow UniFi console no longer turns every UniFi item Unknown.] On 2026-11-14 slow traffic questions (the flow log behind the Busiest client and the graph side panels) tied up the UniFi module and about 20 items went Unknown for four minutes. The module now keeps its device checks apart from traffic questions, which take turns and stop in time, sending the newest flows they have. The App asks the flow log once for everyone who wants it at the same moment, and a side panel no longer waits another 20 seconds for usage after the flow log timed out (50 seconds before). Settings, Advanced, Performance now also shows how long module calls queued and which kinds timed out.
 
 ## 1.9.21 to 1.9.23 (stable, November 1)
