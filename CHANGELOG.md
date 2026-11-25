@@ -8,6 +8,8 @@ Versions move through three channels: **dev** (newest, may be rough), **beta**, 
 
 ## Not on stable yet
 
+- **1.10.1** On the main screen, each environment's Docker MAC addresses line now sits inside that environment's fold, under its Portainer environment line, instead of loose in the Services card. It is not counted as a service, but a clash still opens the fold by itself. An environment with no containers watched gets a fold of its own for its two lines. The Services list and **Remove all** treat it the same way, and in **Pick what to watch** an environment's "of N services" count no longer includes it.
+
 - **1.10.0** (with Portainer 0.2.0) [highlight: MonitorBox now spots two Docker containers sharing a MAC address.] On November 25 two pairs of containers on Goliath's media network had the same MAC address, so their connections failed at random for hours while Docker said everything was healthy. A new item per Docker environment, **Docker MAC addresses**, now goes Down when two containers on one Docker network share a MAC (naming them and their addresses), and Degraded when a container's settings ask for a fixed MAC that could cause that later. It looks every 5 minutes, read-only, and never changes a container. Under **Edit monitoring** you can change how often it looks and list containers whose fixed MAC is on purpose (that never hides a real clash). New Portainer connections offer it ticked; on an existing one, open **Pick what to watch** and tick it under Environments. Alerts now also send an update when exactly what is wrong changes while it is still wrong, such as a third container joining a clash.
 
 ## 1.9.24 (stable, November 15)

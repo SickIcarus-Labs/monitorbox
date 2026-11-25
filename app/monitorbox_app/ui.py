@@ -413,27 +413,39 @@ function rowsOf(n,i,d){d=d||0;
   return out},d,true)}
 /* Services that belong to an environment (Portainer containers) are grouped under it: one fold per environment, opening to short service
    names, with a stack of several containers folded once more. A problem opens its fold by itself like every other fold. */
+/* The Docker MAC address watch of an environment sits in the same fold, under its Portainer environment line; it is not counted as a service, but a
+   problem with it opens the fold like any other. An environment with no services watched still gets a fold for its environment and MAC lines. */
+const isMacWatch=n=>!n.service&&n.kind!=='aggregate'&&(n.checks||[]).length===1&&n.checks[0].type==='portainer'&&n.checks[0].target==='mac';
 function envGroups(ns){
  const svcs=ns.filter(n=>n.service&&n.service.env&&n.kind!=='aggregate'),envs={};
- for(const n of svcs)(envs[n.service.env]=envs[n.service.env]||{env:n.service.env,svcs:[],node:null}).svcs.push(n);
+ for(const n of svcs)(envs[n.service.env]=envs[n.service.env]||{env:n.service.env,svcs:[],node:null,macs:[]}).svcs.push(n);
  const taken=new Set(svcs.map(n=>n.id));
- for(const g of Object.values(envs)){g.node=ns.find(x=>!x.service&&g.svcs.some(s=>(s.dependsOn||[]).includes(x.id)))||null;if(g.node)taken.add(g.node.id)}
+ for(const g of Object.values(envs)){g.node=ns.find(x=>!x.service&&!isMacWatch(x)&&g.svcs.some(s=>(s.dependsOn||[]).includes(x.id)))||null;if(g.node)taken.add(g.node.id)}
+ for(const m of ns.filter(isMacWatch)){const dep=m.dependsOn||[];
+  let g=Object.values(envs).find(x=>x.node&&dep.includes(x.node.id));
+  if(!g){const node=ns.find(x=>dep.includes(x.id)&&!x.service&&!isMacWatch(x)&&x.kind!=='aggregate');if(!node)continue;
+   const env=(/\((.+)\)\s*$/.exec(m.name)||[])[1]||node.name.replace(/\s+Portainer$/i,'');
+   g=envs[env]=envs[env]||{env,svcs:[],node,macs:[]};if(!g.node)g.node=node;taken.add(node.id)}
+  g.macs.push(m);taken.add(m.id)}
  return{groups:Object.values(envs).sort((a,b)=>a.env.localeCompare(b.env)),taken}}
+const MAC_TITLE='Docker MAC addresses';
 const worstState=sts=>sts.reduce((w,s)=>(SRANK[s]||0)>(SRANK[w]||0)?s:w,'healthy');
 /* the green light already says running and healthy, so a service line keeps only what adds something: how long it has been up, or what is wrong */
 const tidy=s=>String(s||'').replace(/^running\s*(·\s*)?/i,'').replace(/^\((.*)\)$/,'$1').replace(/\s*·?\s*\bhealthy$/i,m=>/unhealthy$/i.test(m)?m:'').replace(/^healthy$/i,'').trim();
 function svcLine(n,i,d){const title=n.service.title||n.service.container||n.name,det=tidy(n.detail||(n.checks[0]&&n.checks[0].detail)||n.label);
  return line(`openDrawer(${i},'${esc(n.id)}')`,ds(n,n.state),title,det,d)}
 function envFold(g,i){
- const byTitle=(a,b)=>(a.service.title||a.name).localeCompare(b.service.title||b.name),sts=g.svcs.map(n=>ds(n,n.state));
+ const byTitle=(a,b)=>(a.service.title||a.name).localeCompare(b.service.title||b.name),bad=x=>!['healthy','pending','expected'].includes(x);
+ const extra=(g.macs||[]).map(n=>ds(n,n.state)),sts=g.svcs.length?g.svcs.map(n=>ds(n,n.state)).concat(extra.filter(bad)):extra.concat(g.node?[ds(g.node,g.node.state)]:[]);
  const stacks={};for(const n of g.svcs)if(n.service.stack)(stacks[n.service.stack]=stacks[n.service.stack]||[]).push(n);
  const inner=()=>{let out=g.node?line(`openDrawer(${i},'${esc(g.node.id)}')`,ds(g.node,g.node.state),'Portainer environment',tidy(g.node.detail||g.node.label),1):'';const done=new Set();
+  for(const m of g.macs||[])out+=line(`openDrawer(${i},'${esc(m.id)}')`,ds(m,m.state),MAC_TITLE,m.detail||(m.checks[0]&&m.checks[0].detail)||m.label,1);
   for(const n of g.svcs.slice().sort(byTitle)){const st=n.service.stack;
    if(st&&stacks[st].length>1){if(done.has(st))continue;done.add(st);const m=stacks[st].slice().sort(byTitle);
     out+=fold('env/'+g.env+'/'+st,worstState(m.map(x=>ds(x,x.state))),pretty(st),m.map(x=>ds(x,x.state)),()=>m.map(x=>svcLine(x,i,2)).join(''),1,false,'services')}
    else out+=svcLine(n,i,1)}
   return out};
- return fold('env/'+g.env,worstState(sts.concat(g.node?[ds(g.node,g.node.state)]:[])),g.env,sts,inner,0,true,'services')}
+ return fold('env/'+g.env,worstState(sts.concat(extra,g.node?[ds(g.node,g.node.state)]:[])),g.env,sts,inner,0,true,g.svcs.length?'services':'checks')}
 function cardRows(c){
  const ns=c.nodes.map(id=>snap.nodes[id]).filter(Boolean), kids=new Set(ns.flatMap(n=>{if(n.kind!=='aggregate')return [];const m=membersOf(n);return m.length>1?m.map(x=>x.id):[]}));
  const eg=envGroups(ns.filter(n=>!kids.has(n.id)));
@@ -1118,7 +1130,10 @@ function drawServices(){
  for(const g of eg.groups)envNode[g.env]=g.node;
  const loose=snap.cards.filter(isSvcCard).flatMap(c=>cardRows(c).loose).filter(n=>!eg.taken.has(n.id)&&!n.service);
  const old=document.querySelector('.drawer'),keep=old?old.scrollTop:drawerTop;
- const body=groups.map(g=>`<div class=svcenv>${esc(g.env)}${g.env!=='Other'?` <button class="btn sm" style="float:right;text-transform:none;letter-spacing:0" onclick="removeEnv('${jsq(g.env)}')">Remove all</button>`:''}</div>`+(envNode[g.env]?svcRow(Object.assign({},envNode[g.env],{service:{title:'Portainer environment',icon:'portainer',synthetic:true}}),false):'')+g.rows.map(r=>{
+ for(const g of eg.groups)if(!groups.some(x=>x.env===g.env))groups.push({env:g.env,rows:[]});groups.sort((a,b)=>a.env==='Other'?1:b.env==='Other'?-1:a.env.localeCompare(b.env));
+ const envMacs={};for(const g of eg.groups)envMacs[g.env]=g.macs||[];
+ const body=groups.map(g=>`<div class=svcenv>${esc(g.env)}${g.env!=='Other'?` <button class="btn sm" style="float:right;text-transform:none;letter-spacing:0" onclick="removeEnv('${jsq(g.env)}')">Remove all</button>`:''}</div>`+(envNode[g.env]?svcRow(Object.assign({},envNode[g.env],{service:{title:'Portainer environment',icon:'portainer',synthetic:true}}),false):'')
+  +(envMacs[g.env]||[]).map(m=>svcRow(Object.assign({},m,{service:{title:MAC_TITLE,icon:'docker',synthetic:true}}),false)).join('')+g.rows.map(r=>{
   if(r.node)return svcRow(r.node,false);
   const open=svcStacks.has(r.key),w=worstOf(r.members),slug=iconSlug(r.stack)||r.members.map(svcSlug).find(Boolean)||'';
   return `<div class=svcrow data-stack="${esc(r.key)}" style="cursor:pointer" onclick="toggleStack('${jsq(r.key)}')" role=button aria-expanded=${open}><span class=ico>${svcIcon({title:pretty(r.stack)},slug)}</span>
@@ -1173,7 +1188,7 @@ function drawList(){const d=window._det,o=$('#detout'),r=d.r,list=d.list;
  if(envs.length){const head=envs.map(e=>list.findIndex(s=>s.env===e&&s.check==='environment')),onE=head.filter(i=>i>=0&&d.sel.has(i)).length;
   html+=`<div class=row style="margin:.9rem 0 .2rem"><b>Environments <small>${onE} of ${envs.length}</small></b></div>`;
   envs.forEach((e,k)=>{const hi=head[k],inner=list.map((s,i)=>i).filter(i=>list[i].env===e&&i!==hi),isOpen=d.open.has(e),
-    svc=inner.filter(i=>list[i].check!=='environment'),on=new Set(svc.filter(i=>d.sel.has(i)).map(i=>list[i].node)).size,tot=new Set(svc.map(i=>list[i].node)).size,ticked=hi>=0?d.sel.has(hi):on>0;
+    svc=inner.filter(i=>list[i].check!=='environment'&&list[i].check!=='mac'),on=new Set(svc.filter(i=>d.sel.has(i)).map(i=>list[i].node)).size,tot=new Set(svc.map(i=>list[i].node)).size,ticked=hi>=0?d.sel.has(hi):on>0;
    html+=`<div class=envrow data-env="${esc(e)}"><div class=row style="margin:0;padding:.35rem 0;gap:.7rem;min-height:48px"><input type=checkbox style="width:22px;height:22px;flex:none" aria-label="Watch ${esc(e)}" ${ticked?'checked':''} onchange="pickEnv('${jsq(e)}',this.checked)">
      <button class=btn style="flex:1;text-align:left;display:flex;justify-content:space-between;gap:.7rem" aria-expanded=${isOpen} onclick="pickOpen('${jsq(e)}')"><span><b>${esc(e)}</b> <small>${on} of ${tot} services</small></span><span aria-hidden=true>${isOpen?'▾':'▸'}</span></button></div>
     ${isOpen?`<div style="margin-left:2.2rem">${rows(inner)}</div>`:''}</div>`})}
@@ -1235,8 +1250,9 @@ async function setExpected(id,on){try{await api('expected',{id,expected:on})}cat
 async function stopWatching(id){const n=snap.nodes[id];if(!n)return;const grp=n.kind==='aggregate'&&(n.children||[]).length;
  if(!await askYes(grp?'Remove '+n.name+' and the '+n.children.length+' system'+(n.children.length==1?'':'s')+' inside it? Their checks are removed. Connection settings stay.':'Stop watching '+n.name+'? Its checks are removed. The server and its connection settings stay, so you can pick it again later.'))return;
  try{await api('stopwatching',grp?{id,children:true}:{id})}catch(e){alert(e.message)}}
-async function removeEnv(env){const g=svcGroups(Object.values(snap.nodes).filter(n=>n.service&&n.kind!=='aggregate')).find(x=>x.env===env);if(!g)return;
- const eg=envGroups(Object.values(snap.nodes)).groups.find(x=>x.env===env),ids=[...(eg&&eg.node?[eg.node.id]:[]),...g.rows.flatMap(r=>r.node?[r.node.id]:r.members.map(n=>n.id))];
+async function removeEnv(env){const g=svcGroups(Object.values(snap.nodes).filter(n=>n.service&&n.kind!=='aggregate')).find(x=>x.env===env)||{rows:[]};
+ const eg=envGroups(Object.values(snap.nodes)).groups.find(x=>x.env===env);if(!eg&&!g.rows.length)return;
+ const ids=[...(eg&&eg.node?[eg.node.id]:[]),...(eg?eg.macs.map(n=>n.id):[]),...g.rows.flatMap(r=>r.node?[r.node.id]:r.members.map(n=>n.id))];
  if(!await askYes('Remove everything listed under '+env+' ('+ids.length+' systems)? Their checks are removed. Connection settings stay, so you can pick them again later.'))return;
  try{for(const id of ids)await api('stopwatching',{id})}catch(e){alert(e.message)}}
 /* A text box in the page instead of the browser's pop-up (which some browsers, iPad Safari included, can silently refuse). Resolves to the text, or null on Cancel. */
