@@ -55,11 +55,30 @@ class Silent:
         self.stop = True; self.s.close()
 
 
+def network(net_id, name, endpoints=(), driver="bridge", scope="local"):
+    """A Docker network as `docker network inspect` gives it. endpoints: [(container id, name, ipv4, mac, ipv6?)]."""
+    cs = {}
+    for e in endpoints:
+        cid, cname, ip, mac = e[:4]
+        cs[cid] = {"Name": cname, "EndpointID": "ep" + cid[:10], "MacAddress": mac, "IPv4Address": f"{ip}/16" if ip else "",
+                   "IPv6Address": (e[4] + "/64") if len(e) > 4 and e[4] else ""}
+    return {"Name": name, "Id": net_id, "Driver": driver, "Scope": scope, "Containers": cs}
+
+
+def inspect(cid, name, config_mac="", network_mode="bridge", running=True, networks=None, env=("SECRET_TOKEN=do-not-leak",)):
+    """A container's inspect answer, with an environment variable that must never come out of the module. networks: {name: (ip, mac)}."""
+    return {"Id": cid, "Name": "/" + name, "State": {"Running": running, "Status": "running" if running else "exited"},
+            "Config": {"MacAddress": config_mac, "Env": list(env), "Image": "x"}, "HostConfig": {"NetworkMode": network_mode},
+            "NetworkSettings": {"Networks": {n: {"IPAddress": ip, "MacAddress": mac, "NetworkID": "n-" + n} for n, (ip, mac) in (networks or {}).items()}}}
+
+
 class Portainer:
-    def __init__(self, envs=None, containers=None, token=TOKEN):
+    def __init__(self, envs=None, containers=None, token=TOKEN, networks=None, inspects=None):
         outer = self
         self.envs, self.containers, self.token = envs or [], containers or {}, token
+        self.networks, self.inspects = networks or {}, inspects or {}     # {env id: [network]}, {env id: {container id: inspect}}
         self.requests, self.down = [], False      # down: answer 503 to everything
+        self.broken = set()                       # paths (ends of) that answer 500, to stand for a half-read environment
         class H(BaseHTTPRequestHandler):
             def _do(self):
                 u = urlparse(self.path)
@@ -75,6 +94,17 @@ class Portainer:
                 if u.path == "/api/endpoints":
                     return self._send(200, outer.envs)
                 parts = u.path.strip("/").split("/")
+                if any(u.path.endswith(b) for b in outer.broken):
+                    return self._send(500, {"message": "broken"})
+                if len(parts) >= 5 and parts[:2] == ["api", "endpoints"] and parts[3] == "docker" and parts[4] == "networks":
+                    nets = outer.networks.get(int(parts[2]), [])
+                    if len(parts) == 5:
+                        return self._send(200, [{**n, "Containers": {}} for n in nets])      # Docker's list leaves the endpoints out
+                    n = next((n for n in nets if n["Id"] == parts[5]), None)
+                    return self._send(200, n) if n else self._send(404, {"message": "no such network"})
+                if len(parts) == 7 and parts[:2] == ["api", "endpoints"] and parts[3:5] == ["docker", "containers"] and parts[6] == "json":
+                    d = outer.inspects.get(int(parts[2]), {}).get(parts[5])
+                    return self._send(200, d) if d else self._send(404, {"message": "No such container"})
                 if len(parts) == 6 and parts[:2] == ["api", "endpoints"] and parts[3:] == ["docker", "containers", "json"]:
                     env = next((e for e in outer.envs if str(e["Id"]) == parts[2]), None)
                     if not env:

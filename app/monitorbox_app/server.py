@@ -2830,6 +2830,15 @@ class App:
                             return self.send(409, {"error": str(e)})
                         app.reload_monitoring()
                         return self.send(200, out)
+                    if path == "/api/macwatch":
+                        try:
+                            out = monconfig.set_mac_watch(app.paths, str(body.get("id", "")), body.get("interval"), body.get("allow"))
+                        except monconfig.Invalid as e:
+                            return self.send(400, {"error": "; ".join(e.errors), "errors": e.errors})
+                        except monconfig.Conflict as e:
+                            return self.send(409, {"error": str(e)})
+                        app.reload_monitoring()
+                        return self.send(200, out)
                     if path == "/api/portwatch":
                         try:
                             out = app.set_portwatch(body)

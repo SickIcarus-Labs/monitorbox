@@ -1194,7 +1194,7 @@ async function pickApply(){const d=window._det,btn=$('#pickapply');btn.disabled=
   if(rm.length){await api('unwatch',{connection:d.cid,items:rm.map(item)});rm.forEach(x=>x.watching=false)}
   await syncCfg();d.msg='Saved: '+add.length+' added, '+rm.length+' removed.';if(window._inline)return inlineClose();drawList()}
  catch(e){alert(e.message);drawList()}}
-const item=s=>{const o={label:s.label,check:s.check,params:s.params,node:s.node,group:s.group,rule:s.rule};for(const k of['type','url','expect','insecure','service','requires'])if(s[k]!==undefined)o[k]=s[k];return o};
+const item=s=>{const o={label:s.label,check:s.check,params:s.params,node:s.node,group:s.group,rule:s.rule};for(const k of['type','url','expect','insecure','service','requires','interval'])if(s[k]!==undefined)o[k]=s[k];return o};
 /* the revision counters and JSON editors live on different Settings pages, so each one is only touched when it is on screen */
 const setRev=r=>{for(const id of['#rev','#crev']){const e=$(id);if(e)e.textContent=r}};
 async function syncCfg(){const cur=await api('config/monitoring');setRev(cur.revision);const e=$('#cfg');if(e)e.value=JSON.stringify(cur.monitoring,null,2)}
@@ -1203,7 +1203,8 @@ async function syncCfg(){const cur=await api('config/monitoring');setRev(cur.rev
 async function editMonitoring(id){let r,mon;try{r=await api('config/monitoring');mon=r.monitoring}catch(e){alert(e.message);return}
  const nd=(mon.nodes||[]).find(x=>x.id===id),df=mon.confirm||{},dn=df.failures??2,ds=df.seconds??60;
  const hk=nd&&(nd.checks||[]).find(k=>k.type==='module'&&(k.check==='temperature'||k.check==='drive')),heat=hk?{def:hk.check==='drive'?55:80,cur:(hk.params||{}).max_c}:null,
-  disks=nd?(nd.checks||[]).filter(k=>k.type==='module'&&k.check==='row'&&(k.params||{}).preset==='qnap-disk'):[];   /* a NAS's disks: one limit each */   /* a device or drive temperature check also has its warning limit here */
+  disks=nd?(nd.checks||[]).filter(k=>k.type==='module'&&k.check==='row'&&(k.params||{}).preset==='qnap-disk'):[],
+  mk=nd&&(nd.checks||[]).find(k=>k.type==='module'&&k.module==='portainer'&&k.check==='mac');   /* the Docker MAC address watch: how often, and fixed MACs that are on purpose */   /* a NAS's disks: one limit each */   /* a device or drive temperature check also has its warning limit here */
  if(!nd){alert('This system has no settings of its own to change.');return}
  const o=document.createElement('div');o.id='medit';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');
  o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:10vh 16px 16px;overflow:auto';
@@ -1215,13 +1216,17 @@ async function editMonitoring(id){let r,mon;try{r=await api('config/monitoring')
   ${heat?`<div class=fld><label class=sub>Warn when hotter than (°C, 20 to 150; empty uses ${heat.def})<input id=me-t type=number min=20 max=150 step=1 inputmode=numeric placeholder="${heat.def}" value="${esc(v(heat.cur))}"></label></div>`:''}
   ${disks.length?`<details${disks.length<=4?' open':''}><summary class=sub>Disk temperature limits (${disks.length})</summary><p class=sub style="margin:.3rem 0">Warn when a disk is hotter than this (°C, 20 to 150). Empty uses the built-in limit: 55 for a hard drive, 70 for an SSD.</p>
    ${disks.map((k,i)=>`<div class=fld><label class=sub>${esc(k.label||(k.params||{}).name||k.id)}<input class=me-d data-c="${esc(k.id)}" data-was="${esc(v((k.params||{}).max_c))}" type=number min=20 max=150 step=1 inputmode=numeric placeholder="auto" value="${esc(v((k.params||{}).max_c))}"></label></div>`).join('')}</details>`:''}
+  ${mk?`<div class=fld><label class=sub>Look for clashing MAC addresses every (seconds, 60 to 3600; empty is 300)<input id=me-mi type=number min=60 max=3600 step=1 inputmode=numeric placeholder="300" value="${esc(v(mk.interval===300?'':mk.interval))}"></label></div>
+   <div class=fld><label class=sub>Containers allowed a fixed MAC address on purpose, one per line (a name, or name/network for one network only). A clash is still reported.<textarea id=me-ma rows=3 autocapitalize=off autocorrect=off spellcheck=false>${esc(((mk.params||{}).allow||[]).join('\n'))}</textarea></label></div>`:''}
   <p id=me-msg class=sub></p><div class=row style="margin-top:.6rem"><button class="btn pri big" id=me-ok>Save</button><button class="btn big" id=me-no>Cancel</button></div></div>`;
  const done=()=>o.remove();o.querySelector('#me-no').onclick=done;
  o.addEventListener('keydown',e=>{if(e.key==='Escape')done()});o.addEventListener('click',e=>{if(e.target===o)done()});
  o.querySelector('#me-ok').onclick=async()=>{const m=o.querySelector('#me-msg'),a=o.querySelector('#me-n').value.trim(),b=o.querySelector('#me-s').value.trim();
   const num=x=>x===''?null:Number(x);if([a,b].some(x=>Number.isNaN(num(x)))){m.textContent='Please enter whole numbers, or leave a box empty.';return}
   const tv=o.querySelector('#me-t'),ds=[...o.querySelectorAll('.me-d')];if((tv&&Number.isNaN(num(tv.value.trim())))||ds.some(d=>Number.isNaN(num(d.value.trim())))){m.textContent='Please enter a number of degrees, or leave it empty.';return}
+  const mi=o.querySelector('#me-mi');if(mi&&Number.isNaN(num(mi.value.trim()))){m.textContent='Please enter a number of seconds, or leave it empty.';return}
   try{await api('confirm',{id,failures:num(a),seconds:num(b)});if(tv)await api('limit',{id,max_c:num(tv.value.trim())});
+   if(mi)await api('macwatch',{id,interval:num(mi.value.trim()),allow:o.querySelector('#me-ma').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean)});
    for(const d of ds)if(d.value.trim()!==d.dataset.was)await api('limit',{id,check:d.dataset.c,max_c:num(d.value.trim())});done()}catch(e){m.textContent=e.message}};
  document.body.appendChild(o);o.querySelector('#me-n').focus()}
 async function setCritical(ids,on){try{await api('critical',{ids,critical:on});if(window.sv&&sv.mon&&$('#devs')){const keep=keepNow();await loadServers(keep)}}catch(e){alert(e.message)}}

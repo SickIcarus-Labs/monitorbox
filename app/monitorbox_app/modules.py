@@ -410,12 +410,13 @@ class Modules:
         state = (res or {}).get("state")
         detail = str((res or {}).get("detail", ""))
         ms = res.get("ms", ms) if isinstance(res, dict) else ms
+        key = {"key": str(res["key"])[:64]} if isinstance(res, dict) and res.get("key") and state in ("degraded", "failed") else {}   # what exactly is wrong (alerts.py)
         if state == "healthy":
             return True, detail, ms, ({"notice": True} if (res or {}).get("notice") else {})     # fine, but worth a line (a busy CPU)
         if state == "degraded":
-            return True, detail, ms, {"warn": True}
+            return True, detail, ms, {"warn": True, **key}
         if state == "failed":
-            return False, detail, ms, {}
+            return False, detail, ms, key
         return None, detail or f"the {mid} module could not check this", ms, {}
 
     def describe(self):

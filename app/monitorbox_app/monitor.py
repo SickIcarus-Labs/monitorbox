@@ -144,7 +144,8 @@ class Monitor:
             for k, v in data["results"].items():
                 if k in self.tasks and k not in self.results and isinstance(v, dict) and v.get("ok") in (True, False) and isinstance(v.get("at"), str) and isinstance(v.get("since"), str):
                     self.results[k] = {"ok": v["ok"], "detail": str(v.get("detail") or ""), "ms": v.get("ms"), "at": v["at"], "since": v["since"],
-                                       "warn": bool(v.get("warn")), "notice": bool(v.get("notice")), "stale": True}
+                                       "warn": bool(v.get("warn")), "notice": bool(v.get("notice")), "stale": True,
+                                       **({"key": v["key"][:64]} if isinstance(v.get("key"), str) and v["key"] else {})}
                     n += 1
             if n:
                 self._stale = True
@@ -213,6 +214,7 @@ class Monitor:
             warn = bool(len(r) > 3 and r[3].get("warn"))
             notice = bool(len(r) > 3 and r[3].get("notice"))
             names = [str(x) for x in (r[3].get("names") or [])][:200] if len(r) > 3 and isinstance(r[3].get("names"), list) else None
+            what = str(r[3].get("key") or "")[:64] if len(r) > 3 else ""     # a module's name for exactly what is wrong (which MACs clash): alerts tell the owner when it changes
             if check["type"] == "ping" and ok is True and ms is not None:     # a slow link: three slow answers in a row, not one blip
                 with self.lock:
                     t = self.tasks.get(key)
@@ -221,7 +223,7 @@ class Monitor:
                         if t["slow"] >= 3:
                             notice, detail = True, f"{detail} · slow ({ms:.0f} ms)"
         except Exception as e:  # a probe must never kill the scheduler
-            ok, detail, ms, warn, notice, names = None, f"check crashed: {e}", None, False, False, None
+            ok, detail, ms, warn, notice, names, what = None, f"check crashed: {e}", None, False, False, None, ""
         now = self.clock()
         with self.lock:
             task = self.tasks.get(key)
@@ -264,7 +266,7 @@ class Monitor:
                         return                          # nothing shown yet: stay "checking"
                     if prev["ok"] is not True or prev.get("warn"):
                         if prev.get("stale"):           # the saved reading from before the restart is confirmed: now it is a fresh one
-                            self.results[key] = {**{k: v for k, v in prev.items() if k != "stale"}, "detail": detail, "at": _iso(now)}
+                            self.results[key] = {**{k: v for k, v in prev.items() if k not in ("stale", "key")}, "detail": detail, "at": _iso(now), **({"key": what} if what else {})}
                             self._bump()
                         return                          # already not healthy: keep showing what was observed
                     ok, warn, notice, detail = True, False, True, f"{'failed' if ok is False else 'warning'} just now, confirming ({task['streak']} of {need_n} in a row, {int(now - task['streak_since'])} s of {int(need_s)} s): {detail}"
@@ -275,10 +277,12 @@ class Monitor:
             changed = prev is None or prev["ok"] != ok or bool(prev.get("warn")) != warn or bool(prev.get("notice")) != notice
             since = _iso(now) if changed else prev["since"]
             new = {"ok": ok, "detail": detail, "ms": ms, "at": _iso(now), "since": since, "warn": warn, "notice": notice}
+            if what and (ok is False or warn) and not notice:
+                new["key"] = what
             self.results[key] = new
             if prev is not None and (prev["ok"] != ok or bool(prev.get("warn")) != warn):
                 self._log_change(key, check, prev, ok, warn, detail)
-            if changed or (prev and (prev["detail"] != detail or prev.get("stale"))):
+            if changed or (prev and (prev["detail"] != detail or prev.get("stale") or prev.get("key", "") != new.get("key", ""))):
                 self._bump()
 
     @staticmethod

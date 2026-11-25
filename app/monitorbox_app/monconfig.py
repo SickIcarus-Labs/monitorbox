@@ -480,7 +480,7 @@ def remove_watch(paths, cid, label):
     return remove_watches(paths, cid, [label])
 
 
-ITEM_KEYS = ("label", "check", "params", "node", "group", "rule", "type", "url", "expect", "insecure", "service", "requires")
+ITEM_KEYS = ("label", "check", "params", "node", "group", "rule", "type", "url", "expect", "insecure", "service", "requires", "interval")
 
 
 def watch_item(x):
@@ -606,6 +606,8 @@ def add_watches(paths, cid, items):
         else:
             spec = {"id": check_id(label), "type": "module", "module": conn["module"], "connection": cid,
                     "check": str(it.get("check", "")), "params": it.get("params") or {}, "label": label}
+        if _num(it.get("interval"), 2, 3600):           # a check that looks less often than usual (the Docker MAC address watch: every 5 minutes)
+            spec["interval"] = it["interval"]
         req = place(it["requires"], False) if isinstance(it.get("requires"), dict) else None
         legacy = _slug(f"{cid}-{label}")[:60]
         mon["nodes"] = [n for n in mon["nodes"] if n.get("id") != legacy]       # earlier per-item nodes
@@ -921,6 +923,54 @@ def set_limit(paths, nid, max_c, check=None):
         else:
             params["max_c"] = max_c
         c["params"] = params
+    return {"revision": save_monitoring(paths, mon, cur["revision"])}
+
+
+MAC_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(/[A-Za-z0-9][A-Za-z0-9_.-]{0,127})?$")
+
+
+def is_mac_check(c):
+    """The Portainer module's Docker MAC address watch (no two containers with one MAC on a Docker bridge)."""
+    return c.get("type") == "module" and c.get("module") == "portainer" and c.get("check") == "mac"
+
+
+def set_mac_watch(paths, nid, interval=None, allow=None):
+    """The Docker MAC address watch's own settings on one system: how often it looks (seconds, 60 to 3600; None for every 5 minutes) and which
+    containers may have a fixed MAC on purpose ("name", or "name/network" for one network only). Allowing one never hides a real clash."""
+    import copy
+    cur = get_monitoring(paths)
+    mon = copy.deepcopy(cur["monitoring"])
+    node = next((n for n in mon.get("nodes", []) if n.get("id") == nid and n.get("kind") != "aggregate"), None)
+    checks = [c for c in (node or {}).get("checks", []) if is_mac_check(c)]
+    if not checks:
+        raise Invalid([f"'{nid}' has no Docker MAC address check."])
+    errs = []
+    if interval is not None and (isinstance(interval, bool) or not isinstance(interval, int) or not 60 <= interval <= 3600):
+        errs.append("Look every must be a whole number of seconds from 60 to 3600, or empty for every 5 minutes.")
+    names = []
+    if allow is not None:
+        if not isinstance(allow, list) or len(allow) > 200:
+            errs.append("The allowed containers must be a list of at most 200 names.")
+        else:
+            for a in allow:
+                a = str(a).strip()
+                if not a:
+                    continue
+                if not MAC_NAME_RE.match(a):
+                    errs.append(f"'{a[:60]}' is not a container name (or name/network).")
+                elif a.lower() not in {x.lower() for x in names}:
+                    names.append(a)
+    if errs:
+        raise Invalid(errs)
+    for c in checks:
+        c["interval"] = interval if interval is not None else 300
+        if allow is not None:
+            params = dict(c.get("params") or {})
+            if names:
+                params["allow"] = names
+            else:
+                params.pop("allow", None)
+            c["params"] = params
     return {"revision": save_monitoring(paths, mon, cur["revision"])}
 
 

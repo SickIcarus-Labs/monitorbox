@@ -2,6 +2,7 @@
 
   check    {"check": "environment", "params": {"name": "Anchor3"}}                 is Portainer able to reach that environment
            {"check": "container",   "params": {"env": "Anchor3", "name": "plex", "allow_stopped": false}}
+           {"check": "mac",         "params": {"env": "Goliath", "allow": ["db-canary-agent"]}}   no two containers with one MAC on a Docker bridge
            connection: {base_url or host, token, verify_tls (default false)}
   discover {"connection": {...}} -> environments, containers (by Compose stack) and web checks for the ones that answer HTTP
 
@@ -13,11 +14,13 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import portainerlib as P  # noqa: E402
 import portainerchecks as C  # noqa: E402
+import macwatch  # noqa: E402
 
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "manifest.json")) as f:
     VERSION = json.load(f)["version"]
 OUT = threading.Lock()
 CLIENTS, CLIENTS_LOCK = {}, threading.Lock()
+MACS = macwatch.Reader()
 
 
 def client(conn):
@@ -60,7 +63,30 @@ def run_check(kind, params, conn):
         return C.check_environment(params, c.endpoints())
     if kind == "container":
         return C.check_container(params, c.endpoints(), c.containers)
-    return {"state": "unknown", "detail": f"unknown Portainer check '{kind}' (known: environment, container)"}
+    if kind == "mac":
+        return check_macs(params, c)
+    return {"state": "unknown", "detail": f"unknown Portainer check '{kind}' (known: environment, container, mac)"}
+
+
+def check_macs(params, c):
+    """The Docker MAC address watch for one environment (macwatch.py). Anything that cannot be read is Unknown, never a clean bill."""
+    try:
+        env = C.find_env(c.endpoints(), params)
+    except P.PortainerError as e:
+        return {"state": "unknown", "detail": f"could not read the Docker networks, so nothing is judged ({e})"}
+    if not env:
+        return {"state": "unknown", "detail": f"Portainer has no environment called '{params.get('env')}'"}
+    if env.get("Status") != 1:
+        return {"state": "unknown", "detail": f"Portainer cannot reach {env.get('Name')}, so its Docker networks cannot be read"}
+    if env.get("Type") not in C.DOCKER_TYPES:
+        return {"state": "unknown", "detail": f"{env.get('Name')} is not a Docker environment"}
+    allow = params.get("allow") if isinstance(params.get("allow"), list) else []
+    try:
+        snap = MACS.read(c, env)
+    except P.PortainerError as e:
+        return {"state": "unknown", "detail": f"could not read every Docker network on {env.get('Name')}, so nothing is judged ({e})"}
+    r = macwatch.judge(snap, allow, str(env.get("Name")))
+    return {"state": r["state"], "detail": r["detail"], **({"key": r["key"]} if r["key"] else {})}
 
 
 def handle(req):
