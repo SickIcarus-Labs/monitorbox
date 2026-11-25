@@ -55,6 +55,12 @@ If the app cannot start, the launcher serves a recovery page on the same address
 
 You can also go back to an earlier version: Settings, Updates, pick the earlier version in the dropdown for that item.
 
+## Docker MAC addresses shows Down or Degraded
+
+**Down** means two containers on one Docker network have the same MAC address. Both will drop packets and time out at random, even while Docker says they are healthy. The message names the containers. Recreate each of them from where it is really defined (its compose file or stack), not by hand: recreating by hand can leave out settings such as environment variables. If one still ends up with the clashing MAC, its settings ask for a fixed one: take that out of its definition and recreate it again. MonitorBox never does any of this itself.
+
+**Degraded** means no clash yet, but a container's settings ask for a fixed MAC, which can clash later when Docker gives it a different address. Recreate it from its definition without the fixed MAC, or, if the fixed MAC is on purpose, add the container under **Edit monitoring** on that item.
+
 ## Something shows "Unknown" (blue)
 
 That means MonitorBox could not check it right now, for example because the provider (UniFi, Portainer, a server) did not answer. It does not mean the thing is down. Check that the provider is reachable from the MonitorBox machine, and that the account or token MonitorBox uses still works.

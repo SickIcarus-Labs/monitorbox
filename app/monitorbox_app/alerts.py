@@ -6,7 +6,8 @@ nothing for heads-up notices. Observed state is never changed here; alerts only 
 
   - a problem is announced after it has lasted `delaySeconds` (default 60), so a blip never reaches a phone
   - when it clears, one "back" message follows after RECOVER_AFTER seconds of staying healthy
-  - going from degraded to down (or back) while open sends an update
+  - going from degraded to down (or back) while open sends an update, and so does a change in exactly what is wrong when the check names it
+    (a "key": which containers share a MAC address, say), once the new picture has lasted as long as a new problem would
   - open alerts and anything not yet delivered are kept in config/alerts-state.json, so an App restart or update
     does not announce the same problem again and does not lose a message that is still waiting to go out
   - a storm: three or more new problems within a minute are one message ("6 things went down at once") instead of six, and one message when they are all back
@@ -456,7 +457,12 @@ class Alerts:
             for nid, a in bad.items():
                 rec = self.open[nid]
                 urg = urgent[nid]
-                if rec.get("sent") == a["state"] or rec.get("grouped") and not urg:
+                if rec.get("sent") == a["state"]:
+                    ev = self._changed(rec, a, nid, site, c, now)
+                    if ev:
+                        out.append(ev)
+                    continue
+                if rec.get("grouped") and not urg:
                     continue
                 if not urg and now - rec["seen"] < c["delaySeconds"]:
                     continue
@@ -471,6 +477,9 @@ class Alerts:
                 else:
                     out.append(self._event("problem", site, a, now))
                 rec["sent"] = a["state"]
+                if a.get("key"):
+                    rec["key"] = a["key"]
+                rec.pop("next_key", None)
             for nid in list(self.open):
                 if nid in bad:
                     continue
@@ -515,6 +524,31 @@ class Alerts:
             if out or fresh:
                 self._save()
         return out
+
+    def _changed(self, rec, a, nid, site, c, now):
+        """An announced problem that is still there, but what exactly is wrong has changed (another container joined a MAC clash, one left it):
+        one update, once the new picture has lasted delaySeconds like any problem. Only checks that name what is wrong (a "key") can do this;
+        no key (a reading saved before a restart) is never a change. Returns the event or None."""
+        k = a.get("key") or ""
+        if not k or rec.get("grouped") or nid in self.flaps:
+            return None
+        if not rec.get("key"):
+            rec["key"] = k                                  # first time we know it (announced before a restart, or before keys existed): nothing new to say
+            return None
+        if k == rec["key"]:
+            rec.pop("next_key", None)
+            rec.pop("next_seen", None)
+            return None
+        if rec.get("next_key") != k:
+            rec["next_key"], rec["next_seen"] = k, now
+            return None
+        if now - rec["next_seen"] < c["delaySeconds"]:
+            return None
+        rec["key"] = k
+        rec.pop("next_key", None)
+        rec.pop("next_seen", None)
+        self._save()
+        return self._event("problem", site, a, now, changed=True)
 
     def _held(self, uid, now):
         h = self.holds.get(uid)
@@ -588,7 +622,7 @@ class Alerts:
                 "detail": a.get("detail", ""), "title": f"{site}: {name} keeps going down and coming back",
                 "message": f"{name} has gone down {FLAP_COUNT} times in {FLAP_WINDOW // 60} minutes. No more messages until it has been steady for {FLAP_QUIET // 60} minutes.", "at": _iso(now), "atLocal": _local(_iso(now)), "flapping": True}
 
-    def _event(self, kind, site, a, now, urgent=None, steady=False):
+    def _event(self, kind, site, a, now, urgent=None, steady=False, changed=False):
         name, st = a["name"], a["state"]
         verb = {"failed": "is down", "degraded": "is degraded", "healthy": "is back", "unknown": "can't be checked"}.get(st, st)
         if urgent:
@@ -596,6 +630,9 @@ class Alerts:
         if steady:
             verb = "is steady again"
         msg = f"{name} {verb}."
+        if changed:
+            verb = {"failed": "is still down, with a change", "degraded": "is still degraded, with a change"}.get(st, verb)
+            msg = f"{name} {verb}: what is wrong is not the same as before."
         if kind == "problem" and a.get("detail"):
             msg += " " + str(a["detail"])
         if kind == "problem" and a.get("affects"):

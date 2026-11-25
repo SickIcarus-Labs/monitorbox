@@ -8,7 +8,8 @@ Node (already validated, see monconfig.py):
    "kind":"aggregate", "children":[ids], "rule":"any"|"all",                                # or an aggregate
    "dependsOn":[ids]}
 
-Check result: {"ok": True|False|None, "detail": str, "ms": float|None, "at": iso, "since": iso, "warn": bool (optional: ok, but not properly)}
+Check result: {"ok": True|False|None, "detail": str, "ms": float|None, "at": iso, "since": iso, "warn": bool (optional: ok, but not properly),
+              "key": str (optional: a module's short name for exactly what is wrong, such as which MACs clash; alerts.py tells the owner when it changes)}
   ok None means "could not be checked" (unknown), never "failed".
 
 States: healthy, degraded, failed, unknown, pending (no result yet).
@@ -296,7 +297,7 @@ def evaluate(nodes, results, now_iso=""):
             detail = (detail + " (the other source reports it fine)").strip()
         attention.append({"id": n["id"], "name": n["name"], "group": n["group"], "critical": o["critical"], "state": s, "label": LABEL[s],
                           "detail": detail, "since": o["since"], "check": bad if len(src.get("checks", [])) > 1 else "",
-                          "affects": [by_id[a]["name"] for a in o["affects"]]})
+                          "affects": [by_id[a]["name"] for a in o["affects"]], **({"key": w["key"]} if w and w.get("key") else {})})
     # --- one entry per source that does not answer: when two or more items are Unknown only because the same connection (a UniFi console,
     # a Portainer server) cannot be reached, the list shows the connection once with what it takes along. Each item keeps its own state.
     by_src = {}

@@ -1,7 +1,8 @@
 """A READ-ONLY client for the Portainer API. MonitorBox never talks to the Docker socket or to Portainer agents: it
 asks the Portainer SERVER, which already manages every environment, using an access token (the X-API-Key header).
 
-Only GET requests are ever sent, and only to the few paths in READ_ONLY. There is no login call, no POST, no PUT,
+Only GET requests are ever sent, and only to the few paths in READ_ONLY (the Docker MAC address watch adds the network list,
+one network, and one container's settings, all reads). There is no login call, no POST, no PUT,
 no DELETE: nothing here can start, stop, create or change anything. The token is sent only to the address in the
 connection.
 
@@ -12,7 +13,7 @@ import json, re, ssl, threading, time
 import urllib.error, urllib.request
 from urllib.parse import urlsplit, urlencode
 
-READ_ONLY = re.compile(r"^/api/(system/status|status|endpoints|endpoints/\d+/docker/containers/json)$")
+READ_ONLY = re.compile(r"^/api/(system/status|status|endpoints|endpoints/\d+/docker/(containers/json|containers/[0-9a-f]{12,64}/json|networks|networks/[0-9a-f]{12,64}))$")
 CACHE_SECONDS = 5            # checks that run together share one fetch
 DEFAULT_PORT = 9443
 
@@ -24,7 +25,9 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class PortainerError(Exception):
-    pass
+    def __init__(self, msg, code=None):
+        super().__init__(msg)
+        self.code = code            # the HTTP status Portainer answered, when it answered one
 
 
 def base_of(conn):
@@ -74,7 +77,7 @@ class Client:
                 raise PortainerError(f"Portainer redirected the request (HTTP {e.code}); the token is never sent on to another address. Check the address, and whether it should be http or https")
             why = {401: "Portainer refused the access token", 403: "Portainer refused the access token (it may not be allowed to see that environment)",
                    404: "Portainer does not have that (is it a newer or older version?)"}.get(e.code, f"Portainer answered HTTP {e.code}")
-            raise PortainerError(why)
+            raise PortainerError(why, e.code)
         except (OSError, ValueError) as e:
             raise PortainerError(f"cannot reach Portainer at {self.base} ({getattr(e, 'reason', e)})")
         with self.lock:
@@ -86,3 +89,20 @@ class Client:
 
     def containers(self, env_id):
         return self.get(f"/api/endpoints/{int(env_id)}/docker/containers/json", {"all": "1"}) or []
+
+    # The Docker MAC address watch (macwatch.py) reads networks and one container's settings. Ids are checked to be plain hex so a path cannot be bent.
+    def networks(self, env_id):
+        return self.get(f"/api/endpoints/{int(env_id)}/docker/networks") or []
+
+    def network(self, env_id, net_id):
+        return self.get(f"/api/endpoints/{int(env_id)}/docker/networks/{_hex(net_id)}") or {}
+
+    def inspect(self, env_id, cid):
+        return self.get(f"/api/endpoints/{int(env_id)}/docker/containers/{_hex(cid)}/json") or {}
+
+
+def _hex(x):
+    x = str(x).lower()
+    if not re.fullmatch(r"[0-9a-f]{12,64}", x):
+        raise PortainerError(f"'{x[:70]}' is not a Docker id")
+    return x

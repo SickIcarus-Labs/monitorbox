@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 
 EDGE_TYPES = (4, 7)
 DOCKER_TYPES = (1, 2, 4)        # Docker, Agent on Docker, Edge Agent on Docker: the ones that have containers to list
+MAC_INTERVAL = 300             # the Docker MAC address watch looks every 5 minutes unless the owner changes it (Edit monitoring)
 TYPE_NAMES = {1: "Docker", 2: "Agent", 3: "Azure", 4: "Edge agent", 5: "Kubernetes", 6: "Kubernetes agent", 7: "Edge agent (Kubernetes)"}
 
 
@@ -165,6 +166,9 @@ def discover(endpoints, fetch, host_of_portainer, probe_web):
         suggest.append(env_item)
         if not up or env.get("Type") not in DOCKER_TYPES:
             continue
+        suggest.append({"label": f"Docker MAC addresses on {name}", "check": "mac", "params": {"env": name}, "interval": MAC_INTERVAL,
+                        "node": f"Docker MAC addresses ({name})", "group": "Services", "batch": "Environments", "requires": env_item,
+                        "default": True, "env": name})
         try:
             containers = fetch(env["Id"])
         except Exception:
