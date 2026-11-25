@@ -666,7 +666,7 @@ class UI(T.SnmpE2E):
             for want in ("Open the network map", "Monitoring (JSON)", "Connections (JSON)", "Measure this site", "Ask the switches", "Ask the gateway", "Preview the screens"):
                 self.assertIn(want, txt)
             heads = pg.locator("h3").all_inner_texts()        # the page: intro, dragons line, the tool sections, and the two raw editors last
-            self.assertEqual(heads, ["Advanced", "Network map", "Performance", "Switch report", "Flows look", "Preview the screens", "Monitoring (JSON)", "Connections (JSON)"])
+            self.assertEqual(heads, ["Advanced", "Logs", "Network map", "Performance", "Switch report", "Flows look", "Preview the screens", "Monitoring (JSON)", "Connections (JSON)"])
             self.assertLess(pg.locator("text=Here there be dragons.").bounding_box()["y"], pg.locator("h3:has-text('Network map')").bounding_box()["y"])
             self.assertEqual(pg.locator(".box:has(button:has-text('Open the network map')):has-text('Troubleshooting tools')").count(), 0, "the page intro is not in the network map's box")
             for sec, gone in (("box", ("Measure this site", "Ask the switches", "Ask the gateway")), ("display", ("Preview the screens",)), ("servers", ("Connections (JSON)", "edit all connection settings"))):
@@ -869,10 +869,11 @@ class UI(T.SnmpE2E):
             pg.locator("[data-env=Anchor3] > .row > input").check()
             self.assertTrue(pg.locator("[data-env=Anchor3] label:has-text('Container plex') input").is_checked())
             self.assertFalse(pg.locator("[data-env=Anchor3] label:has-text('Container old') input").is_checked())
-            # Apply adds only what is ticked: both environments, plex, scrob and watchtower
+            # Apply adds only what is ticked: both environments with their Docker MAC address watches, plex, scrob and watchtower
             pg.click("#pickapply"); pg.wait_for_selector("#pickmsg:has-text('Saved')")
             ids = {n["id"] for n in c.get("/api/config/monitoring")["monitoring"]["nodes"]}
-            self.assertEqual(ids, {"pi", "anchor3-portainer", "granite-portainer", "plex-anchor3", "scrob-anchor3", "watchtower-granite"})
+            self.assertEqual(ids, {"pi", "anchor3-portainer", "granite-portainer", "docker-mac-addresses-anchor3", "docker-mac-addresses-granite",
+                                   "plex-anchor3", "scrob-anchor3", "watchtower-granite"})
             self.assertEqual(errs, [])
             b.close()
 
